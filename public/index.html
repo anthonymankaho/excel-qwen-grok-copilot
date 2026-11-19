@@ -18,11 +18,11 @@
     <section id="settings" class="settings card hidden">
       <div class="section-heading"><div><h2>Provider settings</h2><p>Keys stay in this local relay’s memory until it stops.</p></div><button id="closeSettings" class="icon-button" aria-label="Close settings">×</button></div>
       <label for="provider">Provider</label>
-      <select id="provider"><option value="qwen">Qwen · Alibaba Model Studio</option><option value="grok">Grok · xAI</option></select>
+      <select id="provider"><option value="qwen">Qwen · QwenCloud</option><option value="grok">Grok · xAI</option></select>
       <div id="qwenFields">
         <label for="qwenEndpoint">Qwen chat completions URL</label>
         <input id="qwenEndpoint" type="url" value="https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1/chat/completions" autocomplete="url">
-        <p class="hint">Singapore QwenCloud pay-as-you-go endpoint. Use a regular QwenCloud API key from Singapore (not a Token Plan key).</p>
+        <p class="hint">Singapore pay-as-you-go Chat Completions URL for region ap-southeast-1. Use a pay-as-you-go key created in that region. Token Plan is a separate Singapore endpoint and is not selected here.</p>
       <label for="qwenModel">Model</label><input id="qwenModel" value="qwen3.8-max" autocomplete="off">
       </div>
       <div id="grokFields" class="hidden"><label for="grokModel">Model</label><input id="grokModel" value="grok-4.7" autocomplete="off"></div>

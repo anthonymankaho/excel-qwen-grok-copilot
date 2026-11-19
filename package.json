@@ -7,7 +7,8 @@
     "start": "office-addin-debugging start manifest.xml desktop --app excel --no-debug --no-live-reload",
     "dev-server": "node server.mjs",
     "stop": "office-addin-debugging stop manifest.xml desktop",
-    "check": "node --check server.mjs && node --check public/taskpane.js"
+    "check": "node --check server.mjs && node --check public/taskpane.js",
+    "test": "node --test"
   },
   "devDependencies": {
     "office-addin-debugging": "^7.0.1"

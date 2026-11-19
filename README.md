@@ -22,12 +22,13 @@ The task pane and API relay are served from `http://127.0.0.1:3000`. This is a l
 
 ## Providers
 
-- **Qwen** uses QwenCloud's OpenAI-compatible chat completions API. The default is the Singapore pay-as-you-go endpoint `https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1/chat/completions`; use a regular QwenCloud API key from the same region. Default model: `qwen3.8-max`.
+- **Qwen** calls QwenCloud's OpenAI-compatible Chat Completions API. The default URL is the documented Singapore pay-as-you-go endpoint `https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` (region `ap-southeast-1`). Use a pay-as-you-go key created in that same region. `https://maas.qwencloudapi.com/compatible-mode/v1` is the same Singapore pay-as-you-go endpoint without the region id. Default model: `qwen3.8-max`.
+- A QwenCloud account set to Singapore can also have a Token Plan key. Token Plan does not use the regional host. Its OpenAI-compatible base URL is `https://token-plan.maas.qwencloudapi.com/compatible-mode/v1`, and those keys are not interchangeable with pay-as-you-go keys. QwenCloud's usage policy limits Token Plan to interactive programming and agent tools and does not allow custom application backends, so this add-in does not select that endpoint. Singapore by itself does not select the billing plan. The default stays on the Singapore pay-as-you-go URL.
 - **Grok** uses xAI's Responses API at `https://api.x.ai/v1/responses`. Default model: `grok-4.7`.
 
 ## Key handling
 
-API keys are posted to the loopback relay and kept only in process memory. They are not saved to a file or browser storage. Stopping the Node process clears them. Workbook values are sent to the selected AI provider only after you choose **Add selection to chat**; review sensitive data before sharing. The relay binds only to `127.0.0.1`. QwenCloud Token Plan keys are limited to programming/agent tools and cannot be used with this custom add-in backend.
+API keys are posted to the loopback relay and kept only in process memory. They are not saved to a file or browser storage. Stopping the Node process clears them. Workbook values are sent to the selected AI provider only after you choose **Add selection to chat**; review sensitive data before sharing. The relay binds only to `127.0.0.1`. Do not enter a Token Plan key here. QwenCloud treats Token Plan and pay-as-you-go as separate key and endpoint pairs, and its Token Plan usage policy does not cover this custom add-in backend.
 
 ## Current scope
 
