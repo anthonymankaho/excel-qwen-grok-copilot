@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=Edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qwen + Grok for Excel</title>
+  <link rel="stylesheet" href="taskpane.css">
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <script defer src="taskpane.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><div class="brand-icon">✦</div><div><strong>Excel Assistant</strong><small>Powered by Qwen or Grok</small></div></div>
+    <button id="settingsToggle" class="icon-button" title="Settings" aria-label="Settings">⚙</button>
+  </header>
+  <main>
+    <section id="settings" class="settings card hidden">
+      <div class="section-heading"><div><h2>Provider settings</h2><p>Keys stay in this local relay’s memory until it stops.</p></div><button id="closeSettings" class="icon-button" aria-label="Close settings">×</button></div>
+      <label for="provider">Provider</label>
+      <select id="provider"><option value="qwen">Qwen · Alibaba Model Studio</option><option value="grok">Grok · xAI</option></select>
+      <div id="qwenFields">
+        <label for="qwenEndpoint">Qwen chat completions URL</label>
+        <input id="qwenEndpoint" type="url" value="https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1/chat/completions" autocomplete="url">
+        <p class="hint">Singapore QwenCloud pay-as-you-go endpoint. Use a regular QwenCloud API key from Singapore (not a Token Plan key).</p>
+      <label for="qwenModel">Model</label><input id="qwenModel" value="qwen3.8-max" autocomplete="off">
+      </div>
+      <div id="grokFields" class="hidden"><label for="grokModel">Model</label><input id="grokModel" value="grok-4.7" autocomplete="off"></div>
+      <label for="apiKey">API key <span id="keyStatus" class="key-status"></span></label>
+      <input id="apiKey" type="password" placeholder="Enter key; kept in relay memory only" autocomplete="new-password">
+      <div class="button-row"><button id="saveKey" class="primary">Use key</button><button id="clearKey" class="secondary">Clear key</button></div>
+      <p class="hint">Keys are sent only to the relay at 127.0.0.1 on this computer. They are not written to disk.</p>
+    </section>
+
+    <section class="context-card card">
+      <div class="context-top"><span class="eyebrow">WORKBOOK CONTEXT</span><button id="refreshSelection" class="text-button">↻ Refresh</button></div>
+      <div id="selectionName" class="selection-name">Open Excel to read selection</div>
+      <div id="selectionPreview" class="selection-preview">Your selected cells will appear here.</div>
+      <div class="context-actions"><button id="addSelection" class="chip">＋ Add selection to chat</button><span id="contextHint">Nothing shared yet</span></div>
+    </section>
+
+    <section class="quick-actions" aria-label="Quick actions">
+      <button class="action" data-prompt="Summarize the selected spreadsheet data. Highlight key totals, patterns, and any caveats."><span>▤</span>Summarize</button>
+      <button class="action" data-prompt="Explain the selected cells, including formulas and how their values relate."><span>ƒx</span>Explain</button>
+      <button class="action" data-prompt="Help me create an Excel formula for this task: "><span>∑</span>Write formula</button>
+    </section>
+
+    <section id="conversation" class="conversation" aria-live="polite"><div class="welcome"><div class="welcome-icon">✦</div><h1>What can I help with?</h1><p>Ask about your workbook, draft a formula, or analyze the selected cells.</p></div></section>
+    <div class="insert-row"><button id="insertAnswer" class="text-button" disabled>↳ Insert last answer into selection</button><span id="lastAnswerState"></span></div>
+    <form id="composer" class="composer">
+      <textarea id="prompt" rows="2" placeholder="Ask anything about your workbook..." aria-label="Message"></textarea>
+      <div class="composer-footer"><div class="provider-pill"><span class="status-dot"></span><select id="activeProvider" aria-label="Active provider"><option value="qwen">Qwen</option><option value="grok">Grok</option></select></div><button id="send" class="send-button" type="submit" aria-label="Send message">↑</button></div>
+    </form>
+    <div class="footnote">AI can make mistakes. Review generated formulas and workbook changes.</div>
+    <div id="toast" role="status" class="toast hidden"></div>
+  </main>
+</body>
+</html>
