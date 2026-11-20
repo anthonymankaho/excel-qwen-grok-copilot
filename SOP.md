@@ -12,8 +12,8 @@ The former second clone `Desktop\excel-qwen-grok-copilot` (identical commit `18c
 
 1. First time on a PC: close Excel → double-click `Setup and Start.bat` (npm install + logon auto-start + sideload + relay). Manual equivalent: `npm install`, `npm run autostart`, `npm start`.
 2. Settings (⚙) → provider → enter **your own** key once → **Use key** with **Remember key on this PC** ticked. The pane re-loads it into the relay on every load (Claude-style sign-in once).
-3. Every later logon: the Startup item `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\ExcelQwenGrokRelay.bat` starts the relay in a **minimized console**. Open Excel → pane ready (else **Home > Add-ins > "Qwen + Grok for Excel"**). No clicks needed.
-4. Manual fallback / restart after a code change: close the minimized relay window, then `Start Local Relay.bat` (or `npm run dev-server`).
+3. Every later logon: the Startup item `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\ExcelQwenGrokRelay.bat` starts the relay **hidden (no window)**. The per-minute task `ExcelQwenGrokRelayEnsure` restarts it within a minute if it dies (kill-and-respawn verified 2026-11-20). Open Excel → pane ready (else **Home > Add-ins > "Qwen + Grok for Excel"**). No clicks needed.
+4. Manual fallback / restart after a code change: `npm run relay-stop` then `npm run relay-ensure` (or wait ≤1 min for self-heal), or foreground `Start Local Relay.bat`.
 5. The sideload persists until `npm run stop`; the auto-start persists until `npm run autostart-remove`. Both are per-user.
 
 ## 2. Asking questions
@@ -33,9 +33,8 @@ The former second clone `Desktop\excel-qwen-grok-copilot` (identical commit `18c
 
 ## 4. Stop
 
-- `Ctrl+C` in the relay window, or close the minimized console: stops relay, clears keys from relay memory. Remembered pane copies persist until **Clear key**. Sideload stays registered.
+- `npm run relay-stop`: kills the relay (keys clear from relay memory). The self-heal task restarts it within a minute — for a **permanent** stop run `npm run autostart-remove` first (removes Startup item + task). Remembered pane copies persist until **Clear key**. Sideload stays registered.
 - `npm run stop`: also unregisters the sideload (next start needs `Setup and Start.bat` / `npm start`).
-- `npm run autostart-remove`: removes the logon auto-start item.
 
 ## 5. After any code change (agent or owner)
 
@@ -56,7 +55,7 @@ The former second clone `Desktop\excel-qwen-grok-copilot` (identical commit `18c
 | Symptom | Action |
 |---|---|
 | Settings shows "Relay unavailable" | Start the relay (section 1.4) |
-| Pane offline right after logon | Check the minimized relay window exists; else run `Start Local Relay.bat`; check the Startup item (section 1.3) |
+| Pane offline right after logon | Wait ≤1 min (self-heal) or `npm run relay-ensure`; check Startup item + task exist (section 1.3) |
 | Port 3000 in use | Stop the other relay terminal first |
 | Pane shows old UI | Restart relay → reopen pane (other computers: `git pull` first) |
 | Provider 401 | Key/endpoint mismatch: `sk-sp-…` ↔ Token Plan URL; regular `sk-` ↔ PAYG URL |

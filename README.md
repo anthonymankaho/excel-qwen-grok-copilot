@@ -7,8 +7,8 @@ A local Microsoft Excel task pane inspired by Copilot and Claude for Microsoft 3
 1. Install Node.js 20 or newer.
 2. First time on a computer: close Excel and double-click `Setup and Start.bat` — it installs dependencies, installs the logon auto-start, sideloads the manifest into desktop Excel and starts the relay. (Manual equivalent: `npm install`, `npm run autostart`, then `npm start`.)
 3. Open Settings, choose a provider, enter **your own** API key once and press **Use key** with **Remember key on this PC** ticked — like a Claude sign-in, it persists for this Windows user and is re-loaded into the relay automatically on every pane load.
-4. Every later logon the relay starts automatically in a minimized console; open Excel and the pane is ready (if it does not open: **Home > Add-ins**). No bat double-clicks needed.
-5. Manual fallback / restart after a code change: `Start Local Relay.bat` (or `npm run dev-server`). Stop the relay with `Ctrl+C` in its window or by closing the minimized window; relay memory clears (a remembered copy stays in pane storage until **Clear key**).
+4. Every later logon the relay starts automatically, **hidden (no window)**. A per-minute self-heal scheduled task (`ExcelQwenGrokRelayEnsure`, current user) restarts it within a minute if it ever dies. Open Excel and the pane is ready (if it does not open: **Home > Add-ins**). No bat double-clicks needed.
+5. Stop the relay with `npm run relay-stop` (the self-heal task brings it back within a minute; for a permanent stop run `npm run autostart-remove` first). Manual foreground fallback / restart after a code change: `npm run relay-stop` then `npm run relay-ensure`, or `Start Local Relay.bat`. Relay memory clears on stop (a remembered key copy stays in pane storage until **Clear key**).
 6. `npm run stop` unregisters the sideload; `npm run autostart-remove` removes the logon auto-start.
 
 ## Using the pane
@@ -46,7 +46,7 @@ API keys are posted to the loopback relay and held in process memory; stopping t
 
 ## Troubleshooting
 
-- **Relay unavailable** in Settings → the relay is not running; start it with `Start Local Relay.bat`.
+- **Relay unavailable** in Settings → run `npm run relay-ensure`, or wait up to a minute for the self-heal task.
 - **Port 3000 already in use** → another relay instance is running; stop it (`Ctrl+C` in its terminal) before starting a new one.
 - **Pane shows old UI after a code change** → restart the relay, then close and reopen the task pane (**Home > Add-ins**); on another computer, `git pull` first.
 - **Context hint says truncated** → the sheet exceeds 45,000 characters; select a smaller range or ask section by section for full detail.
@@ -66,4 +66,5 @@ This is a starter app, not Microsoft's Copilot product. It includes chat, automa
 - **2026-11-20** — README usage/tests/troubleshooting sections and `SOP.md` runbook added.
 - **2026-11-20** — Consolidated to one local folder: sideload re-pointed to `Excel Qwen Grok Copilot`; the redundant clone `excel-qwen-grok-copilot` (identical commit) awaits retirement once its file lock is released.
 - **2026-11-20** — Zero-touch redesign (Claude-style): remembered keys with one-time entry, per-user logon auto-start (`Setup and Start.bat`, `npm run autostart`), minimized relay console; sharing model documented — colleagues on their own PCs with their own keys.
+- **2026-11-20** — Relay made invisible and self-healing: hidden process (no console to close accidentally) + per-minute `ExcelQwenGrokRelayEnsure` task; kill-and-respawn verified live; `npm run relay-stop` / `relay-ensure` added.
 - **Pending** — Grok section verification (xAI endpoint, `grok-4.7`) handed to Grok via `Desktop\Qwen Code\GROK_HANDOFF_20261120_0833.md`.
