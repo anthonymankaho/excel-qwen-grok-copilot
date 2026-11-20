@@ -2,19 +2,16 @@
 
 Owner/operator: Anthony. Keys are entered by the owner only. Agents: Qwen Code owns the Qwen provider + shared context/edit layer; Grok owns the Grok section (see `Desktop\Qwen Code\GROK_HANDOFF_20261120_0833.md`); Codex authored the initial app.
 
-## 0. Folder map on this PC (two copies — do not confuse them)
+## 0. Folder on this PC (consolidated 2026-11-20)
 
-| Copy | Path | Role |
-|---|---|---|
-| Working repo | `C:\Users\User\Desktop\Excel Qwen Grok Copilot` | Agents edit/commit here; has `tests/` |
-| Runtime clone (sideloaded) | `C:\Users\User\Desktop\excel-qwen-grok-copilot` | The copy Excel actually sideloads (registry `HKCU\Software\Microsoft\Office\16.0\Wef\Developer\{c42d1d4e-bce1-4efe-9f70-66f64889f4cc}` → its `manifest.xml`); run the relay from here |
+Single active copy: `C:\Users\User\Desktop\Excel Qwen Grok Copilot` — both the working repo and the sideloaded runtime (registry `HKCU\Software\Microsoft\Office\16.0\Wef\Developer\{c42d1d4e-bce1-4efe-9f70-66f64889f4cc}` → its `manifest.xml`, re-pointed 2026-11-20). Run every bat / npm command here.
 
-Both manifests point the pane at `http://127.0.0.1:3000`, so **whichever folder's relay is running serves the pane**. Keep the runtime clone updated (`git pull`) after each push, or the pane runs old code.
+The former second clone `Desktop\excel-qwen-grok-copilot` (identical commit `18c9838`) is redundant and nothing references it any more. Its retirement move was blocked by an open file handle on 2026-11-20: close whatever holds it (Explorer window, terminal, or another agent session with that folder open), then move or delete it.
 
 ## 1. Daily start
 
 1. The Excel sideload persists across restarts (verified 2026-11-20 in the registry). The full `Start Excel Qwen Grok Copilot.bat` / `npm start` is needed only **first time on a PC** or after `npm run stop`.
-2. Every session the **relay must be running** (pane, API and keys live in that process): double-click `Start Local Relay.bat` in the runtime clone (or `npm run dev-server`). Keep the terminal open.
+2. Every session the **relay must be running** (pane, API and keys live in that process): double-click `Start Local Relay.bat` in `Excel Qwen Grok Copilot` (or `npm run dev-server`). Keep the terminal open.
 3. Open Excel; the pane opens automatically, else **Home > Add-ins > "Qwen + Grok for Excel"**.
 4. Settings (⚙) → provider → paste the key → **Use key**. Keys live in relay memory only and are re-entered after every relay start — by design.
 5. Optional auto-start at logon (Startup-folder shortcut to `Start Local Relay.bat`) is a persistence change: implement only on the owner's explicit yes.
@@ -44,7 +41,7 @@ Both manifests point the pane at `http://127.0.0.1:3000`, so **whichever folder'
 1. In the working repo: `npm run check && npm test` (9/9 required).
 2. One live question through the relay before relying on the change; for edit features confirm the proposal card and click-gating.
 3. Commit locally. **Only Anthony pushes** (`git push origin main`).
-4. In the runtime clone: `git pull`, restart relay (`Ctrl+C` then `Start Local Relay.bat`), close and reopen the pane.
+4. On this PC the working repo is the runtime copy: restart the relay (`Ctrl+C` then `Start Local Relay.bat`) and reopen the pane. On other computers: `git pull` first, then restart relay and reopen pane.
 
 ## 6. Second computer (home)
 
@@ -56,7 +53,7 @@ Clone the private repo `anthonymankaho/excel-qwen-grok-copilot`, Node.js 20+, `n
 |---|---|
 | Settings shows "Relay unavailable" | Start the relay (section 1.2) |
 | Port 3000 in use | Stop the other relay terminal first |
-| Pane shows old UI | `git pull` in runtime clone → restart relay → reopen pane |
+| Pane shows old UI | Restart relay → reopen pane (other computers: `git pull` first) |
 | Provider 401 | Key/endpoint mismatch: `sk-sp-…` ↔ Token Plan URL; regular `sk-` ↔ PAYG URL |
 | "Invalid conversation message." | Message + context > 50,000 chars; shorten or untick Send context |
 | Hint says truncated | Ask per range/section instead of whole sheet |

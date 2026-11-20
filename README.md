@@ -48,7 +48,7 @@ API keys are posted to the loopback relay and kept only in process memory. They 
 
 - **Relay unavailable** in Settings → the relay is not running; start it with `Start Local Relay.bat`.
 - **Port 3000 already in use** → another relay instance is running; stop it (`Ctrl+C` in its terminal) before starting a new one.
-- **Pane shows old UI after a code change** → restart the relay, then close and reopen the task pane (**Home > Add-ins**); on a cloned runtime copy, `git pull` first.
+- **Pane shows old UI after a code change** → restart the relay, then close and reopen the task pane (**Home > Add-ins**); on another computer, `git pull` first.
 - **Context hint says truncated** → the sheet exceeds 45,000 characters; select a smaller range or ask section by section for full detail.
 - **Invalid conversation message.** → message plus context exceeds 50,000 characters; shorten the message or untick **Send context**.
 - **Provider HTTP 401** → key/endpoint mismatch: Token Plan keys (`sk-sp-…`) only work on the Token Plan URL; regular keys only on the pay-as-you-go URL.
@@ -64,4 +64,5 @@ This is a starter app, not Microsoft's Copilot product. It includes chat, automa
 - **2026-11-20** — Qwen switched to the owner's QwenCloud International Token Plan endpoint with default model `qwen4-max`; live-verified end-to-end through the relay (`c98ac6c`, pushed by the owner). Codex's earlier "Token Plan cannot serve this add-in" claim disproved by live probe.
 - **2026-11-20** — Claude-for-Microsoft-365-style behavior: automatic workbook context per question and approval-gated cell edits; shared `SYSTEM_PROMPT` for both providers; offline test suite added, 9/9 pass; live edit-proposal verified with `qwen4-max` (`f1427f7`).
 - **2026-11-20** — README usage/tests/troubleshooting sections and `SOP.md` runbook added.
+- **2026-11-20** — Consolidated to one local folder: sideload re-pointed to `Excel Qwen Grok Copilot`; the redundant clone `excel-qwen-grok-copilot` (identical commit) awaits retirement once its file lock is released.
 - **Pending** — Grok section verification (xAI endpoint, `grok-4.7`) handed to Grok via `Desktop\Qwen Code\GROK_HANDOFF_20261120_0833.md`.
