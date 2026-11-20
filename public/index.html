@@ -33,10 +33,10 @@
     </section>
 
     <section class="context-card card">
-      <div class="context-top"><span class="eyebrow">WORKBOOK CONTEXT</span><button id="refreshSelection" class="text-button">↻ Refresh</button></div>
-      <div id="selectionName" class="selection-name">Open Excel to read selection</div>
-      <div id="selectionPreview" class="selection-preview">Your selected cells will appear here.</div>
-      <div class="context-actions"><button id="addSelection" class="chip">＋ Add selection to chat</button><span id="contextHint">Nothing shared yet</span></div>
+      <div class="context-top"><span class="eyebrow">WORKBOOK CONTEXT · AUTO</span><button id="refreshSelection" class="text-button">↻ Refresh</button></div>
+      <div id="selectionName" class="selection-name">Open Excel to read context</div>
+      <div id="selectionPreview" class="selection-preview">Your selection (or the active sheet) is sent with each question, formulas included.</div>
+      <div class="context-actions"><label class="context-toggle"><input type="checkbox" id="includeContext" checked> Send context</label><button id="addUsedRange" class="chip">＋ Whole sheet</button><span id="contextHint">Nothing sent yet</span></div>
     </section>
 
     <section class="quick-actions" aria-label="Quick actions">

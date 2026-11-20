@@ -8,6 +8,7 @@ const publicDir = path.join(root, 'public');
 const host = '127.0.0.1';
 const port = Number(process.env.PORT || 3000);
 const secrets = { qwen: '', grok: '' }; // Process memory only; cleared when the relay stops.
+const SYSTEM_PROMPT = 'You are an assistant inside Microsoft Excel. Be accurate, concise, and clear. When analyzing spreadsheet data, state assumptions and distinguish values from formulas. The user message may include an [Excel selection ...] or [Excel used range ...] block: tab-separated rows where formulas appear as value [=formula]. When the user asks to change, fix, or create cell content, reply with your explanation plus one fenced ```json block containing {"edits":[{"sheet":"<sheet name>","cell":"<A1 address>","value":"<number, text, or =formula>"}]} (at most 200 edits). You cannot change cells yourself; edits apply only after the user clicks Apply in the pane, so never claim a change is already done.';
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.xml': 'application/xml; charset=utf-8', '.png': 'image/png', '.json': 'application/json; charset=utf-8' };
 
 function send(res, status, data, type = 'application/json; charset=utf-8') {
@@ -66,10 +67,10 @@ const server = http.createServer(async (req, res) => {
       if (provider === 'qwen') {
         url = new URL(endpoint);
         if (url.protocol !== 'https:' || url.username || url.password) return send(res, 400, { error: 'Qwen endpoint must be an HTTPS URL.' });
-        payload = { model: model || 'qwen4-max', messages: [{ role: 'system', content: 'You are an assistant inside Microsoft Excel. Be accurate, concise, and clear. When analyzing spreadsheet data, state assumptions and distinguish values from formulas.' }, ...messages], stream: false };
+        payload = { model: model || 'qwen4-max', messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages], stream: false };
       } else {
         url = new URL('https://api.x.ai/v1/responses');
-        payload = { model: model || 'grok-4.7', instructions: 'You are an assistant inside Microsoft Excel. Be accurate, concise, and clear. When analyzing spreadsheet data, state assumptions and distinguish values from formulas.', input: messages.map(({ role, content }) => ({ role, content })), store: false };
+        payload = { model: model || 'grok-4.7', instructions: SYSTEM_PROMPT, input: messages.map(({ role, content }) => ({ role, content })), store: false };
       }
       const response = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${secrets[provider]}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(90_000) });
       const data = await response.json().catch(() => ({}));

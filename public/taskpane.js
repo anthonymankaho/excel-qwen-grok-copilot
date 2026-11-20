@@ -1,5 +1,6 @@
 const API = '';
-const state = { messages: [], sharedSelection: '', lastAnswer: '', busy: false, officeReady: false };
+const CONTEXT_CAP = 45_000; // Relay rejects messages over 50,000 chars; leave room for the prompt itself.
+const state = { messages: [], lastAnswer: '', busy: false, officeReady: false, forceSheet: false };
 const $ = id => document.getElementById(id);
 
 async function api(path, body) {
@@ -14,25 +15,72 @@ function toast(message) {
   clearTimeout(toast.timer); toast.timer = setTimeout(() => el.classList.add('hidden'), 3200);
 }
 
-function safeText(node, value) { node.textContent = value; }
-
 async function readSelection() {
-  if (!state.officeReady) { toast('Open this task pane inside Excel first.'); return; }
+  return Excel.run(async context => {
+    const range = context.workbook.getSelectedRange();
+    range.load(['address', 'text', 'formulas', 'rowCount', 'columnCount']);
+    await context.sync();
+    return { address: range.address, text: range.text, formulas: range.formulas, rowCount: range.rowCount, columnCount: range.columnCount };
+  });
+}
+
+async function readUsedRange() {
+  return Excel.run(async context => {
+    const sheet = context.workbook.worksheets.getActiveWorksheet();
+    const range = sheet.getUsedRangeOrNullObject();
+    range.load(['address', 'text', 'formulas']);
+    await context.sync();
+    return range.isNullObject ? null : { address: range.address, text: range.text, formulas: range.formulas };
+  });
+}
+
+function annotateRows(rows, formulas) {
+  return (rows || []).map((row, i) => row.map((value, j) => {
+    const formula = formulas?.[i]?.[j];
+    return formula && String(formula).startsWith('=') ? `${value} [${formula}]` : value;
+  }).join('\t')).join('\n');
+}
+
+async function buildContext() {
+  if (!state.officeReady || !$('includeContext').checked) return null;
+  let source = null, kind = 'selection';
+  if (!state.forceSheet) {
+    const selection = await readSelection();
+    if (selection.rowCount * selection.columnCount > 1) source = selection;
+  }
+  if (!source) { source = await readUsedRange(); kind = 'used range'; }
+  if (!source) return null;
+  let text = annotateRows(source.text, source.formulas);
+  if (!text) return null;
+  let truncated = false;
+  if (text.length > CONTEXT_CAP) {
+    const marker = `\n[...truncated: ${text.length - CONTEXT_CAP} chars omitted — ask about a smaller range for full detail]`;
+    text = text.slice(0, CONTEXT_CAP - marker.length) + marker;
+    truncated = true;
+  }
+  return { header: `[Excel ${kind} ${source.address}]`, text, address: source.address, kind, truncated, chars: text.length };
+}
+
+async function refreshContextCard() {
+  if (!state.officeReady) { $('selectionName').textContent = 'Open Excel to read context'; return; }
   try {
-    const selection = await Excel.run(async context => {
-      const range = context.workbook.getSelectedRange();
-      range.load(['address', 'text', 'formulas']);
-      await context.sync();
-      return { address: range.address, text: range.text, formulas: range.formulas };
-    });
-    $('selectionName').textContent = selection.address || 'Selected cells';
-    const rows = (selection.text || []).map((row, i) => row.map((value, j) => {
-      const formula = selection.formulas?.[i]?.[j];
-      return formula && String(formula).startsWith('=') ? `${value} [${formula}]` : value;
-    }).join('\t')).join('\n');
-    $('selectionPreview').textContent = rows || '(Selection is empty)';
-    state.currentSelection = { address: selection.address, rows: selection.text || [], formulas: selection.formulas || [] };
-  } catch (error) { toast(`Could not read selection: ${error.message}`); }
+    const ctx = await buildContext();
+    if (!$('includeContext').checked) {
+      $('selectionName').textContent = 'Context off';
+      $('selectionPreview').textContent = 'Questions are sent without workbook data.';
+      $('contextHint').textContent = 'Nothing will be sent';
+      return;
+    }
+    if (!ctx) {
+      $('selectionName').textContent = 'No workbook data';
+      $('selectionPreview').textContent = '(The active sheet and selection are empty)';
+      $('contextHint').textContent = 'Nothing will be sent';
+      return;
+    }
+    $('selectionName').textContent = ctx.address;
+    $('selectionPreview').textContent = ctx.text;
+    $('contextHint').textContent = `Next question sends ${ctx.kind} · ${ctx.chars.toLocaleString()} chars${ctx.truncated ? ' · truncated' : ''} · formulas included`;
+  } catch (error) { toast(`Could not read workbook context: ${error.message}`); }
 }
 
 function renderMessage(role, content) {
@@ -43,24 +91,78 @@ function renderMessage(role, content) {
     const label = document.createElement('div'); label.className = 'message-label'; label.textContent = $('activeProvider').value.toUpperCase(); bubble.append(label);
   }
   const body = document.createElement('div'); body.textContent = content; bubble.append(body); conversation.append(bubble); conversation.scrollTop = conversation.scrollHeight;
+  return bubble;
 }
 
-function selectionContext() {
-  if (!state.sharedSelection || !state.currentSelection) return '';
-  return `\n\n[Excel selection ${state.currentSelection.address}]\n${state.sharedSelection}`;
+function parseEdits(text) {
+  const blocks = [...text.matchAll(/```json\s*([\s\S]*?)```/g)];
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    try {
+      const parsed = JSON.parse(blocks[i][1]);
+      const edits = parsed?.edits;
+      if (!Array.isArray(edits) || edits.length < 1 || edits.length > 200) continue;
+      if (!edits.every(e => e && typeof e.sheet === 'string' && e.sheet.length <= 100 && typeof e.cell === 'string' && /^[A-Z]{1,3}[1-9][0-9]{0,6}$/i.test(e.cell) && (typeof e.value === 'string' || typeof e.value === 'number') && String(e.value).length <= 5000)) continue;
+      const prose = (text.slice(0, blocks[i].index) + text.slice(blocks[i].index + blocks[i][0].length)).trim();
+      return { prose, edits };
+    } catch { /* not an edits block; keep looking */ }
+  }
+  return { prose: text, edits: null };
+}
+
+function renderEditsCard(edits) {
+  const conversation = $('conversation');
+  const card = document.createElement('div'); card.className = 'message assistant edits-card';
+  const label = document.createElement('div'); label.className = 'message-label'; label.textContent = `PROPOSED EDITS · ${edits.length} · APPLY ONLY WITH YOUR CLICK`;
+  card.append(label);
+  for (const edit of edits.slice(0, 200)) {
+    const row = document.createElement('div'); row.className = 'edit-row';
+    row.textContent = `${edit.sheet}!${edit.cell} ← ${String(edit.value)}`;
+    card.append(row);
+  }
+  const actions = document.createElement('div'); actions.className = 'button-row';
+  const apply = document.createElement('button'); apply.className = 'primary'; apply.textContent = 'Apply edits';
+  const dismiss = document.createElement('button'); dismiss.className = 'secondary'; dismiss.textContent = 'Dismiss';
+  apply.addEventListener('click', async () => {
+    apply.disabled = true; dismiss.disabled = true;
+    try {
+      await Excel.run(async context => {
+        for (const edit of edits) {
+          const range = context.workbook.worksheets.getItem(edit.sheet).getRange(edit.cell);
+          if (typeof edit.value === 'string' && edit.value.startsWith('=')) range.formulas = [[edit.value]];
+          else range.values = [[edit.value]];
+        }
+        await context.sync();
+      });
+      label.textContent = `APPLIED ${edits.length} EDITS`;
+      toast(`Applied ${edits.length} edits to the workbook.`);
+    } catch (error) {
+      apply.disabled = false; dismiss.disabled = false;
+      toast(`Could not apply edits: ${error.message}`);
+    }
+  });
+  dismiss.addEventListener('click', () => card.remove());
+  actions.append(apply, dismiss); card.append(actions);
+  conversation.append(card); conversation.scrollTop = conversation.scrollHeight;
 }
 
 async function sendPrompt(prompt) {
   const clean = prompt.trim(); if (!clean || state.busy) return;
   const provider = $('activeProvider').value;
-  const content = clean + selectionContext();
-  state.messages.push({ role: 'user', content }); renderMessage('user', clean + (state.sharedSelection ? `\n\nAttached selection: ${state.currentSelection.address}` : ''));
+  let ctx = null;
+  try { ctx = await buildContext(); } catch (error) { toast(`Could not read workbook context: ${error.message}`); }
+  state.forceSheet = false;
+  const content = clean + (ctx ? `\n\n${ctx.header}\n${ctx.text}` : '');
+  if (content.length > 49_500) { toast('Message plus workbook context is too large — shorten the message or turn context off.'); return; }
+  state.messages.push({ role: 'user', content }); renderMessage('user', clean + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
   state.busy = true; $('send').disabled = true; $('send').textContent = '…';
   try {
     const result = await api('chat', { provider, model: provider === 'qwen' ? $('qwenModel').value.trim() : $('grokModel').value.trim(), endpoint: $('qwenEndpoint').value.trim(), messages: state.messages.slice(-24) });
+    const { prose, edits } = parseEdits(result.text);
     state.messages.push({ role: 'assistant', content: result.text });
-    state.lastAnswer = result.text; $('insertAnswer').disabled = false; $('lastAnswerState').textContent = result.model ? `via ${result.model}` : '';
-    renderMessage('assistant', result.text);
+    state.lastAnswer = prose; $('insertAnswer').disabled = !prose; $('lastAnswerState').textContent = result.model ? `via ${result.model}` : '';
+    renderMessage('assistant', prose);
+    if (edits) renderEditsCard(edits);
+    refreshContextCard();
   } catch (error) { renderMessage('assistant', `Error: ${error.message}`); toast(error.message); }
   finally { state.busy = false; $('send').disabled = false; $('send').textContent = '↑'; }
 }
@@ -95,14 +197,9 @@ $('settingsToggle').addEventListener('click', () => { $('settings').classList.to
 $('closeSettings').addEventListener('click', () => $('settings').classList.add('hidden'));
 $('provider').addEventListener('change', toggleProviderFields);
 $('activeProvider').addEventListener('change', () => { $('provider').value = $('activeProvider').value; toggleProviderFields(); });
-$('refreshSelection').addEventListener('click', readSelection);
-$('addSelection').addEventListener('click', async () => {
-  await readSelection();
-  if (!state.currentSelection) return;
-  state.sharedSelection = (state.currentSelection.rows || []).map(row => row.join('\t')).join('\n');
-  $('contextHint').textContent = 'Selection will be shared with provider';
-  toast('Selection attached to your next messages.');
-});
+$('refreshSelection').addEventListener('click', refreshContextCard);
+$('includeContext').addEventListener('change', refreshContextCard);
+$('addUsedRange').addEventListener('click', () => { state.forceSheet = true; refreshContextCard(); toast('Next question will use the whole active sheet.'); });
 $('saveKey').addEventListener('click', async () => {
   const apiKey = $('apiKey').value.trim(); if (!apiKey) return toast('Enter an API key first.');
   try { await api('configure', { provider: $('provider').value, apiKey }); $('apiKey').value = ''; await refreshSettings(); toast('Key loaded into local relay memory.'); }
@@ -118,6 +215,6 @@ $('insertAnswer').addEventListener('click', insertAnswer);
 document.querySelectorAll('.action').forEach(button => button.addEventListener('click', () => { $('prompt').value = button.dataset.prompt; $('prompt').focus(); }));
 
 Office.onReady(info => {
-  if (info.host === Office.HostType.Excel) { state.officeReady = true; readSelection(); }
+  if (info.host === Office.HostType.Excel) { state.officeReady = true; refreshContextCard(); }
   refreshSettings();
 });
