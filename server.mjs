@@ -66,7 +66,7 @@ const server = http.createServer(async (req, res) => {
       if (provider === 'qwen') {
         url = new URL(endpoint);
         if (url.protocol !== 'https:' || url.username || url.password) return send(res, 400, { error: 'Qwen endpoint must be an HTTPS URL.' });
-        payload = { model: model || 'qwen-plus', messages: [{ role: 'system', content: 'You are an assistant inside Microsoft Excel. Be accurate, concise, and clear. When analyzing spreadsheet data, state assumptions and distinguish values from formulas.' }, ...messages], stream: false };
+        payload = { model: model || 'qwen4-max', messages: [{ role: 'system', content: 'You are an assistant inside Microsoft Excel. Be accurate, concise, and clear. When analyzing spreadsheet data, state assumptions and distinguish values from formulas.' }, ...messages], stream: false };
       } else {
         url = new URL('https://api.x.ai/v1/responses');
         payload = { model: model || 'grok-4.7', instructions: 'You are an assistant inside Microsoft Excel. Be accurate, concise, and clear. When analyzing spreadsheet data, state assumptions and distinguish values from formulas.', input: messages.map(({ role, content }) => ({ role, content })), store: false };

@@ -22,12 +22,12 @@ The task pane and API relay are served from `http://127.0.0.1:3000`. This is a l
 
 ## Providers
 
-- **Qwen** uses QwenCloud's OpenAI-compatible chat completions API. The default is the Singapore pay-as-you-go endpoint `https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1/chat/completions`; use a regular QwenCloud API key from the same region. Default model: `qwen3.8-max`.
+- **Qwen** uses the owner's QwenCloud International Token Plan through the OpenAI-compatible endpoint `https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` with a Token Plan key (`sk-sp-…`). Default model: `qwen4-max` (verified 2026-11-20; `qwen4-max-preview` and `qwen3.8-max` also work on this endpoint). For pay-as-you-go instead, change the URL in Settings to `https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` and use a regular Singapore QwenCloud API key — Token Plan keys do not work on that endpoint, and regular keys do not work on the Token Plan endpoint.
 - **Grok** uses xAI's Responses API at `https://api.x.ai/v1/responses`. Default model: `grok-4.7`.
 
 ## Key handling
 
-API keys are posted to the loopback relay and kept only in process memory. They are not saved to a file or browser storage. Stopping the Node process clears them. Workbook values are sent to the selected AI provider only after you choose **Add selection to chat**; review sensitive data before sharing. The relay binds only to `127.0.0.1`. QwenCloud Token Plan keys are limited to programming/agent tools and cannot be used with this custom add-in backend.
+API keys are posted to the loopback relay and kept only in process memory. They are not saved to a file or browser storage. Stopping the Node process clears them. Workbook values are sent to the selected AI provider only after you choose **Add selection to chat**; review sensitive data before sharing. The relay binds only to `127.0.0.1`. The Qwen section is configured for the owner's QwenCloud International Token Plan key and was verified end-to-end through this relay on 2026-11-20. Token Plan is marketed for interactive coding/agent tools; this personal loopback add-in uses it at the owner's explicit direction. Keep the key private — never commit it or paste it into shared files.
 
 ## Current scope
 
