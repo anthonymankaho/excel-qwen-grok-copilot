@@ -1,7 +1,29 @@
 const API = '';
 const CONTEXT_CAP = 45_000; // Relay rejects messages over 50,000 chars; leave room for the prompt itself.
+const KEY_STORE = 'eqgc.keys.v1';
 const state = { messages: [], lastAnswer: '', busy: false, officeReady: false, forceSheet: false };
 const $ = id => document.getElementById(id);
+
+function storedKeys() {
+  try { return JSON.parse(localStorage.getItem(KEY_STORE) || '{}'); } catch { return {}; }
+}
+function rememberKey(provider, key) {
+  const all = storedKeys();
+  if (key) all[provider] = key; else delete all[provider];
+  try { localStorage.setItem(KEY_STORE, JSON.stringify(all)); } catch { /* storage unavailable: session-only */ }
+}
+let keysReady = null;
+function ensureKeys() {
+  if (!keysReady) keysReady = (async () => {
+    const stored = storedKeys();
+    let allOk = true;
+    for (const provider of ['qwen', 'grok']) {
+      if (stored[provider]) { try { await api('configure', { provider, apiKey: stored[provider] }); } catch { allOk = false; } }
+    }
+    if (!allOk) keysReady = null; // relay was offline; retry on next question
+  })();
+  return keysReady;
+}
 
 async function api(path, body) {
   const response = await fetch(`${API}/api/${path}`, { method: body ? 'POST' : 'GET', headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
@@ -147,6 +169,7 @@ function renderEditsCard(edits) {
 
 async function sendPrompt(prompt) {
   const clean = prompt.trim(); if (!clean || state.busy) return;
+  await ensureKeys();
   const provider = $('activeProvider').value;
   let ctx = null;
   try { ctx = await buildContext(); } catch (error) { toast(`Could not read workbook context: ${error.message}`); }
@@ -171,7 +194,8 @@ async function refreshSettings() {
   try {
     const data = await api('health');
     const provider = $('provider').value;
-    $('keyStatus').textContent = data.configured[provider] ? 'Key active for this session' : '';
+    const remembered = Boolean(storedKeys()[provider]);
+    $('keyStatus').textContent = data.configured[provider] ? (remembered ? 'Key active · remembered on this PC' : 'Key active for this session') : '';
     $('keyStatus').style.color = data.configured[provider] ? '#168251' : '#777';
   } catch { $('keyStatus').textContent = 'Relay unavailable'; $('keyStatus').style.color = '#b23b36'; }
 }
@@ -202,11 +226,19 @@ $('includeContext').addEventListener('change', refreshContextCard);
 $('addUsedRange').addEventListener('click', () => { state.forceSheet = true; refreshContextCard(); toast('Next question will use the whole active sheet.'); });
 $('saveKey').addEventListener('click', async () => {
   const apiKey = $('apiKey').value.trim(); if (!apiKey) return toast('Enter an API key first.');
-  try { await api('configure', { provider: $('provider').value, apiKey }); $('apiKey').value = ''; await refreshSettings(); toast('Key loaded into local relay memory.'); }
+  const provider = $('provider').value;
+  try {
+    await api('configure', { provider, apiKey });
+    rememberKey(provider, $('rememberKey').checked ? apiKey : '');
+    keysReady = null;
+    $('apiKey').value = ''; await refreshSettings();
+    toast($('rememberKey').checked ? 'Key loaded and remembered on this PC.' : 'Key loaded into local relay memory.');
+  }
   catch (error) { toast(error.message); }
 });
 $('clearKey').addEventListener('click', async () => {
-  try { await api('clear-key', { provider: $('provider').value }); await refreshSettings(); toast('Key cleared.'); }
+  const provider = $('provider').value;
+  try { await api('clear-key', { provider }); rememberKey(provider, ''); keysReady = null; await refreshSettings(); toast('Key cleared.'); }
   catch (error) { toast(error.message); }
 });
 $('composer').addEventListener('submit', async event => { event.preventDefault(); const value = $('prompt').value; $('prompt').value = ''; await sendPrompt(value); });
@@ -217,4 +249,5 @@ document.querySelectorAll('.action').forEach(button => button.addEventListener('
 Office.onReady(info => {
   if (info.host === Office.HostType.Excel) { state.officeReady = true; refreshContextCard(); }
   refreshSettings();
+  ensureKeys().then(refreshSettings);
 });

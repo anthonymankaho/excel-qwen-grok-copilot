@@ -31,10 +31,11 @@ function fire(el, type, ev = {}) {
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function makeSandbox({ selection, used, reply }) {
+function makeSandbox({ selection, used, reply, seedKeys }) {
   const els = new Map();
   const defaults = { provider: 'qwen', activeProvider: 'qwen', qwenModel: 'qwen4-max', qwenEndpoint: 'https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions' };
-  const get = id => { if (!els.has(id)) { const el = makeElement(id); if (defaults[id]) el.value = defaults[id]; if (id === 'includeContext') el.checked = true; els.set(id, el); } return els.get(id); };
+  const get = id => { if (!els.has(id)) { const el = makeElement(id); if (defaults[id]) el.value = defaults[id]; if (id === 'includeContext' || id === 'rememberKey') el.checked = true; els.set(id, el); } return els.get(id); };
+  const store = seedKeys ? { 'eqgc.keys.v1': JSON.stringify(seedKeys) } : {};
   const writes = [];
   const calls = [];
   const range = (obj) => ({ load() {}, isNullObject: false, getCell: () => target('Selection', 'A1'), ...obj });
@@ -45,6 +46,11 @@ function makeSandbox({ selection, used, reply }) {
   const sandbox = {
     console, JSON, Math, String, Array, Object, Promise, RegExp,
     setTimeout: () => 0, clearTimeout: () => {},
+    localStorage: {
+      getItem: k => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: k => { delete store[k]; }
+    },
     document: { getElementById: get, createElement: tag => makeElement(tag), querySelectorAll: () => [] },
     Office: { HostType: { Excel: 'Excel' }, onReady(cb) { sandbox.officeCb = cb; } },
     Excel: {
@@ -66,7 +72,7 @@ function makeSandbox({ selection, used, reply }) {
       return { ok: true, status: 200, json: async () => data };
     }
   };
-  sandbox.writes = writes; sandbox.calls = calls; sandbox.els = get;
+  sandbox.writes = writes; sandbox.calls = calls; sandbox.els = get; sandbox.store = store;
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox);
   return sandbox;
@@ -167,4 +173,30 @@ test('oversize prompt is blocked before any provider call', async () => {
   await ask(sb, 'x'.repeat(49_600));
   assert.equal(chatCalls(sb).length, before);
   assert.match(sb.els('toast').textContent, /too large/);
+});
+
+test('remembered key is auto-configured into the relay on pane load', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, seedKeys: { qwen: 'sk-sp-remembered' } });
+  await boot(sb); await flush();
+  const cfg = sb.calls.find(c => c.url.endsWith('/api/configure'));
+  assert.ok(cfg, 'configure called without user action');
+  assert.deepEqual(cfg.body, { provider: 'qwen', apiKey: 'sk-sp-remembered' });
+});
+
+test('Use key persists only while Remember is ticked; Clear key removes storage', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall });
+  await boot(sb);
+  sb.els('apiKey').value = 'sk-sp-once';
+  await fire(sb.els('saveKey'), 'click'); await flush();
+  assert.equal(JSON.parse(sb.store['eqgc.keys.v1']).qwen, 'sk-sp-once');
+  sb.els('rememberKey').checked = false;
+  sb.els('apiKey').value = 'sk-sp-session';
+  await fire(sb.els('saveKey'), 'click'); await flush();
+  assert.equal(JSON.parse(sb.store['eqgc.keys.v1']).qwen, undefined);
+  sb.els('rememberKey').checked = true;
+  sb.els('apiKey').value = 'sk-sp-again';
+  await fire(sb.els('saveKey'), 'click'); await flush();
+  await fire(sb.els('clearKey'), 'click'); await flush();
+  assert.deepEqual(JSON.parse(sb.store['eqgc.keys.v1'] || '{}'), {});
+  assert.ok(sb.calls.some(c => c.url.endsWith('/api/clear-key')));
 });

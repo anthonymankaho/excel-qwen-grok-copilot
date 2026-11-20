@@ -16,7 +16,7 @@
   </header>
   <main>
     <section id="settings" class="settings card hidden">
-      <div class="section-heading"><div><h2>Provider settings</h2><p>Keys stay in this local relay’s memory until it stops.</p></div><button id="closeSettings" class="icon-button" aria-label="Close settings">×</button></div>
+      <div class="section-heading"><div><h2>Provider settings</h2><p>Enter the key once; with Remember ticked it persists on this PC like a Claude sign-in.</p></div><button id="closeSettings" class="icon-button" aria-label="Close settings">×</button></div>
       <label for="provider">Provider</label>
       <select id="provider"><option value="qwen">Qwen · QwenCloud Token Plan</option><option value="grok">Grok · xAI</option></select>
       <div id="qwenFields">
@@ -27,9 +27,9 @@
       </div>
       <div id="grokFields" class="hidden"><label for="grokModel">Model</label><input id="grokModel" value="grok-4.7" autocomplete="off"></div>
       <label for="apiKey">API key <span id="keyStatus" class="key-status"></span></label>
-      <input id="apiKey" type="password" placeholder="Enter key; kept in relay memory only" autocomplete="new-password">
-      <div class="button-row"><button id="saveKey" class="primary">Use key</button><button id="clearKey" class="secondary">Clear key</button></div>
-      <p class="hint">Keys are sent only to the relay at 127.0.0.1 on this computer. They are not written to disk.</p>
+      <input id="apiKey" type="password" placeholder="Enter key once; remembered if ticked below" autocomplete="new-password">
+      <div class="button-row"><button id="saveKey" class="primary">Use key</button><button id="clearKey" class="secondary">Clear key</button><label class="context-toggle"><input type="checkbox" id="rememberKey" checked> Remember key on this PC</label></div>
+      <p class="hint">Keys go only to the relay at 127.0.0.1 on this computer. With Remember ticked they persist in this pane’s local browser storage (this PC, this Windows user only); untick for memory-only sessions. Clear key removes both.</p>
     </section>
 
     <section class="context-card card">
