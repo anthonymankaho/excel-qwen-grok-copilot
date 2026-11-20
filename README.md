@@ -5,11 +5,11 @@ A local Microsoft Excel task pane inspired by Copilot and Claude for Microsoft 3
 ## Run locally
 
 1. Install Node.js 20 or newer.
-2. Install project dependencies once by opening PowerShell in this folder and running `npm install`.
-3. Close Excel, then double-click `Start Excel Qwen Grok Copilot.bat` (or run `npm start`). The command starts the local relay and sideloads the XML manifest into desktop Excel.
-4. Keep the terminal window open while using the add-in. If its pane does not open automatically, select it from **Home > Add-ins**. To restart only the local relay after a code change, use `Start Local Relay.bat`. The sideload registration persists across Excel and relay restarts (until `npm run stop`), so on later sessions you only need the relay: double-click `Start Local Relay.bat` (or `npm run dev-server`). The full `npm start` / `Start Excel Qwen Grok Copilot.bat` is needed only the first time on a computer, or after `npm run stop`.
-5. Open Settings, choose a provider, enter its API key, and press **Use key**.
-6. When finished, press `Ctrl+C` in the terminal to stop the session and clear the in-memory keys. You can also run `npm run stop` to unregister the development sideload.
+2. First time on a computer: close Excel and double-click `Setup and Start.bat` — it installs dependencies, installs the logon auto-start, sideloads the manifest into desktop Excel and starts the relay. (Manual equivalent: `npm install`, `npm run autostart`, then `npm start`.)
+3. Open Settings, choose a provider, enter **your own** API key once and press **Use key** with **Remember key on this PC** ticked — like a Claude sign-in, it persists for this Windows user and is re-loaded into the relay automatically on every pane load.
+4. Every later logon the relay starts automatically in a minimized console; open Excel and the pane is ready (if it does not open: **Home > Add-ins**). No bat double-clicks needed.
+5. Manual fallback / restart after a code change: `Start Local Relay.bat` (or `npm run dev-server`). Stop the relay with `Ctrl+C` in its window or by closing the minimized window; relay memory clears (a remembered copy stays in pane storage until **Clear key**).
+6. `npm run stop` unregisters the sideload; `npm run autostart-remove` removes the logon auto-start.
 
 ## Using the pane
 
@@ -20,12 +20,12 @@ A local Microsoft Excel task pane inspired by Copilot and Claude for Microsoft 3
 5. **Provider.** The pill at the composer footer switches Qwen/Grok; each provider needs its own key loaded in Settings.
 6. **History.** Conversation lives in memory only — reloading the pane clears it. At most 24 messages are sent per request.
 
-## Continue on another computer
+## Other computers and colleagues (sharing)
 
-1. Clone the private GitHub repository to the computer.
-2. Install Node.js 20 or newer and run `npm install` in the project folder.
-3. Close Excel and run `npm start` (or double-click `Start Excel Qwen Grok Copilot.bat`).
-4. Enter the provider API key again in the add-in Settings. Keys are intentionally not synced or committed.
+1. Get the code: the owner adds you as a collaborator on the private repository, or hands you a zip of the project. Keys are never in the repo or the zip.
+2. Install Node.js 20+, close Excel, double-click `Setup and Start.bat`.
+3. Enter **your own** key once (Remember ticked). Key/endpoint pairing: a Token Plan key (`sk-sp-…`) works only with the default Token Plan URL; a regular QwenCloud key works only after switching the URL in Settings to `https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1/chat/completions`; Grok needs your own xAI key.
+4. Every computer runs its own loopback relay and stores its own keys; nothing is shared between users. Never use someone else's personal Token Plan key — the plan's terms and quota are per person.
 
 The task pane and API relay are served from `http://127.0.0.1:3000`. This is a local development add-in for desktop Excel. Excel for the web and organizational deployment require an HTTPS-hosted manifest/app and suitable admin sideloading or deployment.
 
@@ -36,12 +36,12 @@ The task pane and API relay are served from `http://127.0.0.1:3000`. This is a l
 
 ## Key handling
 
-API keys are posted to the loopback relay and kept only in process memory. They are not saved to a file or browser storage. Stopping the Node process clears them. Like Claude for Microsoft 365, the pane automatically sends workbook context with each question: your multi-cell selection when you have one, otherwise the active sheet's used range, with formulas as `value [=formula]`. Untick **Send context** to ask without workbook data; **＋ Whole sheet** forces the full active sheet for the next question. Context is capped at 45,000 characters per message with an explicit truncation note; review sensitive data before sharing. Cell changes are proposed as an edit list and written only when you click **Apply edits**. The relay binds only to `127.0.0.1`. The Qwen section is configured for the owner's QwenCloud International Token Plan key and was verified end-to-end through this relay on 2026-11-20. Token Plan is marketed for interactive coding/agent tools; this personal loopback add-in uses it at the owner's explicit direction. Keep the key private — never commit it or paste it into shared files.
+API keys are posted to the loopback relay and held in process memory; stopping the Node process clears them. With **Remember key on this PC** ticked, the pane also persists the key in its local browser storage (this PC, this Windows user only) and re-loads it into the relay on every pane load; untick for memory-only sessions, and **Clear key** removes both copies. Keys are never written to the repo or any shared file. Like Claude for Microsoft 365, the pane automatically sends workbook context with each question: your multi-cell selection when you have one, otherwise the active sheet's used range, with formulas as `value [=formula]`. Untick **Send context** to ask without workbook data; **＋ Whole sheet** forces the full active sheet for the next question. Context is capped at 45,000 characters per message with an explicit truncation note; review sensitive data before sharing. Cell changes are proposed as an edit list and written only when you click **Apply edits**. The relay binds only to `127.0.0.1`. The Qwen section is configured for the owner's QwenCloud International Token Plan key and was verified end-to-end through this relay on 2026-11-20. Token Plan is marketed for interactive coding/agent tools; this personal loopback add-in uses it at the owner's explicit direction. Keep the key private — never commit it or paste it into shared files.
 
 ## Tests
 
 - `npm run check` — syntax check of `server.mjs` and `public/taskpane.js`.
-- `npm test` — offline suite `tests/taskpane.test.mjs` (`node --test`, zero dependencies, stub DOM + Office.js): auto-context rules, Send-context opt-out, Whole-sheet override, truncation cap, apply-only-on-click, Dismiss, invalid edit payloads, oversize-prompt guard. 9 tests.
+- `npm test` — offline suite `tests/taskpane.test.mjs` (`node --test`, zero dependencies, stub DOM + Office.js): auto-context rules, Send-context opt-out, Whole-sheet override, truncation cap, apply-only-on-click, Dismiss, invalid edit payloads, oversize-prompt guard, remembered-key auto-load and persistence. 11 tests.
 - Live check (manual): start the relay, load a key in Settings, ask one question and confirm a real answer; for edit proposals confirm the **PROPOSED EDITS** card appears and nothing is written before **Apply edits**.
 
 ## Troubleshooting
@@ -65,4 +65,5 @@ This is a starter app, not Microsoft's Copilot product. It includes chat, automa
 - **2026-11-20** — Claude-for-Microsoft-365-style behavior: automatic workbook context per question and approval-gated cell edits; shared `SYSTEM_PROMPT` for both providers; offline test suite added, 9/9 pass; live edit-proposal verified with `qwen4-max` (`f1427f7`).
 - **2026-11-20** — README usage/tests/troubleshooting sections and `SOP.md` runbook added.
 - **2026-11-20** — Consolidated to one local folder: sideload re-pointed to `Excel Qwen Grok Copilot`; the redundant clone `excel-qwen-grok-copilot` (identical commit) awaits retirement once its file lock is released.
+- **2026-11-20** — Zero-touch redesign (Claude-style): remembered keys with one-time entry, per-user logon auto-start (`Setup and Start.bat`, `npm run autostart`), minimized relay console; sharing model documented — colleagues on their own PCs with their own keys.
 - **Pending** — Grok section verification (xAI endpoint, `grok-4.7`) handed to Grok via `Desktop\Qwen Code\GROK_HANDOFF_20261120_0833.md`.
