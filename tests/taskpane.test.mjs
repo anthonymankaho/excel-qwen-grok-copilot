@@ -33,18 +33,28 @@ function fire(el, type, ev = {}) {
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function makeSandbox({ selection, used, reply, seedKeys }) {
+function makeSandbox({ selection, used, reply, seedKeys, cells }) {
   const els = new Map();
   const defaults = { provider: 'qwen', activeProvider: 'qwen', qwenModel: 'qwen4-max', qwenEndpoint: 'https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions' };
   const get = id => { if (!els.has(id)) { const el = makeElement(id); if (defaults[id]) el.value = defaults[id]; if (id === 'includeContext' || id === 'rememberKey') el.checked = true; els.set(id, el); } return els.get(id); };
   const store = seedKeys ? { 'eqgc.keys.v1': JSON.stringify(seedKeys) } : {};
   const writes = [];
   const calls = [];
+  const cellStore = {};
+  for (const [k, v] of Object.entries(cells || {})) cellStore[k] = { value: v.value ?? '', formula: v.formula ?? '' };
   const range = (obj) => ({ load() {}, isNullObject: false, getCell: () => target('Selection', 'A1'), ...obj });
-  const target = (sheet, cell) => ({
-    set formulas(v) { writes.push({ sheet, cell, kind: 'formula', value: v[0][0] }); },
-    set values(v) { writes.push({ sheet, cell, kind: 'value', value: v[0][0] }); }
-  });
+  const target = (sheet, cell) => {
+    const key = `${sheet}!${cell}`;
+    const cur = () => (cellStore[key] ||= { value: '', formula: '' });
+    return {
+      load() {},
+      get values() { return [[cur().value]]; },
+      get formulas() { return [[cur().formula]]; },
+      set formulas(v) { cur().formula = v[0][0]; cur().value = v[0][0]; writes.push({ sheet, cell, kind: 'formula', value: v[0][0] }); },
+      set values(v) { cur().value = v[0][0]; cur().formula = ''; writes.push({ sheet, cell, kind: 'value', value: v[0][0] }); },
+      clear() { cur().value = ''; cur().formula = ''; writes.push({ sheet, cell, kind: 'clear' }); }
+    };
+  };
   const sandbox = {
     console, JSON, Math, String, Array, Object, Promise, RegExp, TextEncoder, TextDecoder,
     setTimeout: () => 0, clearTimeout: () => {},
@@ -232,4 +242,41 @@ test('Fast toggle is sent to the relay as fast flag', async () => {
   sb.els('fastMode').checked = true;
   await ask(sb, 'quicker');
   assert.equal(chatCalls(sb).at(-1).body.fast, true);
+});
+
+test('edit card shows old → new; Apply then Undo restores originals', async () => {
+  const reply = { text: 'Fix.\n```json\n{"edits":[{"sheet":"Sheet1","cell":"D5","value":"=SUM(A1:A4)"},{"sheet":"Sheet1","cell":"B2","value":42}]}\n```', model: 'm' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, cells: { 'Sheet1!D5': { value: 123 }, 'Sheet1!B2': { value: 2 } } });
+  await boot(sb); await ask(sb, 'fix');
+  const card = sb.els('conversation').children.find(c => String(c.className).includes('edits-card'));
+  const rows = card.children.filter(c => c.className === 'edit-row');
+  assert.match(rows[0].textContent, /123 → =SUM\(A1:A4\)/);
+  assert.match(rows[1].textContent, /2 → 42/);
+  const actions = card.children.find(c => c.children.length === 2);
+  await fire(actions.children[0], 'click'); await flush(); await flush();
+  assert.deepEqual(sb.writes.slice(-2), [
+    { sheet: 'Sheet1', cell: 'D5', kind: 'formula', value: '=SUM(A1:A4)' },
+    { sheet: 'Sheet1', cell: 'B2', kind: 'value', value: 42 }
+  ]);
+  const undoBtn = actions.children[2];
+  assert.ok(undoBtn, 'undo button appears after apply');
+  await fire(undoBtn, 'click'); await flush(); await flush();
+  assert.deepEqual(sb.writes.slice(-2), [
+    { sheet: 'Sheet1', cell: 'D5', kind: 'value', value: 123 },
+    { sheet: 'Sheet1', cell: 'B2', kind: 'value', value: 2 }
+  ]);
+  assert.match(card.children[0].textContent, /UNDONE — RESTORED 2 CELLS/);
+});
+
+test('undo of an originally empty cell clears it', async () => {
+  const reply = { text: 'x\n```json\n{"edits":[{"sheet":"Sheet1","cell":"A1","value":7}]}\n```', model: 'm' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+  await boot(sb); await ask(sb, 'set A1');
+  const card = sb.els('conversation').children.find(c => String(c.className).includes('edits-card'));
+  const rows = card.children.filter(c => c.className === 'edit-row');
+  assert.match(rows[0].textContent, /\(empty\) → 7/);
+  const actions = card.children.find(c => c.children.length === 2);
+  await fire(actions.children[0], 'click'); await flush(); await flush();
+  await fire(actions.children[2], 'click'); await flush(); await flush();
+  assert.deepEqual(sb.writes.slice(-1), [{ sheet: 'Sheet1', cell: 'A1', kind: 'clear' }]);
 });

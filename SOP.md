@@ -28,9 +28,9 @@ The former second clone `Desktop\excel-qwen-grok-copilot` (identical commit `18c
 
 ## 3. Approving cell edits
 
-1. Read every row of the **PROPOSED EDITS** card (`sheet!cell ← value`) against the workbook.
+1. Read every row of the **PROPOSED EDITS** card (`sheet!cell: old → new`) against the workbook; `(empty)` means the cell is currently blank.
 2. Click **Apply edits** only when correct; **Dismiss** otherwise. Nothing is written without the click.
-3. After Apply, spot-check the cells in the sheet; Excel Undo (`Ctrl+Z`) reverses a bad apply.
+3. After Apply, spot-check the cells; **Undo last apply** on the card restores the pre-apply values (empty cells cleared), or Excel `Ctrl+Z`.
 4. **↳ Insert last answer into selection** writes prose into the top-left selected cell — also click-gated.
 
 ## 4. Stop
@@ -40,7 +40,7 @@ The former second clone `Desktop\excel-qwen-grok-copilot` (identical commit `18c
 
 ## 5. After any code change (agent or owner)
 
-1. In the working repo: `npm run check && npm test` (11/11 required).
+1. In the working repo: `npm run check && npm test` (15/15 required).
 2. One live question through the relay before relying on the change; for edit features confirm the proposal card and click-gating.
 3. Commit locally. **Only Anthony pushes** (`git push origin main`).
 4. On this PC the working repo is the runtime copy: close the minimized relay window, run `Start Local Relay.bat`, reopen the pane. On other computers: `git pull` first, then restart relay and reopen pane.

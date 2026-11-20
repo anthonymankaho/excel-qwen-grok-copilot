@@ -131,31 +131,67 @@ function parseEdits(text) {
   return { prose: text, edits: null };
 }
 
-function renderEditsCard(edits) {
+async function renderEditsCard(edits) {
   const conversation = $('conversation');
   const card = document.createElement('div'); card.className = 'message assistant edits-card';
-  const label = document.createElement('div'); label.className = 'message-label'; label.textContent = `PROPOSED EDITS · ${edits.length} · APPLY ONLY WITH YOUR CLICK`;
+  const label = document.createElement('div'); label.className = 'message-label'; label.textContent = `PROPOSED EDITS · ${edits.length} · REVIEW OLD → NEW · APPLY ONLY WITH YOUR CLICK`;
   card.append(label);
-  for (const edit of edits.slice(0, 200)) {
+  let olds = null;
+  try {
+    olds = await Excel.run(async context => {
+      const ranges = edits.map(e => context.workbook.worksheets.getItem(e.sheet).getRange(e.cell));
+      ranges.forEach(r => r.load(['values', 'formulas']));
+      await context.sync();
+      return ranges.map(r => ({ value: r.values?.[0]?.[0], formula: r.formulas?.[0]?.[0] }));
+    });
+  } catch { olds = null; }
+  edits.forEach((edit, i) => {
     const row = document.createElement('div'); row.className = 'edit-row';
-    row.textContent = `${edit.sheet}!${edit.cell} ← ${String(edit.value)}`;
+    const old = olds?.[i];
+    const oldText = !old ? '(current unreadable)'
+      : String(old.formula || '').startsWith('=') ? old.formula
+      : (old.value === '' || old.value == null ? '(empty)' : String(old.value));
+    row.textContent = `${edit.sheet}!${edit.cell}: ${oldText} → ${String(edit.value)}`;
     card.append(row);
-  }
+  });
   const actions = document.createElement('div'); actions.className = 'button-row';
   const apply = document.createElement('button'); apply.className = 'primary'; apply.textContent = 'Apply edits';
   const dismiss = document.createElement('button'); dismiss.className = 'secondary'; dismiss.textContent = 'Dismiss';
   apply.addEventListener('click', async () => {
     apply.disabled = true; dismiss.disabled = true;
     try {
-      await Excel.run(async context => {
-        for (const edit of edits) {
-          const range = context.workbook.worksheets.getItem(edit.sheet).getRange(edit.cell);
-          if (typeof edit.value === 'string' && edit.value.startsWith('=')) range.formulas = [[edit.value]];
-          else range.values = [[edit.value]];
-        }
+      const recs = await Excel.run(async context => {
+        const ranges = edits.map(e => context.workbook.worksheets.getItem(e.sheet).getRange(e.cell));
+        ranges.forEach(r => r.load(['values', 'formulas']));
         await context.sync();
+        const before = ranges.map((r, i) => ({ sheet: edits[i].sheet, cell: edits[i].cell, value: r.values?.[0]?.[0], formula: r.formulas?.[0]?.[0] }));
+        ranges.forEach((r, i) => {
+          const v = edits[i].value;
+          if (typeof v === 'string' && v.startsWith('=')) r.formulas = [[v]];
+          else r.values = [[v]];
+        });
+        await context.sync();
+        return before;
       });
       label.textContent = `APPLIED ${edits.length} EDITS`;
+      const undoBtn = document.createElement('button'); undoBtn.className = 'secondary'; undoBtn.textContent = 'Undo last apply';
+      undoBtn.addEventListener('click', async () => {
+        undoBtn.disabled = true;
+        try {
+          await Excel.run(async context => {
+            for (const rec of recs) {
+              const r = context.workbook.worksheets.getItem(rec.sheet).getRange(rec.cell);
+              if (String(rec.formula || '').startsWith('=')) r.formulas = [[rec.formula]];
+              else if (rec.value === '' || rec.value == null) r.clear();
+              else r.values = [[rec.value]];
+            }
+            await context.sync();
+          });
+          label.textContent = `UNDONE — RESTORED ${recs.length} CELLS`;
+          toast('Restored previous cell values.');
+        } catch (error) { undoBtn.disabled = false; toast(`Could not undo: ${error.message}`); }
+      });
+      actions.append(undoBtn);
       toast(`Applied ${edits.length} edits to the workbook.`);
     } catch (error) {
       apply.disabled = false; dismiss.disabled = false;
@@ -230,7 +266,7 @@ async function sendPrompt(prompt) {
     state.messages.push({ role: 'assistant', content: result.text });
     state.lastAnswer = prose; $('insertAnswer').disabled = !prose; $('lastAnswerState').textContent = result.model ? `via ${result.model}` : '';
     result.bubble.children[result.bubble.children.length - 1].textContent = prose;
-    if (edits) renderEditsCard(edits);
+    if (edits) await renderEditsCard(edits);
     refreshContextCard();
   } catch (error) {
     if (error.bubble) error.bubble.children[error.bubble.children.length - 1].textContent = `Error: ${error.message}`;

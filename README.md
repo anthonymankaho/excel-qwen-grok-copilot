@@ -16,7 +16,7 @@ A local Microsoft Excel task pane inspired by Copilot and Claude for Microsoft 3
 1. **Workbook context (automatic).** The `WORKBOOK CONTEXT · AUTO` card shows what the next question will send: your multi-cell selection, or the active sheet's used range when the selection is a single cell. Formulas are included as `value [=formula]`. **↻ Refresh** re-reads it; untick **Send context** to ask without workbook data; **＋ Whole sheet** forces the full active sheet for the next question only.
 2. **Ask.** Type in the composer and press Enter (Shift+Enter = new line), or use the quick actions **Summarize**, **Explain**, **Write formula** (finish the prompted sentence, then send). Replies stream in token by token; the bubble shows **Thinking…** until the first text arrives (measured ~1.6–1.9 s for small questions; longer while a large sheet is analyzed). Tick **Fast** next to the provider pill to skip deep thinking (Qwen only) for quicker, shallower replies.
 3. **Answers.** Replies appear in the conversation with a `via <model>` tag. **↳ Insert last answer into selection** writes the answer text into the top-left cell of the current selection.
-4. **Cell edits (approval-gated).** When you ask for changes, the model replies with a **PROPOSED EDITS** card listing `sheet!cell ← value` rows. Review them, then click **Apply edits** to write (formulas as formulas, other values as values) or **Dismiss** to discard. Nothing is written without your click; Excel's own Undo still works afterwards.
+4. **Cell edits (approval-gated, with diff and undo).** When you ask for changes, the model replies with a **PROPOSED EDITS** card listing `sheet!cell: old → new` rows (old = the cell's current formula or value, `(empty)` if blank). Review them, then click **Apply edits** to write (formulas as formulas, other values as values) or **Dismiss** to discard. Nothing is written without your click. After Apply, an **Undo last apply** button on the card restores the pre-apply values (originally empty cells are cleared); Excel's own Undo also works.
 5. **Provider.** The pill at the composer footer switches Qwen/Grok; each provider needs its own key loaded in Settings.
 6. **History.** Conversation lives in memory only — reloading the pane clears it. At most 24 messages are sent per request.
 
@@ -41,7 +41,7 @@ API keys are posted to the loopback relay and held in process memory; stopping t
 ## Tests
 
 - `npm run check` — syntax check of `server.mjs` and `public/taskpane.js`.
-- `npm test` — offline suite `tests/taskpane.test.mjs` (`node --test`, zero dependencies, stub DOM + Office.js + SSE): auto-context rules, Send-context opt-out, Whole-sheet override, truncation cap, apply-only-on-click, Dismiss, invalid edit payloads, oversize-prompt guard, remembered-key auto-load and persistence, history context dedup, Fast flag. 13 tests.
+- `npm test` — offline suite `tests/taskpane.test.mjs` (`node --test`, zero dependencies, stub DOM + Office.js + SSE): auto-context rules, Send-context opt-out, Whole-sheet override, truncation cap, apply-only-on-click, Dismiss, invalid edit payloads, oversize-prompt guard, remembered-key auto-load and persistence, history context dedup, Fast flag, edit old→new diff, Undo restore (incl. empty-cell clear). 15 tests.
 - Live check (manual): start the relay, load a key in Settings, ask one question and confirm a real answer; for edit proposals confirm the **PROPOSED EDITS** card appears and nothing is written before **Apply edits**.
 
 ## Troubleshooting
@@ -68,4 +68,6 @@ This is a starter app, not Microsoft's Copilot product. It includes chat, automa
 - **2026-11-20** — Zero-touch redesign (Claude-style): remembered keys with one-time entry, per-user logon auto-start (`Setup and Start.bat`, `npm run autostart`), minimized relay console; sharing model documented — colleagues on their own PCs with their own keys.
 - **2026-11-20** — Relay made invisible and self-healing: hidden process (no console to close accidentally) + per-minute `ExcelQwenGrokRelayEnsure` task; kill-and-respawn verified live; `npm run relay-stop` / `relay-ensure` added.
 - **2026-11-20** — Latency review + fixes: SSE streaming through the relay (`/api/chat-stream`, normalized deltas for both providers, Thinking… indicator), history context dedup, **Fast** toggle (`enable_thinking:false`, gateway-verified). Measured: first text ~1.6–1.9 s small / ~6.4 s with 10k-char context (thinking), then incremental.
+- **2026-11-20** — Real-DOM crash fix (`HTMLCollection` has no `.at()`), pushed to origin on owner's order (`2db66a4`).
+- **2026-11-20** — Edit safety: PROPOSED EDITS shows old → new per cell; **Undo last apply** restores pre-apply values (empty cells cleared). 15/15 tests.
 - **Pending** — Grok section verification (xAI endpoint, `grok-4.7`) handed to Grok via `Desktop\Qwen Code\GROK_HANDOFF_20261120_0833.md`.
