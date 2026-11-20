@@ -44,7 +44,7 @@ function makeSandbox({ selection, used, reply, seedKeys }) {
     set values(v) { writes.push({ sheet, cell, kind: 'value', value: v[0][0] }); }
   });
   const sandbox = {
-    console, JSON, Math, String, Array, Object, Promise, RegExp,
+    console, JSON, Math, String, Array, Object, Promise, RegExp, TextEncoder, TextDecoder,
     setTimeout: () => 0, clearTimeout: () => {},
     localStorage: {
       getItem: k => (k in store ? store[k] : null),
@@ -68,7 +68,16 @@ function makeSandbox({ selection, used, reply, seedKeys }) {
     fetch: async (url, opts) => {
       const body = opts?.body ? JSON.parse(opts.body) : null;
       calls.push({ url, body });
-      const data = url.endsWith('/api/health') ? { ok: true, configured: { qwen: true, grok: false } } : (reply || { text: 'mock answer', model: 'test-model' });
+      if (url.endsWith('/api/health')) return { ok: true, status: 200, json: async () => ({ ok: true, configured: { qwen: true, grok: false } }) };
+      const data = reply || { text: 'mock answer', model: 'test-model' };
+      if (url.endsWith('/api/chat-stream')) {
+        const frames = `data: ${JSON.stringify({ model: data.model || 'test-model', choices: [{ delta: { content: data.text } }] })}\n\ndata: [DONE]\n\n`;
+        let sent = false;
+        return {
+          ok: true, status: 200,
+          body: { getReader: () => ({ read: async () => sent ? { done: true } : (sent = true, { done: false, value: new TextEncoder().encode(frames) }) }) }
+        };
+      }
       return { ok: true, status: 200, json: async () => data };
     }
   };
@@ -81,7 +90,7 @@ function makeSandbox({ selection, used, reply, seedKeys }) {
 const singleEmpty = { address: "'Sheet1'!A1", text: [['']], formulas: [['']], rowCount: 1, columnCount: 1 };
 const usedSmall = { address: "'Sheet1'!A1:B2", text: [['1', '2'], ['3', '4']], formulas: [['=1+0', '=A1*2'], ['=3', '=4']] };
 const selMulti = { address: "'Sheet1'!A1:B2", text: [['1', '2'], ['3', '4']], formulas: [['=1+0', '=A1*2'], ['=3', '=4']], rowCount: 2, columnCount: 2 };
-const chatCalls = sb => sb.calls.filter(c => c.url.endsWith('/api/chat'));
+const chatCalls = sb => sb.calls.filter(c => c.url.endsWith('/api/chat-stream') || c.url.endsWith('/api/chat'));
 const lastContent = sb => chatCalls(sb).at(-1).body.messages.at(-1).content;
 async function boot(sb) { sb.officeCb({ host: 'Excel' }); await flush(); await flush(); }
 async function ask(sb, text) { sb.els('prompt').value = text; await fire(sb.els('composer'), 'submit'); await flush(); await flush(); }
@@ -199,4 +208,26 @@ test('Use key persists only while Remember is ticked; Clear key removes storage'
   await fire(sb.els('clearKey'), 'click'); await flush();
   assert.deepEqual(JSON.parse(sb.store['eqgc.keys.v1'] || '{}'), {});
   assert.ok(sb.calls.some(c => c.url.endsWith('/api/clear-key')));
+});
+
+test('history context dedup: only the latest user message carries the Excel block', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall });
+  await boot(sb);
+  await ask(sb, 'first');
+  await ask(sb, 'second');
+  const msgs = chatCalls(sb).at(-1).body.messages;
+  const users = msgs.filter(m => m.role === 'user');
+  assert.equal(users.length, 2);
+  assert.ok(!users[0].content.includes('[Excel'), 'older context stripped');
+  assert.match(users[1].content, /\[Excel used range/);
+});
+
+test('Fast toggle is sent to the relay as fast flag', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall });
+  await boot(sb);
+  await ask(sb, 'quick');
+  assert.equal(chatCalls(sb).at(-1).body.fast, false);
+  sb.els('fastMode').checked = true;
+  await ask(sb, 'quicker');
+  assert.equal(chatCalls(sb).at(-1).body.fast, true);
 });

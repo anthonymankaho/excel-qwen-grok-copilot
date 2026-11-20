@@ -167,6 +167,52 @@ function renderEditsCard(edits) {
   conversation.append(card); conversation.scrollTop = conversation.scrollHeight;
 }
 
+function dedupContext(messages) {
+  // Older turns keep their prose only; re-sending every past 45k context block would multiply input tokens each turn.
+  return messages.map((m, i) => (m.role === 'user' && i < messages.length - 1)
+    ? { ...m, content: m.content.replace(/\n\n\[Excel (?:selection|used range) [^\]]*\]\n[\s\S]*$/, '') }
+    : m);
+}
+
+async function streamChat(payload) {
+  const response = await fetch(`${API}/api/chat-stream`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || `Request failed (${response.status})`);
+  }
+  const bubble = renderMessage('assistant', '');
+  const bodyEl = bubble.children.at(-1);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '', text = '', model = '';
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const frame = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        for (const line of frame.split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          const raw = line.slice(6);
+          if (raw === '[DONE]') continue;
+          let j; try { j = JSON.parse(raw); } catch { continue; }
+          if (j.error) throw new Error(j.error);
+          if (j.model) model = j.model;
+          if (j.status === 'thinking' && !text) { bodyEl.textContent = 'Thinking…'; continue; }
+          const delta = j.choices?.[0]?.delta?.content;
+          if (delta) {
+            text += delta; bodyEl.textContent = text;
+            $('conversation').scrollTop = $('conversation').scrollHeight;
+          }
+        }
+      }
+    }
+  } catch (error) { error.bubble = bubble; throw error; }
+  return { text, model, bubble };
+}
+
 async function sendPrompt(prompt) {
   const clean = prompt.trim(); if (!clean || state.busy) return;
   await ensureKeys();
@@ -179,14 +225,18 @@ async function sendPrompt(prompt) {
   state.messages.push({ role: 'user', content }); renderMessage('user', clean + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
   state.busy = true; $('send').disabled = true; $('send').textContent = '…';
   try {
-    const result = await api('chat', { provider, model: provider === 'qwen' ? $('qwenModel').value.trim() : $('grokModel').value.trim(), endpoint: $('qwenEndpoint').value.trim(), messages: state.messages.slice(-24) });
+    const result = await streamChat({ provider, model: provider === 'qwen' ? $('qwenModel').value.trim() : $('grokModel').value.trim(), endpoint: $('qwenEndpoint').value.trim(), messages: dedupContext(state.messages.slice(-24)), fast: $('fastMode').checked });
     const { prose, edits } = parseEdits(result.text);
     state.messages.push({ role: 'assistant', content: result.text });
     state.lastAnswer = prose; $('insertAnswer').disabled = !prose; $('lastAnswerState').textContent = result.model ? `via ${result.model}` : '';
-    renderMessage('assistant', prose);
+    result.bubble.children.at(-1).textContent = prose;
     if (edits) renderEditsCard(edits);
     refreshContextCard();
-  } catch (error) { renderMessage('assistant', `Error: ${error.message}`); toast(error.message); }
+  } catch (error) {
+    if (error.bubble) error.bubble.children.at(-1).textContent = `Error: ${error.message}`;
+    else renderMessage('assistant', `Error: ${error.message}`);
+    toast(error.message);
+  }
   finally { state.busy = false; $('send').disabled = false; $('send').textContent = '↑'; }
 }
 

@@ -23,6 +23,8 @@ The former second clone `Desktop\excel-qwen-grok-copilot` (identical commit `18c
 - **＋ Whole sheet** = force the full active sheet for the next question only.
 - Truncation note in the hint = sheet over 45,000 chars; select a smaller range for full detail.
 - Enter sends; Shift+Enter new line; quick actions **Summarize / Explain / Write formula**.
+- Replies stream (Thinking… until first text). **Fast** tick = skip deep thinking (Qwen only) for quicker, shallower answers; leave unticked for formula audits.
+- Only the latest question carries workbook context; older turns keep prose only (token/latency control).
 
 ## 3. Approving cell edits
 

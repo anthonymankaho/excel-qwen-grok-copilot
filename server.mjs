@@ -36,6 +36,25 @@ function extractGrokText(data) {
   return '';
 }
 
+function prepareChat(body) {
+  const { provider, model, endpoint, messages } = body;
+  if (!['qwen', 'grok'].includes(provider)) return { status: 400, error: 'Choose Qwen or Grok.' };
+  if (!secrets[provider]) return { status: 401, error: `Add your ${provider === 'qwen' ? 'Qwen' : 'Grok'} API key in Settings first.` };
+  if (!Array.isArray(messages) || messages.length < 1 || messages.length > 24) return { status: 400, error: 'Conversation must contain 1 to 24 messages.' };
+  if (messages.some(m => !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 50_000)) return { status: 400, error: 'Invalid conversation message.' };
+  let url, payload;
+  if (provider === 'qwen') {
+    url = new URL(endpoint);
+    if (url.protocol !== 'https:' || url.username || url.password) return { status: 400, error: 'Qwen endpoint must be an HTTPS URL.' };
+    payload = { model: model || 'qwen4-max', messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages], stream: false };
+    if (body.fast) payload.enable_thinking = false;
+  } else {
+    url = new URL('https://api.x.ai/v1/responses');
+    payload = { model: model || 'grok-4.7', instructions: SYSTEM_PROMPT, input: messages.map(({ role, content }) => ({ role, content })), store: false };
+  }
+  return { provider, model, url, payload };
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${host}:${port}`);
   if (req.method === 'GET' && url.pathname === '/api/health') return send(res, 200, { ok: true, configured: { qwen: Boolean(secrets.qwen), grok: Boolean(secrets.grok) } });
@@ -57,22 +76,10 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && url.pathname === '/api/chat') {
     try {
       const body = await readBody(req);
-      const { provider, model, endpoint, messages } = body;
-      if (!['qwen', 'grok'].includes(provider)) return send(res, 400, { error: 'Choose Qwen or Grok.' });
-      if (!secrets[provider]) return send(res, 401, { error: `Add your ${provider === 'qwen' ? 'Qwen' : 'Grok'} API key in Settings first.` });
-      if (!Array.isArray(messages) || messages.length < 1 || messages.length > 24) return send(res, 400, { error: 'Conversation must contain 1 to 24 messages.' });
-      if (messages.some(m => !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 50_000)) return send(res, 400, { error: 'Invalid conversation message.' });
-
-      let url, payload;
-      if (provider === 'qwen') {
-        url = new URL(endpoint);
-        if (url.protocol !== 'https:' || url.username || url.password) return send(res, 400, { error: 'Qwen endpoint must be an HTTPS URL.' });
-        payload = { model: model || 'qwen4-max', messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages], stream: false };
-      } else {
-        url = new URL('https://api.x.ai/v1/responses');
-        payload = { model: model || 'grok-4.7', instructions: SYSTEM_PROMPT, input: messages.map(({ role, content }) => ({ role, content })), store: false };
-      }
-      const response = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${secrets[provider]}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(90_000) });
+      const prep = prepareChat(body);
+      if (prep.error) return send(res, prep.status, { error: prep.error });
+      const { provider, model, url: target, payload } = prep;
+      const response = await fetch(target, { method: 'POST', headers: { Authorization: `Bearer ${secrets[provider]}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(90_000) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) return send(res, response.status, { error: data?.error?.message || data?.message || `Provider returned HTTP ${response.status}.` });
       const text = provider === 'qwen' ? data?.choices?.[0]?.message?.content : extractGrokText(data);
@@ -81,6 +88,61 @@ const server = http.createServer(async (req, res) => {
     } catch (error) {
       const message = error.name === 'TimeoutError' ? 'Provider request timed out.' : error.message;
       return send(res, 502, { error: message });
+    }
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/chat-stream') {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 120_000);
+    // res 'close' = client gone mid-stream; req 'close' fires as soon as the body is consumed and would abort every call.
+    res.on('close', () => { clearTimeout(timer); ac.abort(); });
+    try {
+      const body = await readBody(req);
+      const prep = prepareChat(body);
+      if (prep.error) { clearTimeout(timer); return send(res, prep.status, { error: prep.error }); }
+      const { provider, url: target, payload } = prep;
+      payload.stream = true;
+      const response = await fetch(target, { method: 'POST', headers: { Authorization: `Bearer ${secrets[provider]}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ac.signal });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        clearTimeout(timer);
+        return send(res, response.status, { error: data?.error?.message || data?.message || `Provider returned HTTP ${response.status}.` });
+      }
+      res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'Connection': 'keep-alive' });
+      res.write(`data: ${JSON.stringify({ status: 'thinking' })}\n\n`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      const emit = content => res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`);
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, idx).trim(); buf = buf.slice(idx + 1);
+          if (!line.startsWith('data:')) continue;
+          const raw = line.slice(5).trim();
+          if (!raw || raw === '[DONE]') continue;
+          let j; try { j = JSON.parse(raw); } catch { continue; }
+          if (provider === 'qwen') {
+            const delta = j.choices?.[0]?.delta?.content;
+            if (delta) emit(delta);
+          } else if (j.type === 'response.output_text.delta' && typeof j.delta === 'string') {
+            emit(j.delta);
+          }
+        }
+      }
+      res.write('data: [DONE]\n\n');
+      clearTimeout(timer);
+      return res.end();
+    } catch (error) {
+      clearTimeout(timer);
+      if (res.headersSent) {
+        res.write(`event: error\ndata: ${JSON.stringify({ error: error.name === 'AbortError' ? 'Provider request timed out or pane closed.' : error.message })}\n\n`);
+        return res.end();
+      }
+      return send(res, 502, { error: error.name === 'AbortError' ? 'Provider request timed out.' : error.message });
     }
   }
 
