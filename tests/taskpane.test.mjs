@@ -24,6 +24,8 @@ function makeElement(id) {
     remove() { if (this.parent) this.parent.children = this.parent.children.filter(c => c !== this); this.parent = null; },
     focus() {}, requestSubmit() { return fire(el, 'submit'); }
   };
+  // Real DOM children is an HTMLCollection without .at(); keep it undefined so regressions fail here.
+  Object.defineProperty(el.children, 'at', { value: undefined });
   return el;
 }
 function fire(el, type, ev = {}) {
@@ -172,7 +174,7 @@ test('invalid edits payload is ignored and prose kept intact', async () => {
   assert.equal(sb.els('conversation').children.some(c => String(c.className).includes('edits-card')), false);
   const bubble = sb.els('conversation').children.find(c => String(c.className).includes('assistant') && c.children.some(b => String(b.textContent).includes('Hello')));
   assert.ok(bubble, 'assistant prose rendered');
-  assert.match(bubble.children.at(-1).textContent, /```json/);
+  assert.match(bubble.children[bubble.children.length - 1].textContent, /```json/);
 });
 
 test('oversize prompt is blocked before any provider call', async () => {

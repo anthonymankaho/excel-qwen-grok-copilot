@@ -181,7 +181,7 @@ async function streamChat(payload) {
     throw new Error(data.error || `Request failed (${response.status})`);
   }
   const bubble = renderMessage('assistant', '');
-  const bodyEl = bubble.children.at(-1);
+  const bodyEl = bubble.children[bubble.children.length - 1]; // HTMLCollection has no .at()
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buf = '', text = '', model = '';
@@ -229,11 +229,11 @@ async function sendPrompt(prompt) {
     const { prose, edits } = parseEdits(result.text);
     state.messages.push({ role: 'assistant', content: result.text });
     state.lastAnswer = prose; $('insertAnswer').disabled = !prose; $('lastAnswerState').textContent = result.model ? `via ${result.model}` : '';
-    result.bubble.children.at(-1).textContent = prose;
+    result.bubble.children[result.bubble.children.length - 1].textContent = prose;
     if (edits) renderEditsCard(edits);
     refreshContextCard();
   } catch (error) {
-    if (error.bubble) error.bubble.children.at(-1).textContent = `Error: ${error.message}`;
+    if (error.bubble) error.bubble.children[error.bubble.children.length - 1].textContent = `Error: ${error.message}`;
     else renderMessage('assistant', `Error: ${error.message}`);
     toast(error.message);
   }
