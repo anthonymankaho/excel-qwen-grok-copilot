@@ -30,7 +30,7 @@ The former second clone `Desktop\excel-qwen-grok-copilot` (identical commit `18c
 ## 3. Approving cell edits
 
 1. Read every row of the **PROPOSED EDITS** card (`sheet!cell: old → new`) against the workbook; `(empty)` means the cell is currently blank, `(sheet missing)` means that sheet is not in the workbook (Apply is refused and nothing is written).
-2. An amber note means a formula can reach the network or run a legacy call (WEBSERVICE, FILTERXML, RTD, HYPERLINK, and similar). Click **Apply edits** only when the rows are correct; **Dismiss** otherwise. Nothing is written without the click.
+2. **Direct** (on by default) writes safe revisions immediately: ranges, formatting, rows, columns, sheets, sort, chart, table, and in Word the selection text and style. **Undo last apply** is on the card. An amber note means a formula can reach the network or run a legacy call (WEBSERVICE, FILTERXML, RTD, HYPERLINK, and similar); those wait for **Apply risky changes**. Turn **Direct** off to hold every change for a click.
 3. After Apply, spot-check the cells; **Undo last apply** on the card restores the pre-apply values (empty cells cleared), or Excel `Ctrl+Z`.
 4. **↳ Insert last answer into selection** writes into the top-left selected cell — also click-gated. A one-line answer that starts with `=` is written as a formula; anything longer is written as text.
 

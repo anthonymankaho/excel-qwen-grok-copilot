@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta http-equiv="X-UA-Compatible" content="IE=Edge">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Qwen + Grok for Excel</title>
+  <title>Qwen + Grok for Excel and Word</title>
   <link rel="stylesheet" href="taskpane.css">
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
   <script defer src="taskpane.js"></script>
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><div class="brand-icon">✦</div><div><strong>Excel Assistant</strong><small>Powered by Qwen or Grok</small></div></div>
+    <div class="brand"><div class="brand-icon">✦</div><div><strong>Office Assistant</strong><small id="brandHost">Excel and Word</small></div></div>
     <button id="settingsToggle" class="icon-button" title="Settings" aria-label="Settings">⚙</button>
   </header>
   <main>
@@ -33,7 +33,7 @@
     </section>
 
     <section class="context-card card">
-      <div class="context-top"><span class="eyebrow">WORKBOOK CONTEXT · AUTO</span><button id="refreshSelection" class="text-button">↻ Refresh</button></div>
+      <div class="context-top"><span id="contextEyebrow" class="eyebrow">WORKBOOK CONTEXT · AUTO</span><button id="refreshSelection" class="text-button">↻ Refresh</button></div>
       <div id="selectionName" class="selection-name">Open Excel to read context</div>
       <div id="selectionPreview" class="selection-preview">Your selection (or the active sheet) is sent with each question, formulas included.</div>
       <div class="context-actions"><label class="context-toggle"><input type="checkbox" id="includeContext" checked> Send context</label><button id="addUsedRange" class="chip">＋ Whole sheet</button><span id="contextHint">Nothing sent yet</span></div>
@@ -43,15 +43,16 @@
       <button class="action" data-prompt="Summarize the selected spreadsheet data. Highlight key totals, patterns, and any caveats."><span>▤</span>Summarize</button>
       <button class="action" data-prompt="Explain the selected cells, including formulas and how their values relate."><span>ƒx</span>Explain</button>
       <button class="action" data-prompt="Help me create an Excel formula for this task: "><span>∑</span>Write formula</button>
+      <button class="action" data-prompt="Revise the selection in place. Correct formulas, fill obvious blanks, format the header, and apply the changes."><span>✎</span>Revise</button>
     </section>
 
-    <section id="conversation" class="conversation" aria-live="polite"><div class="welcome"><div class="welcome-icon">✦</div><h1>What can I help with?</h1><p>Ask about your workbook, draft a formula, or analyze the selected cells.</p></div></section>
+    <section id="conversation" class="conversation" aria-live="polite"><div class="welcome"><div class="welcome-icon">✦</div><h1>What should I revise?</h1><p>Ask about the selection, or tell me to change the sheet or the document.</p></div></section>
       <div class="insert-row"><button id="newChat" class="text-button" type="button">New chat</button><button id="insertAnswer" class="text-button" disabled>↳ Insert last answer into selection</button><span id="lastAnswerState"></span></div>
     <form id="composer" class="composer">
-      <textarea id="prompt" rows="2" placeholder="Ask anything about your workbook..." aria-label="Message"></textarea>
-      <div class="composer-footer"><div class="provider-pill"><span id="statusDot" class="status-dot" title="Relay status"></span><select id="activeProvider" aria-label="Active provider"><option value="qwen">Qwen</option><option value="grok">Grok</option></select></div><label class="context-toggle" title="Skip deep thinking for a quicker reply"><input type="checkbox" id="fastMode"> Fast</label><button id="send" class="send-button" type="submit" aria-label="Send message">↑</button></div>
+      <textarea id="prompt" rows="2" placeholder="Ask, or tell me what to change..." aria-label="Message"></textarea>
+      <div class="composer-footer"><div class="provider-pill"><span id="statusDot" class="status-dot" title="Relay status"></span><select id="activeProvider" aria-label="Active provider"><option value="qwen">Qwen</option><option value="grok">Grok</option></select></div><label class="context-toggle" title="Skip deep thinking for a quicker reply"><input type="checkbox" id="fastMode"> Fast</label><label class="context-toggle" title="Write safe changes into Excel or Word immediately. Formulas that call the network still wait for a click."><input type="checkbox" id="directRevise" checked> Direct</label><button id="send" class="send-button" type="submit" aria-label="Send message">↑</button></div>
     </form>
-    <div class="footnote">AI can make mistakes. Review generated formulas and workbook changes.</div>
+    <div class="footnote">Direct revise writes safe changes immediately. Undo is on the card. Risky formulas still wait for a click.</div>
     <div id="toast" role="status" class="toast hidden"></div>
   </main>
 </body>

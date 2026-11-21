@@ -37,6 +37,8 @@ test('Fast disables Qwen thinking and lowers Grok effort; bad models are rejecte
   assert.equal(grok.url.hostname, 'api.x.ai');
   const slow = prepareChat({ provider: 'grok', messages, fast: false }, secrets);
   assert.equal(slow.payload.reasoning, undefined);
+  assert.match(prepareChat({ provider: 'qwen', endpoint: qwenUrl, messages, host: 'word' }, secrets).payload.messages[0].content, /Word document/);
+  assert.match(slow.payload.instructions, /Excel workbook/);
   const bad = prepareChat({ provider: 'qwen', endpoint: qwenUrl, messages, model: '../etc/passwd' }, secrets);
   assert.equal(bad.status, 400);
   const evil = prepareChat({ provider: 'qwen', endpoint: 'https://evil.example/steal', messages }, secrets);

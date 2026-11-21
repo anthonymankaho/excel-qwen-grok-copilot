@@ -10,7 +10,31 @@ const port = Number(process.env.PORT || 3000);
 const BODY_LIMIT = 2_000_000;
 const QWEN_PATH = '/compatible-mode/v1/chat/completions';
 const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/;
-const SYSTEM_PROMPT = 'You are an assistant inside Microsoft Excel. Be accurate, concise, and clear. When analyzing spreadsheet data, state assumptions and distinguish values from formulas. The user message may include an [Excel selection ...] or [Excel used range ...] block: tab-separated rows where formulas appear as value [=formula]. When the user asks to change, fix, or create cell content, reply with your explanation plus one fenced ```json block containing {"edits":[{"sheet":"<sheet name>","cell":"<A1 address>","value":"<number, text, or =formula>"}]} (at most 200 edits). Use a plain A1 cell such as D5, not a range. You cannot change cells yourself; edits apply only after the user clicks Apply in the pane, so never claim a change is already done. Do not propose formulas that call the network or external data (WEBSERVICE, FILTERXML, RTD) unless the user explicitly asks for that.';
+const SYSTEM_PROMPT = `You are an assistant inside Microsoft Office, revising the open Excel workbook or Word document the way Copilot and Claude for Excel do. Be accurate and concise. Distinguish values from formulas. The user message may include an [Excel selection ...], [Excel used range ...], [Word selection], or [Word document] block.
+
+When the user asks to change the file, reply with a short explanation plus one fenced json block. Do not claim the change is already saved; the pane applies the actions. Prefer {"actions":[...]} with at most 40 actions. A legacy {"edits":[{"sheet":"Sheet1","cell":"D5","value":"=SUM(A1:A4)"}]} block is still accepted for single cells.
+
+Excel actions:
+- {"op":"set","sheet":"Sheet1","range":"A1:B2","values":[["Name","Total"],["Ada",100]]} — a formula is a string that starts with =. A single cell may use "value" instead of "values".
+- {"op":"format","sheet":"Sheet1","range":"A1:B1","bold":true,"italic":false,"fill":"#1F4E79","fontColor":"#FFFFFF","numberFormat":"#,##0","align":"center","wrap":true}
+- {"op":"clear","sheet":"Sheet1","range":"C2:C20"}
+- {"op":"insertRows","sheet":"Sheet1","row":5,"count":1}
+- {"op":"insertColumns","sheet":"Sheet1","column":"C","count":1}
+- {"op":"deleteRows","sheet":"Sheet1","row":5,"count":1}
+- {"op":"addSheet","name":"Summary"}
+- {"op":"renameSheet","sheet":"Sheet1","name":"Data"}
+- {"op":"autofit","sheet":"Sheet1","range":"A:D"}
+- {"op":"sort","sheet":"Sheet1","range":"A1:B20","column":"B","ascending":false,"hasHeaders":true}
+- {"op":"chart","sheet":"Sheet1","range":"A1:B20","type":"column","title":"Sales"} — type is column, bar, line, or pie
+- {"op":"table","sheet":"Sheet1","range":"A1:B20","name":"SalesTable"}
+
+Word actions:
+- {"op":"replaceSelection","text":"Revised paragraph."}
+- {"op":"insertText","text":"Added at the end.","where":"end"} — where is start or end
+- {"op":"formatSelection","bold":true,"italic":false}
+- {"op":"styleSelection","style":"Heading 1"} — Heading 1, Heading 2, Heading 3, Title, or Normal
+
+Use only actions for the open host. Do not propose WEBSERVICE, FILTERXML, or RTD unless the user explicitly asks. Do not invent a sheet or range you have not seen, except addSheet.`;
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.xml': 'application/xml; charset=utf-8', '.png': 'image/png', '.json': 'application/json; charset=utf-8' };
 
 function send(res, status, data, type = 'application/json; charset=utf-8') {
@@ -101,6 +125,12 @@ export function providerDelta(provider, event) {
   return { content: '', model: '', error: '' };
 }
 
+function hostNote(host) {
+  return host === 'word'
+    ? '\nThe open file is a Word document. Use only Word actions.'
+    : '\nThe open file is an Excel workbook. Use only Excel actions.';
+}
+
 function resolveModel(model, fallback) {
   if (model == null || (typeof model === 'string' && model.trim() === '')) return { model: fallback };
   if (typeof model !== 'string' || !MODEL_RE.test(model.trim())) return { error: 'Invalid model name.' };
@@ -121,13 +151,13 @@ export function prepareChat(body, secrets) {
     if (!url) return { status: 400, error: 'Qwen endpoint must be an HTTPS QwenCloud chat completions URL.' };
     const model = resolveModel(body.model, 'qwen4-max');
     if (model.error) return { status: 400, error: model.error };
-    payload = { model: model.model, messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages], stream: false };
+    payload = { model: model.model, messages: [{ role: 'system', content: SYSTEM_PROMPT + hostNote(body.host) }, ...messages], stream: false };
     if (body.fast) payload.enable_thinking = false;
   } else {
     url = new URL('https://api.x.ai/v1/responses');
     const model = resolveModel(body.model, 'grok-4.7');
     if (model.error) return { status: 400, error: model.error };
-    payload = { model: model.model, instructions: SYSTEM_PROMPT, input: messages.map(({ role, content }) => ({ role, content })), store: false };
+    payload = { model: model.model, instructions: SYSTEM_PROMPT + hostNote(body.host), input: messages.map(({ role, content }) => ({ role, content })), store: false };
     if (body.fast) payload.reasoning = { effort: 'low' };
   }
   return { provider, model: payload.model, url, payload };
