@@ -33,7 +33,7 @@ function fire(el, type, ev = {}) {
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function makeSandbox({ selection, used, reply, seedKeys, cells }) {
+function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets }) {
   const els = new Map();
   const defaults = { provider: 'qwen', activeProvider: 'qwen', qwenModel: 'qwen4-max', qwenEndpoint: 'https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions' };
   const get = id => { if (!els.has(id)) { const el = makeElement(id); if (defaults[id]) el.value = defaults[id]; if (id === 'includeContext' || id === 'rememberKey') el.checked = true; els.set(id, el); } return els.get(id); };
@@ -42,7 +42,25 @@ function makeSandbox({ selection, used, reply, seedKeys, cells }) {
   const calls = [];
   const cellStore = {};
   for (const [k, v] of Object.entries(cells || {})) cellStore[k] = { value: v.value ?? '', formula: v.formula ?? '' };
-  const range = (obj) => ({ load() {}, isNullObject: false, getCell: () => target('Selection', 'A1'), ...obj });
+  const missing = new Set(missingSheets || []);
+  const range = (obj) => ({
+    load() {}, isNullObject: false,
+    getCell() {
+      const cell = target('Selection', 'A1');
+      cell.getResizedRange = (rowDelta, colDelta) => {
+        const rows = rowDelta + 1, cols = colDelta + 1;
+        return range({
+          address: obj.address,
+          text: (obj.text || []).slice(0, rows).map(row => (row || []).slice(0, cols)),
+          formulas: (obj.formulas || []).slice(0, rows).map(row => (row || []).slice(0, cols)),
+          rowCount: rows,
+          columnCount: cols
+        });
+      };
+      return cell;
+    },
+    ...obj
+  });
   const target = (sheet, cell) => {
     const key = `${sheet}!${cell}`;
     const cur = () => (cellStore[key] ||= { value: '', formula: '' });
@@ -56,7 +74,7 @@ function makeSandbox({ selection, used, reply, seedKeys, cells }) {
     };
   };
   const sandbox = {
-    console, JSON, Math, String, Array, Object, Promise, RegExp, TextEncoder, TextDecoder,
+    console, JSON, Math, String, Array, Object, Promise, RegExp, Number, TextEncoder, TextDecoder, AbortController,
     setTimeout: () => 0, clearTimeout: () => {},
     localStorage: {
       getItem: k => (k in store ? store[k] : null),
@@ -71,7 +89,8 @@ function makeSandbox({ selection, used, reply, seedKeys, cells }) {
           getSelectedRange: () => range(selection),
           worksheets: {
             getActiveWorksheet: () => ({ getUsedRangeOrNullObject: () => range(used) }),
-            getItem: sheet => ({ getRange: cell => target(sheet, cell) })
+            getItem: sheet => ({ getRange: cell => target(sheet, cell) }),
+            getItemOrNullObject: sheet => ({ isNullObject: missing.has(sheet), load() {}, getRange: cell => target(sheet, cell) })
           }
         },
         sync: async () => {}
@@ -279,4 +298,87 @@ test('undo of an originally empty cell clears it', async () => {
   await fire(actions.children[0], 'click'); await flush(); await flush();
   await fire(actions.children[2], 'click'); await flush(); await flush();
   assert.deepEqual(sb.writes.slice(-1), [{ sheet: 'Sheet1', cell: 'A1', kind: 'clear' }]);
+});
+
+test('absolute cell refs are normalized and invalid edits are skipped', async () => {
+  const reply = { text: 'Set two.\n```json\n{"edits":[{"sheet":"Sheet1","cell":"$D$5","value":"=A1+1"},{"sheet":"Sheet1","cell":"not-a-cell","value":1}]}\n```', model: 'm' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, cells: { 'Sheet1!D5': { value: 4 } } });
+  await boot(sb); await ask(sb, 'set');
+  const card = sb.els('conversation').children.find(c => String(c.className).includes('edits-card'));
+  const rows = card.children.filter(c => c.className === 'edit-row');
+  assert.equal(rows.length, 1);
+  assert.match(rows[0].textContent, /Sheet1!D5: 4 → =A1\+1/);
+  assert.match(card.children.find(c => c.className === 'edit-note').textContent, /1 edit skipped/);
+  const actions = card.children.find(c => c.className === 'button-row');
+  await fire(actions.children[0], 'click'); await flush(); await flush();
+  assert.deepEqual(sb.writes.slice(-1), [{ sheet: 'Sheet1', cell: 'D5', kind: 'formula', value: '=A1+1' }]);
+});
+
+test('risky formulas stay click-gated and are called out on the card', async () => {
+  const reply = { text: 'Pull.\n```json\n{"edits":[{"sheet":"Sheet1","cell":"A1","value":"=WEBSERVICE(\\"https://example.com\\")"}]}\n```', model: 'm' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+  await boot(sb); await ask(sb, 'pull');
+  const card = sb.els('conversation').children.find(c => String(c.className).includes('edits-card'));
+  assert.match(card.children.find(c => c.className === 'edit-warning').textContent, /WEBSERVICE/);
+  assert.equal(sb.writes.length, 0);
+  const actions = card.children.find(c => c.className === 'button-row');
+  await fire(actions.children[0], 'click'); await flush(); await flush();
+  assert.equal(sb.writes.at(-1).kind, 'formula');
+  assert.match(sb.writes.at(-1).value, /WEBSERVICE/);
+});
+
+test('a missing sheet is shown and nothing is written', async () => {
+  const reply = { text: 'x\n```json\n{"edits":[{"sheet":"Gone","cell":"A1","value":1}]}\n```', model: 'm' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, missingSheets: ['Gone'] });
+  await boot(sb); await ask(sb, 'set');
+  const card = sb.els('conversation').children.find(c => String(c.className).includes('edits-card'));
+  assert.match(card.children.find(c => c.className === 'edit-row').textContent, /sheet missing/);
+  const actions = card.children.find(c => c.className === 'button-row');
+  await fire(actions.children[0], 'click'); await flush(); await flush();
+  assert.equal(sb.writes.length, 0);
+  assert.match(sb.els('toast').textContent, /not in this workbook/);
+});
+
+test('insert writes a single formula as a formula', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: '=SUM(A1:A4)', model: 'm' } });
+  await boot(sb); await ask(sb, 'formula');
+  await fire(sb.els('insertAnswer'), 'click'); await flush();
+  assert.deepEqual(sb.writes.slice(-1), [{ sheet: 'Selection', cell: 'A1', kind: 'formula', value: '=SUM(A1:A4)' }]);
+});
+
+test('oversized sheets are read from the top-left grid only', async () => {
+  const text = Array.from({ length: 200 }, (_, i) => [i === 180 ? 'UNIQUE_TAIL' : 'a', 'b']);
+  const formulas = text.map(() => ['', '']);
+  const sb = makeSandbox({ selection: singleEmpty, used: { address: "'Sheet1'!A1:B200", text, formulas, rowCount: 200, columnCount: 2 } });
+  await boot(sb); await ask(sb, 'review');
+  const content = lastContent(sb);
+  assert.equal(content.includes('UNIQUE_TAIL'), false);
+  assert.match(content, /150 of 200 rows/);
+  assert.match(sb.els('contextHint').textContent, /truncated/);
+});
+
+test('cell tabs and newlines stay inside one context row', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: { address: "'Sheet1'!A1:B1", text: [['a\nb\tc', 'ok']], formulas: [['', '']] } });
+  await boot(sb); await ask(sb, 'review');
+  assert.match(lastContent(sb), /a b c\tok/);
+  assert.equal(lastContent(sb).includes('\nb'), false);
+});
+
+test('an empty provider stream is shown as an error', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: '', model: 'm' } });
+  await boot(sb); await ask(sb, 'hi');
+  const bubble = sb.els('conversation').children.find(c => String(c.className).includes('assistant'));
+  assert.match(bubble.children[bubble.children.length - 1].textContent, /no text answer/);
+  assert.equal(sb.els('insertAnswer').disabled, true);
+});
+
+test('New chat drops previous turns from the next request', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall });
+  await boot(sb);
+  await ask(sb, 'first');
+  await fire(sb.els('newChat'), 'click');
+  await ask(sb, 'second');
+  const msgs = chatCalls(sb).at(-1).body.messages;
+  assert.equal(msgs.length, 1);
+  assert.match(msgs[0].content, /^second/);
 });

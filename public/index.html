@@ -22,7 +22,7 @@
       <div id="qwenFields">
         <label for="qwenEndpoint">Qwen chat completions URL</label>
         <input id="qwenEndpoint" type="url" value="https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions" autocomplete="url">
-        <p class="hint">QwenCloud International Token Plan endpoint. Use your Token Plan key (sk-sp-…); it only works against this endpoint.</p>
+        <p class="hint">QwenCloud International Token Plan endpoint. Use your Token Plan key (sk-sp-…). The relay only calls HTTPS chat-completions URLs on qwencloudapi.com or aliyuncs.com.</p>
       <label for="qwenModel">Model</label><input id="qwenModel" value="qwen4-max" autocomplete="off">
       </div>
       <div id="grokFields" class="hidden"><label for="grokModel">Model</label><input id="grokModel" value="grok-4.7" autocomplete="off"></div>
@@ -46,10 +46,10 @@
     </section>
 
     <section id="conversation" class="conversation" aria-live="polite"><div class="welcome"><div class="welcome-icon">✦</div><h1>What can I help with?</h1><p>Ask about your workbook, draft a formula, or analyze the selected cells.</p></div></section>
-    <div class="insert-row"><button id="insertAnswer" class="text-button" disabled>↳ Insert last answer into selection</button><span id="lastAnswerState"></span></div>
+      <div class="insert-row"><button id="newChat" class="text-button" type="button">New chat</button><button id="insertAnswer" class="text-button" disabled>↳ Insert last answer into selection</button><span id="lastAnswerState"></span></div>
     <form id="composer" class="composer">
       <textarea id="prompt" rows="2" placeholder="Ask anything about your workbook..." aria-label="Message"></textarea>
-      <div class="composer-footer"><div class="provider-pill"><span class="status-dot"></span><select id="activeProvider" aria-label="Active provider"><option value="qwen">Qwen</option><option value="grok">Grok</option></select></div><label class="context-toggle" title="Skip deep thinking for quicker replies (Qwen only)"><input type="checkbox" id="fastMode"> Fast</label><button id="send" class="send-button" type="submit" aria-label="Send message">↑</button></div>
+      <div class="composer-footer"><div class="provider-pill"><span id="statusDot" class="status-dot" title="Relay status"></span><select id="activeProvider" aria-label="Active provider"><option value="qwen">Qwen</option><option value="grok">Grok</option></select></div><label class="context-toggle" title="Skip deep thinking for a quicker reply"><input type="checkbox" id="fastMode"> Fast</label><button id="send" class="send-button" type="submit" aria-label="Send message">↑</button></div>
     </form>
     <div class="footnote">AI can make mistakes. Review generated formulas and workbook changes.</div>
     <div id="toast" role="status" class="toast hidden"></div>

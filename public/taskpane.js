@@ -1,8 +1,13 @@
 const API = '';
 const CONTEXT_CAP = 45_000; // Relay rejects messages over 50,000 chars; leave room for the prompt itself.
+const MAX_CONTEXT_ROWS = 150;
+const MAX_CONTEXT_COLS = 30;
+const CELL_CHAR_LIMIT = 32767;
 const KEY_STORE = 'eqgc.keys.v1';
-const state = { messages: [], lastAnswer: '', busy: false, officeReady: false, forceSheet: false };
+const RISKY_FORMULA = /^=.*\b(?:WEBSERVICE|FILTERXML|RTD|REGISTER\.ID|CALL|DDE|INFO|HYPERLINK)\s*\(/i;
+const state = { messages: [], lastAnswer: '', busy: false, officeReady: false, forceSheet: false, turn: 0 };
 const $ = id => document.getElementById(id);
+let abortChat = null;
 
 function storedKeys() {
   try { return JSON.parse(localStorage.getItem(KEY_STORE) || '{}'); } catch { return {}; }
@@ -37,29 +42,54 @@ function toast(message) {
   clearTimeout(toast.timer); toast.timer = setTimeout(() => el.classList.add('hidden'), 3200);
 }
 
-async function readSelection() {
-  return Excel.run(async context => {
-    const range = context.workbook.getSelectedRange();
-    range.load(['address', 'text', 'formulas', 'rowCount', 'columnCount']);
+function setRelayDot(mode) {
+  const dot = $('statusDot');
+  if (!dot) return;
+  dot.classList.toggle('warn', mode === 'warn');
+  dot.classList.toggle('offline', mode === 'offline');
+}
+
+async function loadLimited(context, range, nullable) {
+  if (nullable) {
+    range.load('isNullObject');
     await context.sync();
-    return { address: range.address, text: range.text, formulas: range.formulas, rowCount: range.rowCount, columnCount: range.columnCount };
-  });
+    if (range.isNullObject) return null;
+  }
+  range.load(['rowCount', 'columnCount', 'address']);
+  await context.sync();
+  if (range.rowCount === 0 || range.columnCount === 0) return null;
+  let view = range;
+  let gridTruncated = false;
+  const fullRows = range.rowCount;
+  const fullCols = range.columnCount;
+  if (Number.isFinite(fullRows) && Number.isFinite(fullCols) && (fullRows > MAX_CONTEXT_ROWS || fullCols > MAX_CONTEXT_COLS)) {
+    const rows = Math.min(fullRows, MAX_CONTEXT_ROWS);
+    const cols = Math.min(fullCols, MAX_CONTEXT_COLS);
+    view = range.getCell(0, 0).getResizedRange(rows - 1, cols - 1);
+    gridTruncated = true;
+  }
+  view.load(['address', 'text', 'formulas', 'rowCount', 'columnCount']);
+  await context.sync();
+  return { address: view.address, text: view.text, formulas: view.formulas, rowCount: view.rowCount ?? fullRows, columnCount: view.columnCount ?? fullCols, gridTruncated, fullRows, fullCols };
+}
+
+async function readSelection() {
+  return Excel.run(async context => loadLimited(context, context.workbook.getSelectedRange(), false));
 }
 
 async function readUsedRange() {
-  return Excel.run(async context => {
-    const sheet = context.workbook.worksheets.getActiveWorksheet();
-    const range = sheet.getUsedRangeOrNullObject();
-    range.load(['address', 'text', 'formulas']);
-    await context.sync();
-    return range.isNullObject ? null : { address: range.address, text: range.text, formulas: range.formulas };
-  });
+  return Excel.run(async context => loadLimited(context, context.workbook.worksheets.getActiveWorksheet().getUsedRangeOrNullObject(), true));
+}
+
+function flatCell(value) {
+  return String(value ?? '').replace(/[\t\r\n]+/g, ' ');
 }
 
 function annotateRows(rows, formulas) {
-  return (rows || []).map((row, i) => row.map((value, j) => {
+  return (rows || []).map((row, i) => (row || []).map((value, j) => {
     const formula = formulas?.[i]?.[j];
-    return formula && String(formula).startsWith('=') ? `${value} [${formula}]` : value;
+    const shown = flatCell(value);
+    return formula && String(formula).startsWith('=') ? `${shown} [${flatCell(formula)}]` : shown;
   }).join('\t')).join('\n');
 }
 
@@ -68,16 +98,22 @@ async function buildContext() {
   let source = null, kind = 'selection';
   if (!state.forceSheet) {
     const selection = await readSelection();
-    if (selection.rowCount * selection.columnCount > 1) source = selection;
+    if (selection && selection.rowCount * selection.columnCount > 1) source = selection;
   }
   if (!source) { source = await readUsedRange(); kind = 'used range'; }
   if (!source) return null;
   let text = annotateRows(source.text, source.formulas);
   if (!text) return null;
   let truncated = false;
+  if (source.gridTruncated) {
+    const rows = Math.min(source.fullRows || MAX_CONTEXT_ROWS, MAX_CONTEXT_ROWS);
+    const cols = Math.min(source.fullCols || MAX_CONTEXT_COLS, MAX_CONTEXT_COLS);
+    text += `\n[...truncated: read ${rows} of ${source.fullRows} rows and ${cols} of ${source.fullCols} columns — select a smaller range for the rest]`;
+    truncated = true;
+  }
   if (text.length > CONTEXT_CAP) {
     const marker = `\n[...truncated: ${text.length - CONTEXT_CAP} chars omitted — ask about a smaller range for full detail]`;
-    text = text.slice(0, CONTEXT_CAP - marker.length) + marker;
+    text = text.slice(0, Math.max(0, CONTEXT_CAP - marker.length)) + marker;
     truncated = true;
   }
   return { header: `[Excel ${kind} ${source.address}]`, text, address: source.address, kind, truncated, chars: text.length };
@@ -105,6 +141,15 @@ async function refreshContextCard() {
   } catch (error) { toast(`Could not read workbook context: ${error.message}`); }
 }
 
+function watchSelection() {
+  const doc = Office.context?.document;
+  if (!doc || typeof doc.addHandlerAsync !== 'function' || !Office.EventType?.DocumentSelectionChanged) return;
+  doc.addHandlerAsync(Office.EventType.DocumentSelectionChanged, () => {
+    clearTimeout(watchSelection.timer);
+    watchSelection.timer = setTimeout(refreshContextCard, 400);
+  });
+}
+
 function renderMessage(role, content) {
   const conversation = $('conversation');
   conversation.querySelector('.welcome')?.remove();
@@ -116,61 +161,118 @@ function renderMessage(role, content) {
   return bubble;
 }
 
+function columnIndex(letters) {
+  let n = 0;
+  for (const ch of letters.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n;
+}
+
+function normalizeCell(cell) {
+  if (typeof cell !== 'string') return '';
+  const match = cell.trim().match(/^\$?([A-Za-z]{1,3})\$?([1-9]\d{0,6})$/);
+  if (!match) return '';
+  const col = match[1].toUpperCase();
+  const row = Number(match[2]);
+  if (columnIndex(col) > 16384 || row > 1048576) return '';
+  return col + String(row);
+}
+
+function normalizeSheet(name) {
+  if (typeof name !== 'string') return '';
+  let sheet = name.trim();
+  if (sheet.length >= 2 && sheet.startsWith("'") && sheet.endsWith("'")) sheet = sheet.slice(1, -1).replace(/''/g, "'");
+  if (!sheet || sheet.length > 31 || /[:\\/?*[\]]/.test(sheet) || sheet.startsWith("'") || sheet.endsWith("'")) return '';
+  return sheet;
+}
+
 function parseEdits(text) {
-  const blocks = [...text.matchAll(/```json\s*([\s\S]*?)```/g)];
+  const blocks = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)];
   for (let i = blocks.length - 1; i >= 0; i--) {
     try {
       const parsed = JSON.parse(blocks[i][1]);
       const edits = parsed?.edits;
       if (!Array.isArray(edits) || edits.length < 1 || edits.length > 200) continue;
-      if (!edits.every(e => e && typeof e.sheet === 'string' && e.sheet.length <= 100 && typeof e.cell === 'string' && /^[A-Z]{1,3}[1-9][0-9]{0,6}$/i.test(e.cell) && (typeof e.value === 'string' || typeof e.value === 'number') && String(e.value).length <= 5000)) continue;
+      const clean = [];
+      let skipped = 0;
+      for (const edit of edits) {
+        const sheet = normalizeSheet(edit?.sheet);
+        const cell = normalizeCell(edit?.cell);
+        const value = edit?.value;
+        const valueOk = (typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value))) && String(value).length <= 5000;
+        if (!sheet || !cell || !valueOk) { skipped += 1; continue; }
+        clean.push({ sheet, cell, value });
+      }
+      if (!clean.length) continue;
       const prose = (text.slice(0, blocks[i].index) + text.slice(blocks[i].index + blocks[i][0].length)).trim();
-      return { prose, edits };
+      return { prose, edits: clean, skipped };
     } catch { /* not an edits block; keep looking */ }
   }
-  return { prose: text, edits: null };
+  return { prose: text, edits: null, skipped: 0 };
 }
 
-async function renderEditsCard(edits) {
+function riskyEdit(value) {
+  return typeof value === 'string' && RISKY_FORMULA.test(value.trim());
+}
+
+async function withCells(edits, fn) {
+  return Excel.run(async context => {
+    const sheets = edits.map(edit => context.workbook.worksheets.getItemOrNullObject(edit.sheet));
+    sheets.forEach(sheet => sheet.load('isNullObject'));
+    await context.sync();
+    const ranges = edits.map((edit, i) => sheets[i].isNullObject ? null : sheets[i].getRange(edit.cell));
+    ranges.forEach(range => range && range.load(['values', 'formulas']));
+    await context.sync();
+    const result = await fn(ranges);
+    await context.sync();
+    return result;
+  });
+}
+
+function oldCellText(old) {
+  if (!old) return '(sheet missing)';
+  if (String(old.formula || '').startsWith('=')) return old.formula;
+  if (old.value === '' || old.value == null) return '(empty)';
+  return String(old.value);
+}
+
+async function renderEditsCard(edits, skipped) {
   const conversation = $('conversation');
   const card = document.createElement('div'); card.className = 'message assistant edits-card';
   const label = document.createElement('div'); label.className = 'message-label'; label.textContent = `PROPOSED EDITS · ${edits.length} · REVIEW OLD → NEW · APPLY ONLY WITH YOUR CLICK`;
   card.append(label);
   let olds = null;
-  try {
-    olds = await Excel.run(async context => {
-      const ranges = edits.map(e => context.workbook.worksheets.getItem(e.sheet).getRange(e.cell));
-      ranges.forEach(r => r.load(['values', 'formulas']));
-      await context.sync();
-      return ranges.map(r => ({ value: r.values?.[0]?.[0], formula: r.formulas?.[0]?.[0] }));
-    });
-  } catch { olds = null; }
+  try { olds = await withCells(edits, ranges => ranges.map(range => range ? { value: range.values?.[0]?.[0], formula: range.formulas?.[0]?.[0] } : null)); }
+  catch { olds = null; }
   edits.forEach((edit, i) => {
     const row = document.createElement('div'); row.className = 'edit-row';
-    const old = olds?.[i];
-    const oldText = !old ? '(current unreadable)'
-      : String(old.formula || '').startsWith('=') ? old.formula
-      : (old.value === '' || old.value == null ? '(empty)' : String(old.value));
+    const oldText = olds == null ? '(current unreadable)' : oldCellText(olds[i]);
     row.textContent = `${edit.sheet}!${edit.cell}: ${oldText} → ${String(edit.value)}`;
     card.append(row);
   });
+  if (skipped) {
+    const note = document.createElement('div'); note.className = 'edit-note';
+    note.textContent = `${skipped} edit${skipped === 1 ? '' : 's'} skipped — each change must be one cell on a sheet in this workbook.`;
+    card.append(note);
+  }
+  if (edits.some(edit => riskyEdit(edit.value))) {
+    const warning = document.createElement('div'); warning.className = 'edit-warning';
+    warning.textContent = 'Some formulas can reach the network or run legacy calls (WEBSERVICE, FILTERXML, RTD, HYPERLINK, and similar). Apply only if you trust them.';
+    card.append(warning);
+  }
   const actions = document.createElement('div'); actions.className = 'button-row';
   const apply = document.createElement('button'); apply.className = 'primary'; apply.textContent = 'Apply edits';
   const dismiss = document.createElement('button'); dismiss.className = 'secondary'; dismiss.textContent = 'Dismiss';
   apply.addEventListener('click', async () => {
     apply.disabled = true; dismiss.disabled = true;
     try {
-      const recs = await Excel.run(async context => {
-        const ranges = edits.map(e => context.workbook.worksheets.getItem(e.sheet).getRange(e.cell));
-        ranges.forEach(r => r.load(['values', 'formulas']));
-        await context.sync();
-        const before = ranges.map((r, i) => ({ sheet: edits[i].sheet, cell: edits[i].cell, value: r.values?.[0]?.[0], formula: r.formulas?.[0]?.[0] }));
-        ranges.forEach((r, i) => {
-          const v = edits[i].value;
-          if (typeof v === 'string' && v.startsWith('=')) r.formulas = [[v]];
-          else r.values = [[v]];
+      const recs = await withCells(edits, async ranges => {
+        if (ranges.some(range => !range)) throw new Error('A proposed sheet is not in this workbook. Nothing was written.');
+        const before = ranges.map((range, i) => ({ sheet: edits[i].sheet, cell: edits[i].cell, value: range.values?.[0]?.[0], formula: range.formulas?.[0]?.[0] }));
+        ranges.forEach((range, i) => {
+          const value = edits[i].value;
+          if (typeof value === 'string' && value.startsWith('=')) range.formulas = [[value]];
+          else range.values = [[value]];
         });
-        await context.sync();
         return before;
       });
       label.textContent = `APPLIED ${edits.length} EDITS`;
@@ -180,10 +282,10 @@ async function renderEditsCard(edits) {
         try {
           await Excel.run(async context => {
             for (const rec of recs) {
-              const r = context.workbook.worksheets.getItem(rec.sheet).getRange(rec.cell);
-              if (String(rec.formula || '').startsWith('=')) r.formulas = [[rec.formula]];
-              else if (rec.value === '' || rec.value == null) r.clear();
-              else r.values = [[rec.value]];
+              const range = context.workbook.worksheets.getItem(rec.sheet).getRange(rec.cell);
+              if (String(rec.formula || '').startsWith('=')) range.formulas = [[rec.formula]];
+              else if (rec.value === '' || rec.value == null) range.clear();
+              else range.values = [[rec.value]];
             }
             await context.sync();
           });
@@ -210,70 +312,148 @@ function dedupContext(messages) {
     : m);
 }
 
-async function streamChat(payload) {
-  const response = await fetch(`${API}/api/chat-stream`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.error || `Request failed (${response.status})`);
+function consumeSseFrames(buf, onFrame) {
+  let rest = buf;
+  let idx;
+  while ((idx = rest.indexOf('\n\n')) >= 0) {
+    onFrame(rest.slice(0, idx));
+    rest = rest.slice(idx + 2);
   }
-  const bubble = renderMessage('assistant', '');
-  const bodyEl = bubble.children[bubble.children.length - 1]; // HTMLCollection has no .at()
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = '', text = '', model = '';
+  return rest;
+}
+
+async function streamChat(payload) {
+  const controller = new AbortController();
+  abortChat = controller;
+  let bubble = null;
+  let text = '';
   try {
+    const response = await fetch(`${API}/api/chat-stream`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: controller.signal });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || `Request failed (${response.status})`);
+    }
+    bubble = renderMessage('assistant', '');
+    const bodyEl = bubble.children[bubble.children.length - 1]; // HTMLCollection has no .at()
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '', model = '';
+    const onFrame = frame => {
+    for (const line of frame.split('\n')) {
+      if (!line.startsWith('data: ')) continue;
+      const raw = line.slice(6);
+      if (raw === '[DONE]') continue;
+      let event; try { event = JSON.parse(raw); } catch { continue; }
+      if (event.error) throw new Error(event.error);
+      if (event.model) model = event.model;
+      if (event.status === 'thinking' && !text) { bodyEl.textContent = 'Thinking…'; continue; }
+      const delta = event.choices?.[0]?.delta?.content;
+      if (delta) {
+        text += delta; bodyEl.textContent = text;
+        $('conversation').scrollTop = $('conversation').scrollHeight;
+      }
+    }
+  };
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       buf += decoder.decode(value, { stream: true });
-      let idx;
-      while ((idx = buf.indexOf('\n\n')) >= 0) {
-        const frame = buf.slice(0, idx); buf = buf.slice(idx + 2);
-        for (const line of frame.split('\n')) {
-          if (!line.startsWith('data: ')) continue;
-          const raw = line.slice(6);
-          if (raw === '[DONE]') continue;
-          let j; try { j = JSON.parse(raw); } catch { continue; }
-          if (j.error) throw new Error(j.error);
-          if (j.model) model = j.model;
-          if (j.status === 'thinking' && !text) { bodyEl.textContent = 'Thinking…'; continue; }
-          const delta = j.choices?.[0]?.delta?.content;
-          if (delta) {
-            text += delta; bodyEl.textContent = text;
-            $('conversation').scrollTop = $('conversation').scrollHeight;
-          }
-        }
-      }
+      buf = consumeSseFrames(buf, onFrame);
     }
-  } catch (error) { error.bubble = bubble; throw error; }
-  return { text, model, bubble };
+    buf += decoder.decode();
+    if (buf.trim()) onFrame(buf);
+    if (!text.trim()) {
+      const error = new Error('The provider returned no text answer.');
+      error.bubble = bubble;
+      throw error;
+    }
+    return { text, model, bubble };
+  } catch (error) {
+    if (bubble) { error.bubble = bubble; error.partial = text; }
+    throw error;
+  } finally {
+    if (abortChat === controller) abortChat = null;
+  }
+}
+
+function resetComposer() {
+  state.busy = false;
+  $('send').textContent = '↑';
+  $('send').setAttribute?.('aria-label', 'Send message');
+}
+
+function stopGeneration() {
+  state.turn += 1;
+  abortChat?.abort();
+  resetComposer();
 }
 
 async function sendPrompt(prompt) {
-  const clean = prompt.trim(); if (!clean || state.busy) return;
-  await ensureKeys();
-  const provider = $('activeProvider').value;
-  let ctx = null;
-  try { ctx = await buildContext(); } catch (error) { toast(`Could not read workbook context: ${error.message}`); }
-  state.forceSheet = false;
-  const content = clean + (ctx ? `\n\n${ctx.header}\n${ctx.text}` : '');
-  if (content.length > 49_500) { toast('Message plus workbook context is too large — shorten the message or turn context off.'); return; }
-  state.messages.push({ role: 'user', content }); renderMessage('user', clean + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
-  state.busy = true; $('send').disabled = true; $('send').textContent = '…';
+  const clean = prompt.trim();
+  if (!clean || state.busy) return;
+  const turn = ++state.turn;
+  state.busy = true;
+  $('send').textContent = '■';
+  $('send').setAttribute?.('aria-label', 'Stop');
   try {
+    await ensureKeys();
+    if (turn !== state.turn) return;
+    const provider = $('activeProvider').value;
+    let ctx = null;
+    try { ctx = await buildContext(); } catch (error) { if (turn === state.turn) toast(`Could not read workbook context: ${error.message}`); }
+    if (turn !== state.turn) return;
+    const content = clean + (ctx ? `\n\n${ctx.header}\n${ctx.text}` : '');
+    if (content.length > 49_500) { toast('Message plus workbook context is too large — shorten the message or turn context off.'); return; }
+    state.forceSheet = false;
+    state.messages.push({ role: 'user', content }); renderMessage('user', clean + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
     const result = await streamChat({ provider, model: provider === 'qwen' ? $('qwenModel').value.trim() : $('grokModel').value.trim(), endpoint: $('qwenEndpoint').value.trim(), messages: dedupContext(state.messages.slice(-24)), fast: $('fastMode').checked });
-    const { prose, edits } = parseEdits(result.text);
+    if (turn !== state.turn) return;
+    const { prose, edits, skipped } = parseEdits(result.text);
     state.messages.push({ role: 'assistant', content: result.text });
     state.lastAnswer = prose; $('insertAnswer').disabled = !prose; $('lastAnswerState').textContent = result.model ? `via ${result.model}` : '';
     result.bubble.children[result.bubble.children.length - 1].textContent = prose;
-    if (edits) await renderEditsCard(edits);
+    if (edits) await renderEditsCard(edits, skipped);
     refreshContextCard();
   } catch (error) {
-    if (error.bubble) error.bubble.children[error.bubble.children.length - 1].textContent = `Error: ${error.message}`;
-    else renderMessage('assistant', `Error: ${error.message}`);
-    toast(error.message);
+    const bodyEl = error.bubble?.parent ? error.bubble.children[error.bubble.children.length - 1] : null;
+    if (error.name === 'AbortError') {
+      if (bodyEl) bodyEl.textContent = error.partial ? `${error.partial}\n\n(stopped)` : '(stopped)';
+      if (error.bubble?.parent) toast('Stopped.');
+      return;
+    }
+    if (turn !== state.turn) return;
+    if (!state.lastAnswer) $('insertAnswer').disabled = true;
+    if (bodyEl) {
+      bodyEl.textContent = error.partial ? `${error.partial}\n\n(${error.message})` : `Error: ${error.message}`;
+      toast(error.message);
+    } else {
+      renderMessage('assistant', `Error: ${error.message}`);
+      toast(error.message);
+    }
+  } finally {
+    if (turn === state.turn) resetComposer();
   }
-  finally { state.busy = false; $('send').disabled = false; $('send').textContent = '↑'; }
+}
+
+function clearConversation() {
+  const conversation = $('conversation');
+  while (conversation.children.length) conversation.children[0].remove();
+  const welcome = document.createElement('div'); welcome.className = 'welcome';
+  const icon = document.createElement('div'); icon.className = 'welcome-icon'; icon.textContent = '✦';
+  const title = document.createElement('h1'); title.textContent = 'What can I help with?';
+  const copy = document.createElement('p'); copy.textContent = 'Ask about your workbook, draft a formula, or analyze the selected cells.';
+  welcome.append(icon, title, copy);
+  conversation.append(welcome);
+}
+
+function newChat() {
+  stopGeneration();
+  state.messages = [];
+  state.lastAnswer = '';
+  state.forceSheet = false;
+  $('insertAnswer').disabled = true;
+  $('lastAnswerState').textContent = '';
+  clearConversation();
 }
 
 async function refreshSettings() {
@@ -281,9 +461,11 @@ async function refreshSettings() {
     const data = await api('health');
     const provider = $('provider').value;
     const remembered = Boolean(storedKeys()[provider]);
-    $('keyStatus').textContent = data.configured[provider] ? (remembered ? 'Key active · remembered on this PC' : 'Key active for this session') : '';
-    $('keyStatus').style.color = data.configured[provider] ? '#168251' : '#777';
-  } catch { $('keyStatus').textContent = 'Relay unavailable'; $('keyStatus').style.color = '#b23b36'; }
+    const active = Boolean(data.configured[provider]);
+    $('keyStatus').textContent = active ? (remembered ? 'Key active · remembered on this PC' : 'Key active for this session') : '';
+    $('keyStatus').style.color = active ? '#168251' : '#777';
+    setRelayDot(active ? 'ok' : 'warn');
+  } catch { $('keyStatus').textContent = 'Relay unavailable'; $('keyStatus').style.color = '#b23b36'; setRelayDot('offline'); }
 }
 
 function toggleProviderFields() {
@@ -295,11 +477,18 @@ function toggleProviderFields() {
 
 async function insertAnswer() {
   if (!state.lastAnswer || !state.officeReady) return;
+  const answer = state.lastAnswer;
+  if (answer.length > CELL_CHAR_LIMIT) { toast('That answer is longer than Excel’s 32,767 character cell limit.'); return; }
+  const formula = answer.trim();
+  const asFormula = formula.startsWith('=') && !formula.includes('\n') && formula.length <= 8192;
   try {
     await Excel.run(async context => {
-      const range = context.workbook.getSelectedRange().getCell(0, 0); range.values = [[state.lastAnswer]]; await context.sync();
+      const range = context.workbook.getSelectedRange().getCell(0, 0);
+      if (asFormula) range.formulas = [[formula]];
+      else range.values = [[answer]];
+      await context.sync();
     });
-    toast('Answer inserted into the selected cell.');
+    toast(asFormula ? 'Formula inserted into the selected cell.' : 'Answer inserted into the selected cell.');
   } catch (error) { toast(`Could not insert answer: ${error.message}`); }
 }
 
@@ -327,13 +516,21 @@ $('clearKey').addEventListener('click', async () => {
   try { await api('clear-key', { provider }); rememberKey(provider, ''); keysReady = null; await refreshSettings(); toast('Key cleared.'); }
   catch (error) { toast(error.message); }
 });
-$('composer').addEventListener('submit', async event => { event.preventDefault(); const value = $('prompt').value; $('prompt').value = ''; await sendPrompt(value); });
+$('newChat').addEventListener('click', newChat);
+$('composer').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (state.busy) { stopGeneration(); return; }
+  const value = $('prompt').value;
+  if (!value.trim()) return;
+  $('prompt').value = '';
+  await sendPrompt(value);
+});
 $('prompt').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('composer').requestSubmit(); } });
 $('insertAnswer').addEventListener('click', insertAnswer);
 document.querySelectorAll('.action').forEach(button => button.addEventListener('click', () => { $('prompt').value = button.dataset.prompt; $('prompt').focus(); }));
 
 Office.onReady(info => {
-  if (info.host === Office.HostType.Excel) { state.officeReady = true; refreshContextCard(); }
+  if (info.host === Office.HostType.Excel) { state.officeReady = true; refreshContextCard(); watchSelection(); }
   refreshSettings();
   ensureKeys().then(refreshSettings);
 });

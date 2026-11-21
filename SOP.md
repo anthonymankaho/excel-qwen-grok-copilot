@@ -23,15 +23,16 @@ The former second clone `Desktop\excel-qwen-grok-copilot` (identical commit `18c
 - **＋ Whole sheet** = force the full active sheet for the next question only.
 - Truncation note in the hint = sheet over 45,000 chars; select a smaller range for full detail.
 - Enter sends; Shift+Enter new line; quick actions **Summarize / Explain / Write formula**.
-- Replies stream (Thinking… until first text). **Fast** tick = skip deep thinking (Qwen only) for quicker, shallower answers; leave unticked for formula audits.
+- Replies stream (Thinking… until first text). The send button is **Stop** while a reply is in flight. **New chat** clears the pane’s history.
+- **Fast** tick = skip deep thinking (Qwen: `enable_thinking` false; Grok: `reasoning.effort` `low`). Leave it unticked for formula audits.
 - Only the latest question carries workbook context; older turns keep prose only (token/latency control).
 
 ## 3. Approving cell edits
 
-1. Read every row of the **PROPOSED EDITS** card (`sheet!cell: old → new`) against the workbook; `(empty)` means the cell is currently blank.
-2. Click **Apply edits** only when correct; **Dismiss** otherwise. Nothing is written without the click.
+1. Read every row of the **PROPOSED EDITS** card (`sheet!cell: old → new`) against the workbook; `(empty)` means the cell is currently blank, `(sheet missing)` means that sheet is not in the workbook (Apply is refused and nothing is written).
+2. An amber note means a formula can reach the network or run a legacy call (WEBSERVICE, FILTERXML, RTD, HYPERLINK, and similar). Click **Apply edits** only when the rows are correct; **Dismiss** otherwise. Nothing is written without the click.
 3. After Apply, spot-check the cells; **Undo last apply** on the card restores the pre-apply values (empty cells cleared), or Excel `Ctrl+Z`.
-4. **↳ Insert last answer into selection** writes prose into the top-left selected cell — also click-gated.
+4. **↳ Insert last answer into selection** writes into the top-left selected cell — also click-gated. A one-line answer that starts with `=` is written as a formula; anything longer is written as text.
 
 ## 4. Stop
 
@@ -40,7 +41,7 @@ The former second clone `Desktop\excel-qwen-grok-copilot` (identical commit `18c
 
 ## 5. After any code change (agent or owner)
 
-1. In the working repo: `npm run check && npm test` (15/15 required).
+1. In the working repo: `npm run check && npm test` (pane suite + relay suite; both must pass).
 2. One live question through the relay before relying on the change; for edit features confirm the proposal card and click-gating.
 3. Commit locally. **Only Anthony pushes** (`git push origin main`).
 4. On this PC the working repo is the runtime copy: close the minimized relay window, run `Start Local Relay.bat`, reopen the pane. On other computers: `git pull` first, then restart relay and reopen pane.
@@ -67,6 +68,6 @@ The former second clone `Desktop\excel-qwen-grok-copilot` (identical commit `18c
 
 ## 8. Privacy boundaries
 
-- Relay binds `127.0.0.1` only; keys never written to the repo or shared files. With Remember ticked, a key persists in the pane's local browser storage (this PC, this Windows user only); untick for memory-only; **Clear key** removes both copies.
+- Relay binds `127.0.0.1` only and rejects any other Host or Origin. Qwen calls only go to HTTPS chat-completions URLs on `qwencloudapi.com` or `aliyuncs.com`, and redirects are not followed. Keys are never written to the repo or shared files. With Remember ticked, a key persists in the pane's local browser storage (this PC, this Windows user only); untick for memory-only; **Clear key** removes both copies.
 - Leaves the machine: your prompts + the attached context (selection/used range, formulas included) to the chosen provider — nothing else, and nothing before a question is sent.
 - Token Plan ToS caveat (personal plan marketed for interactive coding/agent tools) is accepted by the owner for this personal loopback tool; keep the key out of chat, files and commits. Colleagues use their own keys, never the owner's.
