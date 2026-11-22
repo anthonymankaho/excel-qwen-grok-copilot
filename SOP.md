@@ -1,73 +1,99 @@
-# SOP — Qwen + Grok for Excel (local add-in)
+# SOP — Qwen + Grok for Excel and Word
 
-Owner/operator: Anthony. Each user enters **their own** key once; the owner's personal Token Plan key is never shared. Agents: Qwen Code owns the Qwen provider + shared context/edit layer; Grok owns the Grok section (see `Desktop\Qwen Code\GROK_HANDOFF_20261120_0833.md`); Codex authored the initial app.
+This is the runbook for the local add-in. Each person uses their own API key. The owner’s Token Plan key stays on the owner’s computer and is never shared.
 
-## 0. Folder on this PC (consolidated 2026-11-20)
+The add-in name in Excel and Word is **Qwen + Grok for Excel and Word**. The pane and the relay are `http://127.0.0.1:3000`. Run every command from the folder that holds `manifest.xml`.
 
-Single active copy: `C:\Users\User\Desktop\Excel Qwen Grok Copilot` — both the working repo and the sideloaded runtime (registry `HKCU\Software\Microsoft\Office\16.0\Wef\Developer\{c42d1d4e-bce1-4efe-9f70-66f64889f4cc}` → its `manifest.xml`, re-pointed 2026-11-20). Run every bat / npm command here.
+## 1. First start on a PC
 
-The former second clone `Desktop\excel-qwen-grok-copilot` (identical commit `18c9838`) is redundant and nothing references it any more. Its retirement move was blocked by an open file handle on 2026-11-20: close whatever holds it (Explorer window, terminal, or another agent session with that folder open), then move or delete it.
+1. Install Node.js 20 or newer. Close Excel and Word.
+2. Double-click `Setup and Start.bat`. It runs `npm install`, `npm run autostart`, then `npm start`.
+3. `npm start` sideloads the manifest into desktop Excel. For Word, run `npm run start:word` once with Word closed.
+4. In the pane, open Settings, choose the provider, enter your own key, leave **Remember key on this PC** ticked, and press **Use key**.
 
-## 1. Daily start (zero-touch since 2026-11-20)
+`npm run autostart` writes two Windows items for the current user:
 
-1. First time on a PC: close Excel → double-click `Setup and Start.bat` (npm install + logon auto-start + sideload + relay). Manual equivalent: `npm install`, `npm run autostart`, `npm start`.
-2. Settings (⚙) → provider → enter **your own** key once → **Use key** with **Remember key on this PC** ticked. The pane re-loads it into the relay on every load (Claude-style sign-in once).
-3. Every later logon: the Startup item `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\ExcelQwenGrokRelay.bat` starts the relay **hidden (no window)**. The per-minute task `ExcelQwenGrokRelayEnsure` restarts it within a minute if it dies (kill-and-respawn verified 2026-11-20). Open Excel → pane ready (else **Home > Add-ins > "Qwen + Grok for Excel"**). No clicks needed.
-4. Manual fallback / restart after a code change: `npm run relay-stop` then `npm run relay-ensure` (or wait ≤1 min for self-heal), or foreground `Start Local Relay.bat`.
-5. The sideload persists until `npm run stop`; the auto-start persists until `npm run autostart-remove`. Both are per-user.
+- Startup item `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\ExcelQwenGrokRelay.bat`
+- Scheduled task `ExcelQwenGrokRelayEnsure`, every minute, which starts the relay if it is down
 
-## 2. Asking questions
+Auto-start needs Windows. On any other system the install script stops and tells you so.
 
-- Context is automatic: multi-cell selection, else active sheet used range; formulas as `value [=formula]`. The `WORKBOOK CONTEXT · AUTO` card shows exactly what will be sent.
-- **Send context** unticked = no workbook data leaves the machine (use for sensitive sheets).
-- **＋ Whole sheet** = force the full active sheet for the next question only.
-- Truncation note in the hint = sheet over 45,000 chars; select a smaller range for full detail.
-- Enter sends; Shift+Enter new line; quick actions **Summarize / Explain / Write formula**.
-- Replies stream (Thinking… until first text). The send button is **Stop** while a reply is in flight. **New chat** clears the pane’s history.
-- **Fast** tick = skip deep thinking (Qwen: `enable_thinking` false; Grok: `reasoning.effort` `low`). Leave it unticked for formula audits.
-- Only the latest question carries workbook context; older turns keep prose only (token/latency control).
+## 2. A normal day
 
-## 3. Approving cell edits
+1. Sign in to Windows. The startup item starts the relay with no window.
+2. Open Excel or Word. If the pane is not there, use **Home > Add-ins**.
+3. If Settings says the relay is down, wait up to a minute, or run `npm run relay-ensure`.
+4. After you change code, run `npm run relay-stop`, then `npm run relay-ensure`, and reopen the pane. `Start Local Relay.bat` is the foreground fallback.
 
-1. Read every row of the **PROPOSED EDITS** card (`sheet!cell: old → new`) against the workbook; `(empty)` means the cell is currently blank, `(sheet missing)` means that sheet is not in the workbook (Apply is refused and nothing is written).
-2. **Direct** (on by default) writes safe revisions immediately: ranges, formatting, rows, columns, sheets, sort, chart, table, and in Word the selection text and style. **Undo last apply** is on the card. An amber note means a formula can reach the network or run a legacy call (WEBSERVICE, FILTERXML, RTD, HYPERLINK, and similar); those wait for **Apply risky changes**. Turn **Direct** off to hold every change for a click.
-3. After Apply, spot-check the cells; **Undo last apply** on the card restores the pre-apply values (empty cells cleared), or Excel `Ctrl+Z`.
-4. **↳ Insert last answer into selection** writes into the top-left selected cell — also click-gated. A one-line answer that starts with `=` is written as a formula; anything longer is written as text.
+The sideload stays until `npm run stop`. Auto-start stays until `npm run autostart-remove`. Both are per user.
 
-## 4. Stop
+## 3. Asking
 
-- `npm run relay-stop`: kills the relay (keys clear from relay memory). The self-heal task restarts it within a minute — for a **permanent** stop run `npm run autostart-remove` first (removes Startup item + task). Remembered pane copies persist until **Clear key**. Sideload stays registered.
-- `npm run stop`: also unregisters the sideload (next start needs `Setup and Start.bat` / `npm start`).
+- Excel sends a multi-cell selection. A single cell sends the used range of the active sheet. Formulas are included as `value [=formula]`.
+- Word sends the selection. An empty selection sends the document body.
+- The context card shows the exact text. **↻ Refresh** reads it again.
+- Untick **Send context** when the sheet or document must not leave the computer.
+- **＋ Whole sheet** forces the active Excel sheet for the next question only.
+- A truncation note means the read stopped at 150 rows by 30 columns, or at 45,000 characters. Select a smaller range.
+- Enter sends. Shift+Enter adds a line. Quick actions are **Summarize**, **Explain**, **Write formula**, and **Revise**.
+- The send button is **Stop** while a reply is streaming. **New chat** clears history in the pane.
+- **Fast** turns Qwen thinking off and sets Grok reasoning to low. Leave it off for a formula audit.
+- Only the latest question carries file context. Older turns keep their prose. A request sends at most 24 messages.
 
-## 5. After any code change (agent or owner)
+## 4. Revising the file
 
-1. In the working repo: `npm run check && npm test` (pane suite + relay suite; both must pass).
-2. One live question through the relay before relying on the change; for edit features confirm the proposal card and click-gating.
-3. Commit locally. **Only Anthony pushes** (`git push origin main`).
-4. On this PC the working repo is the runtime copy: close the minimized relay window, run `Start Local Relay.bat`, reopen the pane. On other computers: `git pull` first, then restart relay and reopen pane.
+**Direct** is on by default.
 
-## 6. Other computers / colleagues (sharing model)
+1. Read the card before you move on. It lists every action that was written, or every action waiting for a click.
+2. Safe actions write immediately: values, formulas, formatting, borders, conditional formatting, filters, freeze, rows, columns, sheets, autofit, sort, charts, tables, pivots, and in Word the selection, highlight, style, and find-and-replace.
+3. An amber note means a formula can reach the network or run a legacy call (`WEBSERVICE`, `FILTERXML`, `RTD`, `HYPERLINK`, and similar). Those wait for **Apply risky changes**.
+4. Turn **Direct** off when you want every action to wait for **Apply edits**.
+5. An older single-cell reply still shows `sheet!cell: old → new`. `(empty)` means the cell is blank. `(sheet missing)` means that sheet is not in the workbook, and Apply writes nothing.
+6. Press **Undo last apply** on the card if the batch is wrong. Cell values return to the previous value, and a cell that was empty is cleared. Inserted rows and columns are removed. Deleted rows come back. Deleted columns come back for the first 30 rows. A new sheet, chart, table, or pivot is deleted. A filter is removed. Freeze returns to the previous state. Autofit is not undone. In Word, Undo restores the selection and puts find-and-replace text back when it can still find the new wording.
+7. Excel `Ctrl+Z` still works for changes Excel recorded.
+8. **↳ Insert last answer into selection** writes the top-left selected cell. One line starting with `=` is a formula. Anything else is text.
 
-1. Owner grants repo collaborator access or hands over a zip (never containing keys). Outbound sharing is the owner's action.
-2. Colleague: Node.js 20+, close Excel, `Setup and Start.bat`, enter **their own** key once (Remember ticked).
-3. Key/endpoint pairing: `sk-sp-…` ↔ Token Plan URL (default); regular QwenCloud `sk-` ↔ PAYG URL (change in Settings); Grok ↔ own xAI key.
-4. Each PC: own loopback relay, own Startup item, own remembered keys. Never share the owner's personal Token Plan key (plan ToS + quota are per person).
+## 5. Stop
 
-## 7. Incident quick table
+- `npm run relay-stop` stops the relay and drops keys held only in relay memory. The minute task starts the relay again unless you run `npm run autostart-remove` first. A remembered key stays in the pane until **Clear key**. The sideload stays.
+- `npm run stop` removes the sideload. The next open needs `Setup and Start.bat` or `npm start`.
 
-| Symptom | Action |
+## 6. After a code change
+
+1. From the project folder, run `npm run check && npm test`. Both must pass. They need no API key.
+2. Start the relay, load a key, and ask one real question. For a revise, confirm the card and press Undo once.
+3. Commit on a branch. The owner pushes.
+4. Restart the relay and reopen the pane. On another computer, `git pull` first.
+
+## 7. Another computer
+
+1. The owner grants repository access or hands over a zip. The zip must not contain keys.
+2. The other person installs Node.js 20 or newer, closes Excel, runs `Setup and Start.bat`, and enters their own key with Remember ticked.
+3. Pair the key with the URL. `sk-sp-…` uses the Token Plan URL, which is the default. A regular QwenCloud key uses the pay-as-you-go URL, changed in Settings. Grok uses that person’s own xAI key.
+4. Each computer has its own relay, its own startup item, and its own remembered keys.
+
+## 8. When it breaks
+
+| What you see | What to do |
 |---|---|
-| Settings shows "Relay unavailable" | Start the relay (section 1.4) |
-| Pane offline right after logon | Wait ≤1 min (self-heal) or `npm run relay-ensure`; check Startup item + task exist (section 1.3) |
-| Port 3000 in use | Stop the other relay terminal first |
-| Pane shows old UI | Restart relay → reopen pane (other computers: `git pull` first) |
-| Provider 401 | Key/endpoint mismatch: `sk-sp-…` ↔ Token Plan URL; regular `sk-` ↔ PAYG URL |
-| "Invalid conversation message." | Message + context > 50,000 chars; shorten or untick Send context |
-| Hint says truncated | Ask per range/section instead of whole sheet |
-| Edits applied wrongly | Excel `Ctrl+Z`; Dismiss future proposals until reviewed |
+| Relay unavailable | Section 2, step 3 |
+| Pane offline just after sign-in | Wait up to a minute, or run `npm run relay-ensure`. Confirm the Startup item and the task from section 1 |
+| Port 3000 in use | `npm run relay-stop`, then start the relay again |
+| Pane shows an old screen | Restart the relay and reopen the pane. On another computer, `git pull` first |
+| Provider HTTP 401 | Key and URL do not match. Token Plan keys use the Token Plan URL. Regular Qwen keys use the pay-as-you-go URL |
+| Qwen endpoint rejected | Use the Token Plan URL or `https://<region>.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` |
+| Invalid conversation message | Message plus context is over 50,000 characters. Shorten the message or untick **Send context** |
+| Context says truncated | Ask about a smaller range |
+| A reply will not finish | Press **Stop**. Tick **Fast** if Grok is taking too long |
+| A change is wrong | **Undo last apply**, or Excel `Ctrl+Z` |
+| Word does not list the add-in | `npm run start:word` with Word closed |
 
-## 8. Privacy boundaries
+## 9. What leaves this computer
 
-- Relay binds `127.0.0.1` only and rejects any other Host or Origin. Qwen calls only go to HTTPS chat-completions URLs on `qwencloudapi.com` or `aliyuncs.com`, and redirects are not followed. Keys are never written to the repo or shared files. With Remember ticked, a key persists in the pane's local browser storage (this PC, this Windows user only); untick for memory-only; **Clear key** removes both copies.
-- Leaves the machine: your prompts + the attached context (selection/used range, formulas included) to the chosen provider — nothing else, and nothing before a question is sent.
-- Token Plan ToS caveat (personal plan marketed for interactive coding/agent tools) is accepted by the owner for this personal loopback tool; keep the key out of chat, files and commits. Colleagues use their own keys, never the owner's.
+The relay binds to `127.0.0.1` and rejects any other Host or Origin. A Qwen call must be HTTPS chat-completions on `qwencloudapi.com` or `aliyuncs.com`. Redirects are not followed.
+
+A key is not written into the repository. With Remember ticked, the pane stores it for this Windows user only. **Clear key** removes that copy and the relay copy.
+
+A question sends the prompt and the attached context to the provider you picked. Context includes cell values and formulas, or the Word selection or document text. Nothing is sent before you ask.
+
+Keep the Token Plan key out of chat, files, and commits. Other people use their own keys.

@@ -1,77 +1,143 @@
-# Qwen + Grok for Excel
+# Qwen + Grok for Excel and Word
 
-A local Microsoft Excel task pane inspired by Copilot and Claude for Microsoft 365. It automatically reads your selection (or the active sheet) as context with formulas, chats about the workbook, summarizes or explains spreadsheet content, helps write formulas, proposes cell edits that are applied only with your click, and can insert the latest answer into the selected cell. Choose Qwen or Grok as the provider.
+A local task pane for desktop Excel and Word. It reads the selection, chats with Qwen or Grok, and revises the open file. **Direct** is on by default: safe changes are written immediately, and the card has **Undo last apply**. Formulas that can reach the network stay on the card until you click.
 
-## Run locally
+The pane and the relay both live on this computer at `http://127.0.0.1:3000`. Excel for the web, Word for the web, and company-wide deployment need an HTTPS host and an admin install. This copy does not.
+
+## What it can change
+
+In Excel:
+
+- Values and formulas on a cell or a range
+- Bold, italic, fill, font color, number format, alignment, wrap, and borders
+- Conditional formatting: a value rule, a color scale, duplicates, unique values, blanks, or above average
+- An AutoFilter, including keeping only chosen values
+- Frozen rows and columns
+- Insert or delete rows and columns, add or rename a sheet, autofit, and sort
+- A column, bar, line, or pie chart, a table, and a pivot built from header names in the source range
+
+In Word:
+
+- Replace the selection, or replace every match of a phrase
+- Insert text at the start or end of the document
+- Bold, italic, highlight, and the styles Heading 1, Heading 2, Heading 3, Title, and Normal
+
+It does not run Python in Excel. A pivot only uses the header names you can see in the source range.
+
+## First time on a computer
 
 1. Install Node.js 20 or newer.
-2. First time on a computer: close Excel and double-click `Setup and Start.bat` — it installs dependencies, installs the logon auto-start, sideloads the manifest into desktop Excel and starts the relay. (Manual equivalent: `npm install`, `npm run autostart`, then `npm start`.)
-3. Open Settings, choose a provider, enter **your own** API key once and press **Use key** with **Remember key on this PC** ticked — like a Claude sign-in, it persists for this Windows user and is re-loaded into the relay automatically on every pane load.
-4. Every later logon the relay starts automatically, **hidden (no window)**. A per-minute self-heal scheduled task (`ExcelQwenGrokRelayEnsure`, current user) restarts it within a minute if it ever dies. Open Excel and the pane is ready (if it does not open: **Home > Add-ins**). No bat double-clicks needed.
-5. Stop the relay with `npm run relay-stop` (the self-heal task brings it back within a minute; for a permanent stop run `npm run autostart-remove` first). Manual foreground fallback / restart after a code change: `npm run relay-stop` then `npm run relay-ensure`, or `Start Local Relay.bat`. Relay memory clears on stop (a remembered key copy stays in pane storage until **Clear key**).
-6. `npm run stop` unregisters the sideload; `npm run autostart-remove` removes the logon auto-start.
+2. Close Excel and Word.
+3. Double-click `Setup and Start.bat`. It installs dependencies, installs the Windows logon auto-start, sideloads the add-in into desktop Excel, and starts the relay.
+4. The same steps by hand: `npm install`, `npm run autostart`, then `npm start`.
+5. Open the pane from **Home > Add-ins**. The add-in name is **Qwen + Grok for Excel and Word**.
+6. Open Settings, pick Qwen or Grok, paste **your own** API key, leave **Remember key on this PC** ticked, and press **Use key**.
+
+To open the same add-in in Word, run `npm run start:word` once with Word closed. `npm start` only launches Excel.
+
+## Every later sign-in
+
+Windows starts the relay at logon with no window. A per-minute task named `ExcelQwenGrokRelayEnsure` starts it again if it stops. Open Excel or Word and the pane is ready. If it is missing, use **Home > Add-ins**.
+
+Stop the relay with `npm run relay-stop`. The minute task will start it again unless you first run `npm run autostart-remove`. `npm run stop` removes the sideload. The next launch then needs `Setup and Start.bat` or `npm start`.
+
+After a code change, restart the relay (`npm run relay-stop`, then `npm run relay-ensure`) and close and reopen the pane. A remembered key stays in the pane until you press **Clear key**. Stopping the relay clears the copy that was only in relay memory.
 
 ## Using the pane
 
-1. **Workbook context (automatic).** The `WORKBOOK CONTEXT · AUTO` card shows what the next question will send: your multi-cell selection, or the active sheet's used range when the selection is a single cell. The card refreshes when the selection changes. Formulas are included as `value [=formula]`. Reads are capped at the first 150 rows and 30 columns, then at 45,000 characters, with an explicit truncation note. **↻ Refresh** re-reads it; untick **Send context** to ask without workbook data; **＋ Whole sheet** forces the full active sheet for the next question only (the choice stays if the message is rejected as too large).
-2. **Ask.** Type in the composer and press Enter (Shift+Enter = new line), or use the quick actions **Summarize**, **Explain**, **Write formula** (finish the prompted sentence, then send). Replies stream in token by token; the bubble shows **Thinking…** until the first text arrives (measured ~1.6–1.9 s for small questions; longer while a large sheet is analyzed). The send button becomes **Stop** while a reply is streaming. **New chat** clears the conversation. Tick **Fast** to skip deep thinking (Qwen: `enable_thinking` off; Grok: reasoning effort `low`).
-3. **Answers.** Replies appear in the conversation with a `via <model>` tag. **↳ Insert last answer into selection** writes the answer into the top-left cell of the current selection. A single formula (one line starting with `=`) is inserted as a formula; anything else is inserted as text.
-4. **Direct revise.** **Direct** is on by default, next to Fast. When you ask for a change, the model returns a revision (cell ranges, formatting, rows and columns, new sheets, sort, a chart, a table, or — in Word — the selection’s text and style). Safe changes are written immediately and the card shows **Undo last apply**. Formulas that can reach the network (WEBSERVICE, FILTERXML, RTD, HYPERLINK, and similar) stay on the card until you click. Turn **Direct** off to review every change before it is written. Single-cell `edits` from earlier replies still use the old → new card.
-5. **Provider.** The pill at the composer footer switches Qwen/Grok; each provider needs its own key loaded in Settings.
-6. **History.** Conversation lives in memory only — reloading the pane clears it. At most 24 messages are sent per request.
+The context card shows what the next question will send.
 
-## Other computers and colleagues (sharing)
+- In Excel, a multi-cell selection is sent. A single cell falls back to the used range of the active sheet. Formulas appear as `value [=formula]`. The read stops at the first 150 rows and 30 columns, then at 45,000 characters. A truncation note says so.
+- In Word, the selection is sent. An empty selection sends the document body, with the same character cap.
+- The card refreshes when the selection changes. **↻ Refresh** reads it again.
+- Untick **Send context** to ask with no file data.
+- **＋ Whole sheet** forces the active Excel sheet for the next question only.
 
-1. Get the code: the owner adds you as a collaborator on the private repository, or hands you a zip of the project. Keys are never in the repo or the zip.
-2. Install Node.js 20+, close Excel, double-click `Setup and Start.bat`.
-3. Enter **your own** key once (Remember ticked). Key/endpoint pairing: a Token Plan key (`sk-sp-…`) works only with the default Token Plan URL; a regular QwenCloud key works only after switching the URL in Settings to `https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1/chat/completions`; Grok needs your own xAI key.
-4. Every computer runs its own loopback relay and stores its own keys; nothing is shared between users. Never use someone else's personal Token Plan key — the plan's terms and quota are per person.
+Ask in the box and press Enter. Shift+Enter adds a line. **Summarize**, **Explain**, **Write formula**, and **Revise** fill a starting prompt. Replies stream. The send button becomes **Stop** while a reply is running. **New chat** clears the conversation. **Fast** skips deep thinking: Qwen turns thinking off, and Grok uses low reasoning effort.
 
-The task pane and API relay are served from `http://127.0.0.1:3000`. This is a local development add-in for desktop Excel and Word. `npm start` opens Excel; `npm run start:word` opens Word with the same manifest. Excel for the web, Word for the web, and organizational deployment require an HTTPS-hosted manifest/app and suitable admin sideloading or deployment.
+The footer pill switches Qwen and Grok. Each provider needs its own key. The dot is green when that key is loaded, amber when the relay is up and the key is not, and red when the relay is down.
 
-## Providers
+**↳ Insert last answer into selection** writes the last reply into the top-left cell of the Excel selection. One line that starts with `=` is written as a formula. Anything else is written as text.
 
-- **Qwen** uses the owner's QwenCloud International Token Plan through the OpenAI-compatible endpoint `https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` with a Token Plan key (`sk-sp-…`). Default model: `qwen4-max` (verified 2026-11-20; `qwen4-max-preview` and `qwen3.8-max` also work on this endpoint). For pay-as-you-go instead, change the URL in Settings to `https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` and use a regular Singapore QwenCloud API key — Token Plan keys do not work on that endpoint, and regular keys do not work on the Token Plan endpoint.
-- **Grok** uses xAI's Responses API at `https://api.x.ai/v1/responses`. Default model: `grok-4.7`.
+History stays in memory. Reloading the pane clears it. Each request sends at most 24 messages, and only the latest question includes the file context.
 
-## Key handling
+## Direct revise
 
-API keys are posted to the loopback relay and held in process memory; stopping the Node process clears them. With **Remember key on this PC** ticked, the pane also persists the key in its local browser storage (this PC, this Windows user only) and re-loads it into the relay on every pane load; untick for memory-only sessions, and **Clear key** removes both copies. Keys are never written to the repo or any shared file. Like Claude for Microsoft 365, the pane automatically sends workbook context with each question: your multi-cell selection when you have one, otherwise the active sheet's used range, with formulas as `value [=formula]`. Untick **Send context** to ask without workbook data; **＋ Whole sheet** forces the full active sheet for the next question. Context is capped at the first 150×30 cells and 45,000 characters per message, with an explicit truncation note; review sensitive data before sharing. Only the latest question carries the workbook context — earlier turns keep their prose only, so input tokens do not multiply with conversation length. Cell changes are proposed as an edit list and written only when you click **Apply edits**. The relay binds only to `127.0.0.1` and rejects any other Host or Origin, so a page on another site cannot call it. Qwen calls are limited to HTTPS chat-completions URLs on `qwencloudapi.com` or `aliyuncs.com`, and provider redirects are not followed, so a key cannot be posted to an arbitrary host. The provider pill’s dot is green when that provider’s key is loaded, amber when the relay is up but the key is not, and red when the relay is down. The Qwen section is configured for the owner's QwenCloud International Token Plan key and was verified end-to-end through this relay on 2026-11-20. Token Plan is marketed for interactive coding/agent tools; this personal loopback add-in uses it at the owner's explicit direction. Keep the key private — never commit it or paste it into shared files.
+Leave **Direct** ticked, next to Fast, when you want the file changed. Ask for the change in plain language. The reply explains it and returns a list of actions. Safe actions are written at once. The card lists what changed and offers **Undo last apply**.
+
+Turn **Direct** off to hold every action until you press **Apply edits**.
+
+These formulas are never written automatically, even with Direct on: `WEBSERVICE`, `FILTERXML`, `RTD`, `HYPERLINK`, and the same family of calls. The card marks them and waits for **Apply risky changes**.
+
+**Undo last apply** reverses that batch:
+
+- Cell values and formulas go back to what was there. A cell that was empty is cleared.
+- Inserted rows and columns are removed. Deleted rows are restored. Deleted columns are restored for the first 30 rows.
+- A new sheet, chart, table, or pivot is removed. A renamed sheet gets its previous name.
+- A filter is removed. Freeze goes back to the previous freeze, or unfreezes.
+- Autofit is not reversed.
+- In Word, the selection is put back, and a find-and-replace puts the previous wording back when the new text can be found.
+
+Excel’s own Undo (`Ctrl+Z`) is still available for edits Excel recorded.
+
+A single-cell reply in the older `edits` shape still shows `sheet!cell: old → new` and waits for **Apply edits**.
+
+## Keys and providers
+
+The key is sent only to the relay on this computer. With **Remember key on this PC** ticked, the pane keeps a copy in its own local storage for this Windows user and loads it into the relay each time the pane opens. Untick Remember for a session that forgets the key when the relay stops. **Clear key** removes both copies. Keys are not written into this repository.
+
+| Provider | Endpoint | Key | Default model |
+|---|---|---|---|
+| Qwen, Token Plan | `https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` | Token Plan key, `sk-sp-…` | `qwen4-max` |
+| Qwen, pay as you go | `https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` | A regular QwenCloud key | Set in Settings |
+| Grok | `https://api.x.ai/v1/responses` | Your xAI key | `grok-4.7` |
+
+A Token Plan key works only on the Token Plan URL. A regular QwenCloud key works only on a regional QwenCloud chat-completions URL. Change the URL in Settings when you change key type. The relay refuses any Qwen URL that is not HTTPS chat-completions on `qwencloudapi.com` or `aliyuncs.com`, and it does not follow redirects.
+
+The relay listens on `127.0.0.1` only and rejects any other Host or Origin.
+
+## Another computer
+
+Each computer runs its own relay and stores its own keys.
+
+1. Get the project from the private repository, or from a zip that does not contain keys.
+2. Install Node.js 20 or newer, close Excel, and double-click `Setup and Start.bat`.
+3. Enter your own key. Do not use someone else’s Token Plan key. The plan and its quota belong to that person.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `npm start` | Sideload into desktop Excel and start the relay |
+| `npm run start:word` | Sideload into desktop Word and start the relay |
+| `npm run dev-server` | Run the relay in the foreground |
+| `npm run relay-ensure` | Start the hidden relay if it is not already up |
+| `npm run relay-stop` | Stop the relay |
+| `npm run autostart` | Install logon start and the minute self-heal task |
+| `npm run autostart-remove` | Remove logon start and the self-heal task |
+| `npm run stop` | Remove the sideload |
+| `npm run check` | Syntax-check `server.mjs` and `public/taskpane.js` |
+| `npm test` | Run the offline pane and relay tests |
+
+Auto-start is Windows-only. It uses `%APPDATA%`.
 
 ## Tests
 
-- `npm run check` — syntax check of `server.mjs` and `public/taskpane.js`.
-- `npm test` — offline suites `tests/taskpane.test.mjs` and `tests/server.test.mjs` (`node --test`, zero dependencies), 33 tests. The pane suite stubs DOM + Office.js + Word + SSE, including direct revise (range write, undo, click-gate when Direct is off, risky-formula hold, format/insert/chart/sheet, Word selection). The relay suite checks the Qwen host allowlist, loopback Host/Origin lock, Fast payload flags, the Excel/Word host line, SSE tail parsing, Grok failure events, and path escape.
-- Live check (manual): start the relay, load a key in Settings, ask one question and confirm a real answer; for edit proposals confirm the **PROPOSED EDITS** card appears and nothing is written before **Apply edits**.
+`npm run check` and `npm test` need no API key. The pane tests stub the page, Excel, Word, and the stream. They cover context, the click-gated edit card, Direct revise, Undo, risky formulas, and Word replace. The relay tests cover the loopback lock, the Qwen URL allowlist, Fast mode, and stream errors.
 
-## Troubleshooting
+Before trusting a change in the real app, start the relay, load a key, ask one question, and confirm the answer. For a revise, confirm the card and use Undo once.
 
-- **Relay unavailable** in Settings → run `npm run relay-ensure`, or wait up to a minute for the self-heal task.
-- **Port 3000 already in use** → another relay instance is running; stop it (`Ctrl+C` in its terminal) before starting a new one.
-- **Pane shows old UI after a code change** → restart the relay, then close and reopen the task pane (**Home > Add-ins**); on another computer, `git pull` first.
-- **Context hint says truncated** → the sheet exceeds 45,000 characters; select a smaller range or ask section by section for full detail.
-- **Invalid conversation message.** → message plus context exceeds 50,000 characters; shorten the message or untick **Send context**.
-- **Provider HTTP 401** → key/endpoint mismatch: Token Plan keys (`sk-sp-…`) only work on the Token Plan URL; regular keys only on the pay-as-you-go URL.
-- **Qwen endpoint must be an HTTPS QwenCloud chat completions URL** → the relay refuses any other host or path. Use the Token Plan URL or `https://<region>.maas.qwencloudapi.com/compatible-mode/v1/chat/completions`.
-- **A reply runs too long** → click **Stop** (the send button). Grok high-effort answers can take a few minutes; **Fast** uses reasoning effort `low`.
-- **Excel for the web** → not supported; desktop Excel only.
+## If something is wrong
 
-## Current scope
-
-This is a local assistant for desktop Excel and Word, not Microsoft's Copilot product. Direct revise covers the everyday changes those products make: values and formulas on a range, formatting, inserting and deleting rows, inserting columns, sheets, autofit, sort, a chart, a table, and in Word replacing or styling the selection and inserting text. It does not build pivot tables, run Python, or apply conditional-formatting rules. Risky formulas still wait for a click. Undo is on the revision card.
-
-## Progress
-
-- **2026-11-20** — Initial app by Codex (`299e0e4`).
-- **2026-11-20** — Qwen switched to the owner's QwenCloud International Token Plan endpoint with default model `qwen4-max`; live-verified end-to-end through the relay (`c98ac6c`, pushed by the owner). Codex's earlier "Token Plan cannot serve this add-in" claim disproved by live probe.
-- **2026-11-20** — Claude-for-Microsoft-365-style behavior: automatic workbook context per question and approval-gated cell edits; shared `SYSTEM_PROMPT` for both providers; offline test suite added, 9/9 pass; live edit-proposal verified with `qwen4-max` (`f1427f7`).
-- **2026-11-20** — README usage/tests/troubleshooting sections and `SOP.md` runbook added.
-- **2026-11-20** — Consolidated to one local folder: sideload re-pointed to `Excel Qwen Grok Copilot`; the redundant clone `excel-qwen-grok-copilot` (identical commit) awaits retirement once its file lock is released.
-- **2026-11-20** — Zero-touch redesign (Claude-style): remembered keys with one-time entry, per-user logon auto-start (`Setup and Start.bat`, `npm run autostart`), minimized relay console; sharing model documented — colleagues on their own PCs with their own keys.
-- **2026-11-20** — Relay made invisible and self-healing: hidden process (no console to close accidentally) + per-minute `ExcelQwenGrokRelayEnsure` task; kill-and-respawn verified live; `npm run relay-stop` / `relay-ensure` added.
-- **2026-11-20** — Latency review + fixes: SSE streaming through the relay (`/api/chat-stream`, normalized deltas for both providers, Thinking… indicator), history context dedup, **Fast** toggle (`enable_thinking:false`, gateway-verified). Measured: first text ~1.6–1.9 s small / ~6.4 s with 10k-char context (thinking), then incremental.
-- **2026-11-20** — Real-DOM crash fix (`HTMLCollection` has no `.at()`), pushed to origin on owner's order (`2db66a4`).
-- **2026-11-20** — Edit safety: PROPOSED EDITS shows old → new per cell; **Undo last apply** restores pre-apply values (empty cells cleared). 15/15 tests.
-- **2026-11-21** — Review pass: loopback Host/Origin lock, QwenCloud endpoint allowlist (no redirect follow), stream tails and Grok `failed`/`incomplete` errors surface instead of a blank success, model name forwarded on the stream, large-sheet read capped at 150×30, `$A$1` normalized, bad edit rows skipped, missing sheets block apply, risky formulas called out, Stop and New chat, formula insert, Fast lowers Grok reasoning effort.
-- **2026-11-22** — Direct revise for Excel and Word: ranges, formatting, rows, columns, sheets, sort, chart, table, and Word selection text/style. **Direct** writes safe changes immediately with Undo; network formulas still wait for a click. Manifest hosts Workbook and Document (`npm run start:word`).
-- **Pending** — Live Grok check with an xAI key (endpoint `https://api.x.ai/v1/responses`, model `grok-4.7`). The request shape matches the Responses API (`instructions`, `input`, `store: false`, `response.output_text.delta`, `reasoning.effort` when Fast is on). This environment has no key, so that call was not run.
+| What you see | What to do |
+|---|---|
+| Relay unavailable | Run `npm run relay-ensure`, or wait up to a minute for the self-heal task |
+| Port 3000 is in use | Another relay is running. `npm run relay-stop`, then start it again |
+| The pane looks old | Restart the relay, then close and reopen the pane. On another computer, `git pull` first |
+| Context says truncated | Select a smaller range, or ask about one section at a time |
+| Invalid conversation message | The message plus context is over 50,000 characters. Shorten it, or untick **Send context** |
+| Provider HTTP 401 | The key and the URL do not match. `sk-sp-…` needs the Token Plan URL. A regular Qwen key needs the pay-as-you-go URL |
+| Qwen endpoint rejected | Use the Token Plan URL, or `https://<region>.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` |
+| A reply takes too long | Press **Stop**. Tick **Fast** for a shorter Grok reply |
+| A change looks wrong | Press **Undo last apply**, or Excel `Ctrl+Z` |
+| The add-in is missing in Word | Run `npm run start:word` once with Word closed |
