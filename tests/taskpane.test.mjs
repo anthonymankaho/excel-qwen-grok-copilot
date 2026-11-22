@@ -603,11 +603,11 @@ test('Agent mode stops when debit does not equal credit and does not continue', 
   const reply = {
     model: 'm',
     turns: [
-      'Draft.\n```json\n{"plan":{"goal":"Draft the journal","mode":"agent","steps":[{"id":1,"objective":"Check the balance","actionType":"validate","requiresApproval":false,"validation":"debit equals credit"}],"assumptions":["This is a draft"],"requiredInputs":[],"risks":["Do not post"],"finalValidation":[{"check":"debitEqualsCredit","sheet":"Sheet1","range":"C2:D2"}]},"actions":[{"op":"set","sheet":"Sheet1","range":"E1","value":1}],"decision":"CONTINUE"}\n```',
+      'Draft.\n```json\n{"plan":{"goal":"Draft the journal","mode":"agent","steps":[{"id":1,"objective":"Check the balance","actionType":"validate","requiresApproval":false,"validation":"debit equals credit"}],"assumptions":["This is a draft"],"requiredInputs":[],"risks":["Do not post"],"finalValidation":[{"check":"debitEqualsCredit","sheet":"Sheet1","range":"C1:D2"}]},"actions":[{"op":"set","sheet":"Sheet1","range":"E1","value":1}],"decision":"CONTINUE"}\n```',
       'Again.\n```json\n{"actions":[{"op":"set","sheet":"Sheet1","range":"F1","value":2}],"decision":"COMPLETE"}\n```'
     ]
   };
-  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, cells: { 'Sheet1!C2': { value: 100 }, 'Sheet1!D2': { value: 40 } } });
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, cells: { 'Sheet1!C1': { value: 'Debit' }, 'Sheet1!D1': { value: 'Credit' }, 'Sheet1!C2': { value: 100 }, 'Sheet1!D2': { value: 40 } } });
   await boot(sb);
   sb.els('workMode').value = 'agent';
   sb.els('directRevise').checked = true;
@@ -617,6 +617,25 @@ test('Agent mode stops when debit does not equal credit and does not continue', 
   assert.equal(sb.writes.some(w => w.cell === 'F1'), false);
   assert.match(visible(sb.els('conversation')), /FAIL debitEqualsCredit/);
   assert.match(visible(sb.els('conversation')), /draft/i);
+});
+
+test('Agent mode asks for columns when debit and credit are not identified', async () => {
+  const reply = {
+    model: 'm',
+    turns: [
+      'Draft.\n```json\n{"plan":{"goal":"Draft the journal","mode":"agent","steps":[{"id":1,"objective":"Check the balance","actionType":"validate","requiresApproval":false,"validation":"debit equals credit"}],"assumptions":[],"requiredInputs":[],"risks":[],"finalValidation":[{"check":"debitEqualsCredit","sheet":"Sheet1","range":"C2:D2"}]},"actions":[{"op":"set","sheet":"Sheet1","range":"E1","value":1}],"decision":"CONTINUE"}\n```',
+      'Again.\n```json\n{"actions":[{"op":"set","sheet":"Sheet1","range":"F1","value":2}],"decision":"COMPLETE"}\n```'
+    ]
+  };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, cells: { 'Sheet1!C2': { value: 100 }, 'Sheet1!D2': { value: 40 } } });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  sb.els('directRevise').checked = true;
+  await ask(sb, 'draft the accrual journal');
+  assert.equal(chatCalls(sb).length, 1);
+  assert.equal(sb.writes.some(w => w.cell === 'F1'), false);
+  assert.match(visible(sb.els('conversation')), /NEEDS_USER debitEqualsCredit/);
+  assert.equal(visible(sb.els('conversation')).includes('FAIL debitEqualsCredit'), false);
 });
 
 test('Agent mode with Direct off waits for Approve before writing', async () => {

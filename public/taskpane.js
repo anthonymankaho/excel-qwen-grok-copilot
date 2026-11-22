@@ -1170,7 +1170,7 @@ function renderValidation(results) {
     row.className = result.status === 'FAIL' ? 'edit-warning' : 'edit-note';
     row.textContent = `${result.status} ${result.check}: before ${result.before} after ${result.after} difference ${result.difference}`;
     card.append(row);
-    if (result.status === 'FAIL') {
+    if (result.status === 'FAIL' || result.status === 'NEEDS_USER') {
       const explained = AgentCore.explainFailure(result);
       const note = document.createElement('div');
       note.className = 'edit-warning';
@@ -1332,23 +1332,24 @@ async function sendAgentPrompt(prompt) {
         }
       }
       const checks = usableChecks(envelope.plan);
+      const profile = readFinanceProfile();
       const beforeGrids = await gridsForChecks(checks);
-      const before = {};
-      checks.forEach(check => {
-        const values = beforeGrids[check.id]?.values || [];
-        before[check.id] = { before: check.check === 'rowCount' ? values.length : AgentCore.sumNumbers(values) };
-      });
       let exec = { status: 'SUCCESS', blocked: 0, applied: 0 };
       if (normalized.actions.length) exec = await executeClassified(normalized.actions, { direct: Boolean($('directRevise').checked) });
       state.audit.push(AgentCore.audit({ kind: 'execute', status: exec.status, count: normalized.actions.length, blocked: exec.blocked }));
       const afterGrids = await gridsForChecks(checks);
-      const validations = checks.map(check => AgentCore.evaluateGridCheck(check, afterGrids[check.id], before[check.id]));
+      const validations = checks.map(check => AgentCore.evaluateGridCheck({ ...check, profile }, afterGrids[check.id], beforeGrids[check.id]));
       validations.forEach(result => state.audit.push(AgentCore.audit({ kind: 'validation', status: result.status, check: result.check, before: result.before, after: result.after, difference: result.difference })));
       if (validations.length) renderValidation(validations);
       const next = AgentCore.decide({ decision: envelope.decision, validations, iteration: guard, maxLoops: AgentCore.MAX_LOOPS });
       if (next === 'FAILED') {
         state.audit.push(AgentCore.audit({ kind: 'stopped', reason: 'validation failed' }));
         toast('Stopped. A validation failed. Nothing further will run.');
+        break;
+      }
+      if (next === 'NEEDS_USER') {
+        state.audit.push(AgentCore.audit({ kind: 'stopped', reason: 'a check needs a column' }));
+        toast('Stopped. A finance check needs a column before it can pass or fail.');
         break;
       }
       if (next === 'CONTINUE' || next === 'REPLAN') {
@@ -1457,7 +1458,60 @@ function newChat() {
   clearConversation();
 }
 
+function showExecutionPath() {
+  const el = $('executionPath');
+  if (!el) return;
+  el.textContent = hostedRelay()
+    ? 'Cloud · questions and workbook text go through Cloudflare to the selected provider'
+    : 'Local · the relay stays on this PC';
+}
+
+function splitColumnList(value) {
+  return String(value || '').split(',').map(part => part.trim()).filter(Boolean);
+}
+
+function readFinanceProfile() {
+  const tolerance = $('checkTolerance')?.value;
+  return AgentCore.normalizeFinanceProfile({
+    debitColumn: $('debitColumn')?.value,
+    creditColumn: $('creditColumn')?.value,
+    amountColumn: $('amountColumn')?.value,
+    keyColumns: splitColumnList($('keyColumns')?.value),
+    requiredColumns: splitColumnList($('requiredColumns')?.value),
+    entityColumn: $('entityColumn')?.value,
+    currencyColumn: $('currencyColumn')?.value,
+    dateColumn: $('dateColumn')?.value,
+    tolerance: tolerance == null || tolerance === '' ? null : Number(tolerance)
+  });
+}
+
+function loadFinanceProfile() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('eqgc.finance.v1') || '{}'); } catch { saved = {}; }
+  const profile = AgentCore.normalizeFinanceProfile(saved);
+  const fields = {
+    debitColumn: profile.debitColumn,
+    creditColumn: profile.creditColumn,
+    amountColumn: profile.amountColumn,
+    keyColumns: profile.keyColumns.join(', '),
+    requiredColumns: profile.requiredColumns.join(', '),
+    entityColumn: profile.entityColumn,
+    currencyColumn: profile.currencyColumn,
+    dateColumn: profile.dateColumn,
+    checkTolerance: profile.tolerance
+  };
+  for (const [id, value] of Object.entries(fields)) {
+    const el = $(id);
+    if (el) el.value = value == null ? '' : String(value);
+  }
+}
+
+function saveFinanceProfile() {
+  try { localStorage.setItem('eqgc.finance.v1', JSON.stringify(readFinanceProfile())); } catch { /* storage can be unavailable */ }
+}
+
 function applyHostedChrome() {
+  showExecutionPath();
   if (!hostedRelay()) return;
   $('relayFields')?.classList.remove('hidden');
   $('localKeyFields')?.classList.add('hidden');
@@ -1577,6 +1631,10 @@ $('composer').addEventListener('submit', async event => {
 $('prompt').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('composer').requestSubmit(); } });
 $('insertAnswer').addEventListener('click', insertAnswer);
 document.querySelectorAll('.action').forEach(button => button.addEventListener('click', () => { $('prompt').value = button.dataset.prompt; $('prompt').focus(); }));
+loadFinanceProfile();
+['debitColumn', 'creditColumn', 'amountColumn', 'keyColumns', 'requiredColumns', 'entityColumn', 'currencyColumn', 'dateColumn', 'checkTolerance'].forEach(id => {
+  $(id).addEventListener('change', saveFinanceProfile);
+});
 
 Office.onReady(info => {
   if (info.host === Office.HostType.Excel || info.host === Office.HostType.Word) {

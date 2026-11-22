@@ -90,12 +90,12 @@ The audit card lists the request, the provider, the context that was sent, the a
 
 | Check | What the pane compares |
 |---|---|
-| Debit = credit | The first two numeric columns in the requested range. A difference beyond 0.005 fails. |
+| Debit = credit | Debit and Credit headers, or the columns named in Settings. The default tolerance is 0.01. Without a known pair of columns the result is NEEDS_USER, not a pass or a fail. |
 | Formula errors | `#N/A`, `#VALUE!`, `#REF!`, `#DIV/0!`, `#NAME?`, `#NULL!`, `#NUM!` |
-| Blank required fields | Empty cells in the requested columns, on rows that otherwise have data |
-| Duplicate keys | The same key on more than one row |
-| Row count | Whether the number of rows changed. A change is a warning. |
-| Total movement | Whether the sum moved beyond the tolerance. A move fails. |
+| Blank required fields | Empty cells in the columns named in the check or in Settings, on rows that otherwise have data. Unknown columns are NEEDS_USER. |
+| Duplicate keys | The same key on more than one row, using the named key columns or one recognized header such as Invoice or Voucher. Unknown keys are NEEDS_USER. |
+| Row count | Whether the number of data rows changed. A change is a warning. |
+| Total movement | Whether the named amount column moved beyond the tolerance. Several unnamed numeric columns are NEEDS_USER. |
 
 When a check fails, the card keeps the difference and tells you to review it. It does not post the entry or force the totals to match.
 

@@ -40,24 +40,48 @@ test('Auto never routes workbook data to a provider without a key', () => {
   assert.equal(quick.provider, 'qwen');
 });
 
-test('debit, blanks, duplicates, and formula errors are calculated from the grid', () => {
-  const balanced = AgentCore.evaluateGridCheck({ check: 'debitEqualsCredit' }, { values: [[100, 40], [20, 80]] });
+test('debit, blanks, duplicates, and formula errors are calculated from identified columns', () => {
+  const headers = ['Debit', 'Credit'];
+  const balanced = AgentCore.evaluateGridCheck({ check: 'debitEqualsCredit' }, { values: [headers, [100, 40], [20, 80]] });
   assert.equal(balanced.status, 'PASS');
   assert.equal(balanced.difference, '0');
-  const open = AgentCore.evaluateGridCheck({ check: 'debitEqualsCredit' }, { values: [[100, 40]] });
+  const open = AgentCore.evaluateGridCheck({ check: 'debitEqualsCredit' }, { values: [headers, [100, 40]] });
   assert.equal(open.status, 'FAIL');
   assert.equal(open.difference, '60');
+  const unnamed = AgentCore.evaluateGridCheck({ check: 'debitEqualsCredit' }, { values: [[100, 40], [20, 80]] });
+  assert.equal(unnamed.status, 'NEEDS_USER');
+  assert.equal(unnamed.difference, '');
+  const wrongHeaders = AgentCore.evaluateGridCheck({ check: 'debitEqualsCredit' }, { values: [['Amount', 'Tax'], [100, 40]] });
+  assert.equal(wrongHeaders.status, 'NEEDS_USER');
+  const named = AgentCore.evaluateGridCheck({ check: 'debitEqualsCredit', columns: [1, 2] }, { values: [[100, 40], [20, 80]] });
+  assert.equal(named.status, 'PASS');
+  const profile = AgentCore.normalizeFinanceProfile({ debitColumn: '1', creditColumn: '2', tolerance: 0.02 });
+  const within = AgentCore.evaluateGridCheck({ check: 'debitEqualsCredit', profile }, { values: [[100, 100.01]] });
+  assert.equal(within.status, 'PASS');
+  const beyond = AgentCore.evaluateGridCheck({ check: 'debitEqualsCredit', profile: { ...profile, tolerance: 0.01 } }, { values: [[100, 99.98]] });
+  assert.equal(beyond.status, 'FAIL');
+  assert.equal(beyond.difference, '0.02');
   const blanks = AgentCore.evaluateGridCheck({ check: 'blankRequired', columns: [2] }, { values: [['Acme', ''], ['', '']] });
   assert.equal(blanks.status, 'FAIL');
   assert.equal(blanks.details.length, 1);
   assert.equal(blanks.details[0], 'R1C2');
+  const blankUnknown = AgentCore.evaluateGridCheck({ check: 'blankRequired' }, { values: [['Acme', '']] });
+  assert.equal(blankUnknown.status, 'NEEDS_USER');
   const dupes = AgentCore.evaluateGridCheck({ check: 'duplicateKeys', columns: [1] }, { values: [['A-1', 5], ['A-1', 9], ['B-2', 1]] });
   assert.equal(dupes.status, 'FAIL');
+  const dupeHeader = AgentCore.evaluateGridCheck({ check: 'duplicateKeys' }, { values: [['Invoice', 'Amount'], ['A-1', 5], ['A-1', 9]] });
+  assert.equal(dupeHeader.status, 'FAIL');
+  const dupeUnknown = AgentCore.evaluateGridCheck({ check: 'duplicateKeys' }, { values: [['A-1', 5], ['A-1', 9]] });
+  assert.equal(dupeUnknown.status, 'NEEDS_USER');
   const errors = AgentCore.evaluateGridCheck({ check: 'formulaErrors' }, { values: [[10, '#REF!']], formulas: [['=A1', '#REF!']] });
   assert.equal(errors.status, 'FAIL');
+  const mixedTotal = AgentCore.evaluateGridCheck({ check: 'totalDelta' }, { values: [[10, 20]] });
+  assert.equal(mixedTotal.status, 'NEEDS_USER');
   const explained = AgentCore.explainFailure(open);
   assert.equal(explained.issue, 'debitEqualsCredit');
   assert.match(explained.recommendedAction, /draft/i);
+  const asked = AgentCore.explainFailure(unnamed);
+  assert.match(asked.recommendedAction, /not a pass or a fail/i);
 });
 
 test('a failed finance check stops the loop even if the model says continue', () => {
@@ -67,6 +91,8 @@ test('a failed finance check stops the loop even if the model says continue', ()
   assert.equal(limited, 'FAILED');
   const done = AgentCore.decide({ decision: '', validations: [{ status: 'PASS' }], iteration: 0, maxLoops: 4 });
   assert.equal(done, 'COMPLETE');
+  const ask = AgentCore.decide({ decision: 'COMPLETE', validations: [{ status: 'NEEDS_USER' }], iteration: 0, maxLoops: 4 });
+  assert.equal(ask, 'NEEDS_USER');
 });
 
 test('the audit summary keeps the trail and drops secrets', () => {
