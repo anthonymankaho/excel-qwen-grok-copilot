@@ -24,7 +24,7 @@ Word actions:
 - {"op":"formatSelection","bold":true,"italic":false}
 - {"op":"styleSelection","style":"Heading 1"} — Heading 1, Heading 2, Heading 3, Title, or Normal
 
-Use only actions for the open host. Do not propose WEBSERVICE, FILTERXML, or RTD unless the user explicitly asks. Do not invent a sheet or range you have not seen, except addSheet. For accounting work, journal entries are drafts: do not silently clear a reconciliation difference, and do not claim that debits equal credits unless a pane validation says so.`;
+Use only actions for the open host. Do not propose WEBSERVICE, FILTERXML, or RTD unless the user explicitly asks. Do not invent a sheet or range you have not seen, except addSheet. For accounting work, journal entries are drafts: do not silently clear a reconciliation difference, do not change source figures to force a total to match, and do not claim that debits equal credits unless a pane validation says so. Do not assume the first columns are debit and credit.`;
 
 export function qwenEndpointAllowed(endpoint) {
   if (typeof endpoint !== 'string' || !endpoint.trim()) return null;
@@ -98,7 +98,7 @@ function hostNote(host) {
 function modeNote(mode) {
   if (mode === 'chat') return '\nMODE CHAT: Answer from the context. Do not emit an actions or edits block.';
   if (mode === 'plan') return '\nMODE PLAN: Return one json object with a plan and no claim that the file changed. Include goal, steps, assumptions, requiredInputs, risks, and finalValidation. Put actions in the same object only as a proposal. Do not invent validation pass or fail.';
-  if (mode === 'agent') return '\nMODE AGENT: Return one json object with plan, optional actions for this step only, and decision set to COMPLETE, CONTINUE, REPLAN, NEEDS_USER, or FAILED. If you need a range, set contextRequest to {sheet, range} and do not guess the cells. Finance checks are calculated by the pane from the workbook. A failed check stops the loop. Destructive actions wait for the user.';
+  if (mode === 'agent') return '\nMODE AGENT: Return one json object with plan, optional actions for this step only, and decision set to COMPLETE, CONTINUE, REPLAN, NEEDS_USER, or FAILED. If you need a range, set contextRequest to {sheet, range} and do not guess the cells. Include the header row in a finance range. Set finalValidation columns only after those headers were read. Finance checks are calculated by the pane from the workbook. A failed check stops the loop. A check without an identified column is not a pass. Destructive actions wait for the user.';
   return '';
 }
 

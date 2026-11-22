@@ -37,7 +37,7 @@
       sheet: typeof raw.sheet === 'string' ? raw.sheet.trim().slice(0, 31) : '',
       range: typeof raw.range === 'string' ? raw.range.trim().slice(0, 32) : '',
       columns,
-      tolerance: Number.isFinite(raw.tolerance) ? raw.tolerance : 0.005
+      tolerance: Number.isFinite(raw.tolerance) && raw.tolerance >= 0 ? raw.tolerance : null
     };
   }
 
@@ -129,9 +129,123 @@
     return Math.round(total * 100) / 100;
   }
 
+  const HEADER_ALIASES = {
+    debit: ['debit', 'debits', 'dr', 'debit amount'],
+    credit: ['credit', 'credits', 'cr', 'credit amount'],
+    amount: ['amount', 'amt', 'net amount'],
+    key: ['invoice', 'invoice no', 'invoice number', 'voucher', 'voucher no', 'document no', 'document number', 'reference']
+  };
+
+  function columnSpec(value) {
+    if (typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 50) return value;
+    if (typeof value !== 'string') return null;
+    const text = value.trim();
+    if (!text) return null;
+    if (/^[1-9][0-9]?$/.test(text)) return Number(text);
+    return text.slice(0, 40);
+  }
+
+  function columnList(value) {
+    const source = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : [];
+    return source.map(columnSpec).filter(item => item != null).slice(0, 6);
+  }
+
+  function normalizeFinanceProfile(raw) {
+    const source = raw && typeof raw === 'object' ? raw : {};
+    const tolerance = Number(source.tolerance);
+    return {
+      debitColumn: columnSpec(source.debitColumn),
+      creditColumn: columnSpec(source.creditColumn),
+      amountColumn: columnSpec(source.amountColumn),
+      keyColumns: columnList(source.keyColumns),
+      requiredColumns: columnList(source.requiredColumns),
+      entityColumn: columnSpec(source.entityColumn),
+      currencyColumn: columnSpec(source.currencyColumn),
+      dateColumn: columnSpec(source.dateColumn),
+      tolerance: Number.isFinite(tolerance) && tolerance >= 0 && tolerance <= 1000 ? tolerance : 0.01
+    };
+  }
+
+  function headerText(value) {
+    return String(value ?? '').trim().toLowerCase().replace(/[_./]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function findAlias(header, aliases) {
+    const found = [];
+    (header || []).forEach((cell, index) => {
+      if (aliases.includes(headerText(cell))) found.push(index + 1);
+    });
+    return found;
+  }
+
+  function resolveSpec(spec, header) {
+    if (typeof spec === 'number') return spec >= 1 && spec <= 50 ? spec : null;
+    if (typeof spec !== 'string') return null;
+    const want = headerText(spec);
+    const index = (header || []).findIndex(cell => headerText(cell) === want);
+    return index >= 0 ? index + 1 : null;
+  }
+
+  function resolveMany(specs, header) {
+    if (!specs?.length) return null;
+    const columns = [];
+    for (const spec of specs) {
+      const index = resolveSpec(spec, header);
+      if (!index) return null;
+      columns.push(index);
+    }
+    return columns;
+  }
+
+  function headerWasUsed(header) {
+    const aliases = Object.values(HEADER_ALIASES).flat();
+    return (header || []).some(cell => aliases.includes(headerText(cell)));
+  }
+
+  function bodyRows(values, header) {
+    return headerWasUsed(header) ? values.slice(1) : values;
+  }
+
+  function needsUser(base, detail) {
+    return { ...base, status: 'NEEDS_USER', before: '', after: '', difference: '', details: [detail] };
+  }
+
+  function toleranceOf(check, profile) {
+    if (Number.isFinite(check.tolerance) && check.tolerance >= 0) return check.tolerance;
+    return profile.tolerance;
+  }
+
+  function columnTotal(rows, column) {
+    let total = 0;
+    let seen = 0;
+    for (const row of rows) {
+      const amount = asNumber(row?.[column - 1]);
+      if (amount == null) continue;
+      seen += 1;
+      total += amount;
+    }
+    return { total: Math.round(total * 100) / 100, seen };
+  }
+
+  function debitColumns(check, header, profile) {
+    if (profile.debitColumn != null || profile.creditColumn != null) {
+      const debit = resolveSpec(profile.debitColumn, header);
+      const credit = resolveSpec(profile.creditColumn, header);
+      return debit && credit && debit !== credit ? [debit, credit] : null;
+    }
+    if (check.columns?.length >= 2 && check.columns[0] !== check.columns[1]) return [check.columns[0], check.columns[1]];
+    const debit = findAlias(header, HEADER_ALIASES.debit);
+    const credit = findAlias(header, HEADER_ALIASES.credit);
+    if (debit.length === 1 && credit.length === 1 && debit[0] !== credit[0]) return [debit[0], credit[0]];
+    return null;
+  }
+
   function evaluateGridCheck(check, grid, prior) {
     const values = grid?.values || [];
     const formulas = grid?.formulas || [];
+    const profile = normalizeFinanceProfile(check?.profile);
+    const header = values[0] || [];
+    const rows = bodyRows(values, header);
     const base = { check: check.check, before: prior?.before ?? '', after: '', difference: '', details: [] };
     if (check.check === 'formulaErrors') {
       const details = [];
@@ -141,38 +255,38 @@
       return { ...base, status: details.length ? 'FAIL' : 'PASS', after: String(details.length), details };
     }
     if (check.check === 'debitEqualsCredit') {
-      let debit = 0;
-      let credit = 0;
-      let seen = 0;
-      for (const row of values) {
-        const left = asNumber(row?.[0]);
-        const right = asNumber(row?.[1]);
-        if (left == null && right == null) continue;
-        seen += 1;
-        debit += left || 0;
-        credit += right || 0;
-      }
-      const difference = Math.round((debit - credit) * 100) / 100;
-      if (!seen) return { ...base, status: 'WARNING', before: '0', after: '0', difference: '0', details: ['No numeric debit or credit rows.'] };
-      return { ...base, status: Math.abs(difference) <= 0.005 ? 'PASS' : 'FAIL', before: String(debit), after: String(credit), difference: String(difference), details: [`Debit ${debit}`, `Credit ${credit}`] };
+      const columns = debitColumns(check, header, profile);
+      if (!columns) return needsUser(base, 'Debit and credit columns were not identified.');
+      const debit = columnTotal(rows, columns[0]);
+      const credit = columnTotal(rows, columns[1]);
+      const difference = Math.round((debit.total - credit.total) * 100) / 100;
+      if (!debit.seen && !credit.seen) return { ...base, status: 'WARNING', before: '0', after: '0', difference: '0', details: ['No numeric debit or credit rows.'] };
+      const tolerance = toleranceOf(check, profile);
+      return { ...base, status: Math.abs(difference) <= tolerance ? 'PASS' : 'FAIL', before: String(debit.total), after: String(credit.total), difference: String(difference), details: [`Debit ${debit.total}`, `Credit ${credit.total}`] };
     }
     if (check.check === 'blankRequired') {
-      const cols = check.columns?.length ? check.columns : [1];
+      const columns = profile.requiredColumns.length ? resolveMany(profile.requiredColumns, header) : (check.columns?.length ? check.columns : null);
+      if (!columns) return needsUser(base, 'Required columns were not identified.');
       const details = [];
-      values.forEach((row, r) => {
+      rows.forEach((row, r) => {
         if (!(row || []).some(value => String(value ?? '').trim())) return;
-        for (const col of cols) {
+        for (const col of columns) {
           if (String(row?.[col - 1] ?? '').trim() === '') details.push(`R${r + 1}C${col}`);
         }
       });
       return { ...base, status: details.length ? 'FAIL' : 'PASS', after: String(details.length), details };
     }
     if (check.check === 'duplicateKeys') {
-      const cols = check.columns?.length ? check.columns : [1];
+      let columns = profile.keyColumns.length ? resolveMany(profile.keyColumns, header) : (check.columns?.length ? check.columns : null);
+      if (!columns) {
+        const found = findAlias(header, HEADER_ALIASES.key);
+        columns = found.length === 1 ? found : null;
+      }
+      if (!columns) return needsUser(base, 'The business-key column was not identified.');
       const seen = new Set();
       const details = [];
-      values.forEach(row => {
-        const key = cols.map(col => String(row?.[col - 1] ?? '').trim()).join('|');
+      rows.forEach(row => {
+        const key = columns.map(col => String(row?.[col - 1] ?? '').trim()).join('|');
         if (!key.replace(/\|/g, '')) return;
         if (seen.has(key)) details.push(key);
         else seen.add(key);
@@ -180,24 +294,46 @@
       return { ...base, status: details.length ? 'FAIL' : 'PASS', after: String(details.length), details };
     }
     if (check.check === 'rowCount') {
-      const after = values.length;
+      const after = rows.length;
       const before = Number(prior?.before ?? after);
       const difference = after - before;
       return { ...base, status: difference === 0 ? 'PASS' : 'WARNING', before: String(before), after: String(after), difference: String(difference), details: [] };
     }
     if (check.check === 'totalDelta') {
-      const after = sumNumbers(values);
+      let column = null;
+      if (profile.amountColumn != null) column = resolveSpec(profile.amountColumn, header);
+      else if (check.columns?.length === 1) column = check.columns[0];
+      else {
+        const amounts = findAlias(header, HEADER_ALIASES.amount);
+        if (amounts.length === 1) column = amounts[0];
+        else {
+          const numeric = new Set();
+          rows.forEach(row => (row || []).forEach((value, index) => { if (asNumber(value) != null) numeric.add(index + 1); }));
+          if (numeric.size === 1) column = [...numeric][0];
+        }
+      }
+      if (!column) return needsUser(base, 'The amount column was not identified.');
+      const after = columnTotal(rows, column).total;
       const before = Number(prior?.before ?? after);
       const difference = Math.round((after - before) * 100) / 100;
-      const tolerance = Number.isFinite(check.tolerance) ? check.tolerance : 0.005;
+      const tolerance = toleranceOf(check, profile);
       return { ...base, status: Math.abs(difference) <= tolerance ? 'PASS' : 'FAIL', before: String(before), after: String(after), difference: String(difference), details: [] };
     }
     return { ...base, status: 'WARNING', details: ['Unsupported check.'] };
   }
 
   function explainFailure(result) {
+    if (result.status === 'NEEDS_USER') {
+      return {
+        issue: result.check,
+        evidence: result.details || [],
+        possibleCause: 'The columns for this check were not identified from headers or Finance settings.',
+        requiredCheck: result.check,
+        recommendedAction: 'Name the columns in Finance checks, or include a header row the pane recognizes. This result is not a pass or a fail.'
+      };
+    }
     const guidance = {
-      debitEqualsCredit: ['A journal line may be missing, duplicated, or signed the wrong way.', 'Treat the entry as a draft. Do not post it until debit equals credit.'],
+      debitEqualsCredit: ['A journal line may be missing, duplicated, or signed the wrong way.', 'Treat the entry as a draft. Do not post it until debit equals credit. Do not change source figures to force the totals together.'],
       formulaErrors: ['A formula references a missing cell, a bad value, or a broken range.', 'Open the listed cells and correct the formula before relying on the total.'],
       blankRequired: ['A required field is empty on a row that otherwise has data.', 'Fill the blank or exclude the row. Do not guess the missing value.'],
       duplicateKeys: ['The same key appears on more than one row.', 'Confirm whether this is a duplicate posting before keeping both rows.'],
@@ -209,7 +345,9 @@
   }
 
   function decide({ decision, validations, iteration, maxLoops }) {
-    if ((validations || []).some(item => item.status === 'FAIL')) return 'FAILED';
+    const items = validations || [];
+    if (items.some(item => item.status === 'FAIL')) return 'FAILED';
+    if (items.some(item => item.status === 'NEEDS_USER')) return 'NEEDS_USER';
     const next = normalizeDecision(decision) || 'COMPLETE';
     if ((next === 'CONTINUE' || next === 'REPLAN') && iteration + 1 >= maxLoops) return 'FAILED';
     return next;
@@ -239,7 +377,7 @@
   }
 
   root.AgentCore = {
-    MAX_LOOPS, parseEnvelope, normalizePlan, routeProvider, isDestructive, isExcelError,
+    MAX_LOOPS, parseEnvelope, normalizePlan, normalizeFinanceProfile, routeProvider, isDestructive, isExcelError,
     evaluateGridCheck, explainFailure, decide, audit, summarize, sumNumbers
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
