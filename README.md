@@ -41,7 +41,7 @@ API keys are posted to the loopback relay and held in process memory; stopping t
 ## Tests
 
 - `npm run check` — syntax check of `server.mjs` and `public/taskpane.js`.
-- `npm test` — offline suites `tests/taskpane.test.mjs` and `tests/server.test.mjs` (`node --test`, zero dependencies), 33 tests. The pane suite stubs DOM + Office.js + Word + SSE, including direct revise (range write, undo, click-gate when Direct is off, risky-formula hold, format/insert/chart/sheet, Word selection). The relay suite checks the Qwen host allowlist, loopback Host/Origin lock, Fast payload flags, the Excel/Word host line, SSE tail parsing, Grok failure events, and path escape.
+- `npm test` — offline suites `tests/taskpane.test.mjs` and `tests/server.test.mjs` (`node --test`, zero dependencies), 35 tests. The pane suite stubs DOM + Office.js + Word + SSE, including direct revise (range write, undo, click-gate when Direct is off, risky-formula hold, format/insert/chart/sheet, conditional format, filter, freeze, pivot, Word selection and find-and-replace). The relay suite checks the Qwen host allowlist, loopback Host/Origin lock, Fast payload flags, the Excel/Word host line, SSE tail parsing, Grok failure events, and path escape.
 - Live check (manual): start the relay, load a key in Settings, ask one question and confirm a real answer; for edit proposals confirm the **PROPOSED EDITS** card appears and nothing is written before **Apply edits**.
 
 ## Troubleshooting
@@ -58,7 +58,7 @@ API keys are posted to the loopback relay and held in process memory; stopping t
 
 ## Current scope
 
-This is a local assistant for desktop Excel and Word, not Microsoft's Copilot product. Direct revise covers the everyday changes those products make: values and formulas on a range, formatting, inserting and deleting rows, inserting columns, sheets, autofit, sort, a chart, a table, and in Word replacing or styling the selection and inserting text. It does not build pivot tables, run Python, or apply conditional-formatting rules. Risky formulas still wait for a click. Undo is on the revision card.
+This is a local assistant for desktop Excel and Word, not Microsoft's Copilot product. Direct revise covers the everyday changes those products make: values and formulas on a range, formatting and borders, conditional formatting, an AutoFilter, frozen panes, inserting and deleting rows and columns, sheets, autofit, sort, a chart, a table, and a pivot from header names you supply. In Word it replaces the selection or every match, inserts text, and applies bold, italic, highlight, or a style. It does not run Python. Risky formulas still wait for a click. Undo is on the revision card.
 
 ## Progress
 
@@ -73,5 +73,5 @@ This is a local assistant for desktop Excel and Word, not Microsoft's Copilot pr
 - **2026-11-20** — Real-DOM crash fix (`HTMLCollection` has no `.at()`), pushed to origin on owner's order (`2db66a4`).
 - **2026-11-20** — Edit safety: PROPOSED EDITS shows old → new per cell; **Undo last apply** restores pre-apply values (empty cells cleared). 15/15 tests.
 - **2026-11-21** — Review pass: loopback Host/Origin lock, QwenCloud endpoint allowlist (no redirect follow), stream tails and Grok `failed`/`incomplete` errors surface instead of a blank success, model name forwarded on the stream, large-sheet read capped at 150×30, `$A$1` normalized, bad edit rows skipped, missing sheets block apply, risky formulas called out, Stop and New chat, formula insert, Fast lowers Grok reasoning effort.
-- **2026-11-22** — Direct revise for Excel and Word: ranges, formatting, rows, columns, sheets, sort, chart, table, and Word selection text/style. **Direct** writes safe changes immediately with Undo; network formulas still wait for a click. Manifest hosts Workbook and Document (`npm run start:word`).
+- **2026-11-22** — Direct revise for Excel and Word: ranges, formatting, borders, conditional formatting, filters, frozen panes, rows, columns, sheets, sort, chart, table, pivot, and Word selection text, highlight, and find-and-replace. **Direct** writes safe changes immediately with Undo; network formulas still wait for a click. Manifest hosts Workbook and Document (`npm run start:word`).
 - **Pending** — Live Grok check with an xAI key (endpoint `https://api.x.ai/v1/responses`, model `grok-4.7`). The request shape matches the Responses API (`instructions`, `input`, `store: false`, `response.output_text.delta`, `reasoning.effort` when Fast is on). This environment has no key, so that call was not run.

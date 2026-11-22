@@ -318,9 +318,59 @@ function colorOk(value) {
   return typeof value === 'string' && /^#[0-9A-Fa-f]{6}$/.test(value);
 }
 
+const CF_OPERATORS = {
+  greater: 'GreaterThan', gt: 'GreaterThan', less: 'LessThan', lt: 'LessThan',
+  equal: 'EqualTo', eq: 'EqualTo', notequal: 'NotEqualTo',
+  greaterorequal: 'GreaterThanOrEqual', gte: 'GreaterThanOrEqual',
+  lessorequal: 'LessThanOrEqual', lte: 'LessThanOrEqual', between: 'Between'
+};
+const WORD_HIGHLIGHTS = { yellow: 'Yellow', green: 'Green', blue: 'Blue', red: 'Red', pink: 'Pink', turquoise: 'Turquoise', teal: 'Teal', gray: 'Gray25', none: 'None' };
+
+function columnSpan(raw) {
+  const column = typeof raw?.column === 'string' ? normalizeCell(`${raw.column}1`).replace(/1$/, '') : '';
+  const count = positiveInt(raw?.count || 1, 10);
+  if (!/^[A-Z]{1,3}$/.test(column) || !count || columnIndex(column) + count - 1 > 16384) return null;
+  return { column, count };
+}
+
+function rangeColumnKey(range, column) {
+  const start = columnIndex(range.split(':')[0].match(/^([A-Z]+)/)[1]);
+  let key = -1;
+  if (typeof column === 'number' && column >= 1 && column <= 50) key = column - 1;
+  else if (typeof column === 'string' && /^[A-Za-z]{1,3}$/.test(column)) key = columnIndex(column.toUpperCase()) - start;
+  return key >= 0 && key < rangeSize(range).cols ? key : -1;
+}
+
+function headerList(value, max) {
+  if (value == null) return [];
+  if (!Array.isArray(value) || value.length > max) return null;
+  const list = [];
+  for (const item of value) {
+    if (typeof item !== 'string') return null;
+    const name = item.trim();
+    if (!name || name.length > 80 || /[[\]\\/:*?]/.test(name) || name.startsWith('=')) return null;
+    list.push(name);
+  }
+  return list;
+}
+
+function comparisonValue(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value !== 'string') return '';
+  const text = value.trim();
+  if (!text || text.length > 40 || RISKY_FORMULA.test(text)) return '';
+  return text;
+}
+
 function normalizeAction(raw) {
   const op = typeof raw?.op === 'string' ? raw.op : '';
-  if (op === 'replaceSelection' || op === 'insertText' || op === 'formatSelection' || op === 'styleSelection') {
+  if (op === 'replaceSelection' || op === 'insertText' || op === 'formatSelection' || op === 'styleSelection' || op === 'replaceAll') {
+    if (op === 'replaceAll') {
+      const find = typeof raw.find === 'string' ? raw.find : '';
+      const replace = typeof raw.replace === 'string' ? raw.replace : '';
+      if (!find.trim() || find.length > 200 || replace.length > 2000) return null;
+      return { host: 'word', op, find, replace, matchCase: raw.matchCase === true };
+    }
     if (op === 'replaceSelection' || op === 'insertText') {
       const text = typeof raw.text === 'string' && raw.text.length <= 8000 ? raw.text : null;
       if (text == null || !text.length) return null;
@@ -328,8 +378,10 @@ function normalizeAction(raw) {
       return { host: 'word', op, text, where: raw.where === 'start' ? 'start' : 'end' };
     }
     if (op === 'formatSelection') {
-      if (typeof raw.bold !== 'boolean' && typeof raw.italic !== 'boolean') return null;
-      return { host: 'word', op, bold: raw.bold, italic: raw.italic };
+      const highlight = raw.highlight == null ? '' : WORD_HIGHLIGHTS[String(raw.highlight).trim().toLowerCase()];
+      if (raw.highlight != null && !highlight) return null;
+      if (typeof raw.bold !== 'boolean' && typeof raw.italic !== 'boolean' && !highlight) return null;
+      return { host: 'word', op, bold: raw.bold, italic: raw.italic, highlight };
     }
     const style = WORD_STYLES[String(raw.style || '').trim().toLowerCase()];
     return style ? { host: 'word', op, style } : null;
@@ -370,7 +422,14 @@ function normalizeAction(raw) {
       action.align = align;
     }
     if (typeof raw.wrap === 'boolean') action.wrap = raw.wrap;
-    const keys = ['bold', 'italic', 'fill', 'fontColor', 'numberFormat', 'align', 'wrap'];
+    if (raw.border != null || raw.borderColor != null) {
+      const border = { all: 'all', outside: 'outside', bottom: 'bottom', none: 'none' }[String(raw.border || 'all').toLowerCase()];
+      if (!border) return null;
+      if (raw.borderColor != null && !colorOk(raw.borderColor)) return null;
+      action.border = border;
+      action.borderColor = raw.borderColor || '#000000';
+    }
+    const keys = ['bold', 'italic', 'fill', 'fontColor', 'numberFormat', 'align', 'wrap', 'border'];
     return keys.some(key => action[key] != null) ? action : null;
   }
   if (op === 'clear' || op === 'sort' || op === 'chart' || op === 'table') {
@@ -378,11 +437,8 @@ function normalizeAction(raw) {
     if (!range) return null;
     if (op === 'clear') return { host: 'excel', op, sheet, range };
     if (op === 'sort') {
-      const start = columnIndex(range.split(':')[0].match(/^([A-Z]+)/)[1]);
-      let key = -1;
-      if (typeof raw.column === 'number' && raw.column >= 1 && raw.column <= 50) key = raw.column - 1;
-      else if (typeof raw.column === 'string' && /^[A-Za-z]{1,3}$/.test(raw.column)) key = columnIndex(raw.column.toUpperCase()) - start;
-      if (key < 0 || key >= rangeSize(range).cols) return null;
+      const key = rangeColumnKey(range, raw.column);
+      if (key < 0) return null;
       return { host: 'excel', op, sheet, range, key, ascending: raw.ascending !== false, hasHeaders: raw.hasHeaders !== false };
     }
     if (op === 'chart') {
@@ -401,11 +457,56 @@ function normalizeAction(raw) {
     if (!row || !count || row + count - 1 > 1048576) return null;
     return { host: 'excel', op, sheet, row, count };
   }
-  if (op === 'insertColumns') {
-    const column = typeof raw.column === 'string' ? normalizeCell(`${raw.column}1`).replace(/1$/, '') : '';
-    const count = positiveInt(raw.count || 1, 10);
-    if (!/^[A-Z]{1,3}$/.test(column) || !count || columnIndex(column) + count - 1 > 16384) return null;
-    return { host: 'excel', op, sheet, column, count };
+  if (op === 'insertColumns' || op === 'deleteColumns') {
+    const span = columnSpan(raw);
+    return span ? { host: 'excel', op, sheet, ...span } : null;
+  }
+  if (op === 'conditionalFormat') {
+    const range = boundedRange(raw.range, 2000);
+    if (!range) return null;
+    const rule = String(raw.rule || 'cellValue').trim().toLowerCase();
+    if (rule === 'colorscale') {
+      const minColor = raw.minColor || '#F8696B';
+      const maxColor = raw.maxColor || '#63BE7B';
+      if (!colorOk(minColor) || !colorOk(maxColor)) return null;
+      return { host: 'excel', op, sheet, range, rule: 'colorScale', minColor, maxColor };
+    }
+    const fill = raw.fill || '#FCE4D6';
+    if (!colorOk(fill)) return null;
+    if (['duplicates', 'unique', 'blanks', 'aboveaverage'].includes(rule)) return { host: 'excel', op, sheet, range, rule, fill };
+    const operator = CF_OPERATORS[String(raw.operator || 'greater').toLowerCase().replace(/[^a-z]/g, '')];
+    const formula1 = comparisonValue(raw.value ?? raw.formula1);
+    const formula2 = raw.value2 == null && raw.formula2 == null ? '' : comparisonValue(raw.value2 ?? raw.formula2);
+    if (!operator || !formula1 || (operator === 'Between' && !formula2)) return null;
+    return { host: 'excel', op, sheet, range, rule: 'cellValue', operator, formula1, formula2, fill };
+  }
+  if (op === 'filter') {
+    const range = boundedRange(raw.range, 5000);
+    if (!range) return null;
+    if (raw.values == null && raw.column == null) return { host: 'excel', op, sheet, range, key: null, values: null };
+    const key = rangeColumnKey(range, raw.column);
+    if (raw.values == null) return key < 0 && raw.column != null ? null : { host: 'excel', op, sheet, range, key: key < 0 ? null : key, values: null };
+    if (key < 0 || !Array.isArray(raw.values) || raw.values.length < 1 || raw.values.length > 20) return null;
+    const values = raw.values.map(value => String(value));
+    if (values.some(value => value.length < 1 || value.length > 80)) return null;
+    return { host: 'excel', op, sheet, range, key, values };
+  }
+  if (op === 'freeze') {
+    const rows = raw.rows == null ? 1 : Number(raw.rows);
+    const columns = raw.columns == null ? 0 : Number(raw.columns);
+    if (!Number.isInteger(rows) || !Number.isInteger(columns) || rows < 0 || columns < 0 || rows > 20 || columns > 20) return null;
+    return { host: 'excel', op, sheet, rows, columns };
+  }
+  if (op === 'pivot') {
+    const source = boundedRange(raw.source, 2000);
+    const at = normalizeCell(raw.at);
+    const name = typeof raw.name === 'string' && /^[A-Za-z][A-Za-z0-9_ ]{0,40}$/.test(raw.name.trim()) ? raw.name.trim() : '';
+    const rows = headerList(raw.rows, 4);
+    const columns = headerList(raw.columns, 4);
+    const values = headerList(raw.values, 4);
+    const sourceSheet = raw.sourceSheet == null ? sheet : normalizeSheet(raw.sourceSheet);
+    if (!source || !at || !name || !rows || !columns || !values || !values.length || (!rows.length && !columns.length) || !sourceSheet) return null;
+    return { host: 'excel', op, sheet, sourceSheet, source, at, name, rows, columns, values };
   }
   if (op === 'autofit') {
     const range = /[0-9]/.test(String(raw.range || '')) ? boundedRange(raw.range, 2000) : normalizeColumns(raw.range);
@@ -456,6 +557,11 @@ function describeAction(action) {
   if (action.op === 'insertRows') return `Insert ${action.count} row${action.count === 1 ? '' : 's'} at row ${action.row} on ${action.sheet}`;
   if (action.op === 'deleteRows') return `Delete ${action.count} row${action.count === 1 ? '' : 's'} at row ${action.row} on ${action.sheet}`;
   if (action.op === 'insertColumns') return `Insert ${action.count} column${action.count === 1 ? '' : 's'} at ${action.column} on ${action.sheet}`;
+  if (action.op === 'deleteColumns') return `Delete ${action.count} column${action.count === 1 ? '' : 's'} at ${action.column} on ${action.sheet}`;
+  if (action.op === 'conditionalFormat') return `Conditional format ${action.sheet}!${action.range} (${action.rule})`;
+  if (action.op === 'filter') return `Filter ${action.sheet}!${action.range}`;
+  if (action.op === 'freeze') return action.rows || action.columns ? `Freeze ${action.rows} row${action.rows === 1 ? '' : 's'} and ${action.columns} column${action.columns === 1 ? '' : 's'} on ${action.sheet}` : `Unfreeze ${action.sheet}`;
+  if (action.op === 'pivot') return `Pivot ${action.name} on ${action.sheet}`;
   if (action.op === 'addSheet') return `Add sheet ${action.name}`;
   if (action.op === 'renameSheet') return `Rename ${action.sheet} to ${action.name}`;
   if (action.op === 'autofit') return `Autofit ${action.sheet}!${action.range}`;
@@ -463,10 +569,53 @@ function describeAction(action) {
   if (action.op === 'chart') return `Chart ${action.sheet}!${action.range} (${action.type})`;
   if (action.op === 'table') return `Table ${action.name} on ${action.sheet}!${action.range}`;
   if (action.op === 'replaceSelection') return 'Replace the Word selection';
+  if (action.op === 'replaceAll') return `Replace “${action.find}” in the document`;
   if (action.op === 'insertText') return `Insert text at the ${action.where} of the document`;
   if (action.op === 'formatSelection') return 'Format the Word selection';
   if (action.op === 'styleSelection') return `Apply Word style ${action.style}`;
   return action.op;
+}
+
+function applyBorders(range, border, color) {
+  const edges = border === 'bottom'
+    ? ['EdgeBottom']
+    : border === 'outside'
+      ? ['EdgeTop', 'EdgeBottom', 'EdgeLeft', 'EdgeRight']
+      : ['EdgeTop', 'EdgeBottom', 'EdgeLeft', 'EdgeRight', 'InsideHorizontal', 'InsideVertical'];
+  for (const edge of edges) {
+    const item = range.format.borders.getItem(edge);
+    item.style = border === 'none' ? 'None' : 'Continuous';
+    if (border !== 'none') item.color = color;
+  }
+}
+
+function ruleFormula(value) {
+  if (String(value).startsWith('=')) return value;
+  return /^-?\d+(\.\d+)?$/.test(value) ? `=${value}` : `="${String(value).replace(/"/g, '""')}"`;
+}
+
+function addConditionalFormat(range, action) {
+  if (action.rule === 'colorScale') {
+    const cf = range.conditionalFormats.add('ColorScale');
+    cf.colorScale.criteria = {
+      minimum: { formula: null, type: 'LowestValue', color: action.minColor },
+      maximum: { formula: null, type: 'HighestValue', color: action.maxColor }
+    };
+    return cf;
+  }
+  if (action.rule === 'cellValue') {
+    const cf = range.conditionalFormats.add('CellValue');
+    const rule = { formula1: ruleFormula(action.formula1), operator: action.operator };
+    if (action.formula2) rule.formula2 = ruleFormula(action.formula2);
+    cf.cellValue.rule = rule;
+    cf.cellValue.format.fill.color = action.fill;
+    return cf;
+  }
+  const criterion = { duplicates: 'DuplicateValues', unique: 'UniqueValues', blanks: 'Blanks', aboveaverage: 'AboveAverage' }[action.rule];
+  const cf = range.conditionalFormats.add('PresetCriteria');
+  cf.preset.rule = { criterion };
+  cf.preset.format.fill.color = action.fill;
+  return cf;
 }
 
 function writeCell(cell, value) {
@@ -483,10 +632,12 @@ async function applyExcelActions(actions) {
   return Excel.run(async context => {
     const wanted = new Map();
     for (const action of actions) {
-      if (!action.sheet || wanted.has(action.sheet)) continue;
-      const sheet = context.workbook.worksheets.getItemOrNullObject(action.sheet);
-      sheet.load('isNullObject');
-      wanted.set(action.sheet, sheet);
+      for (const name of [action.sheet, action.sourceSheet]) {
+        if (!name || wanted.has(name)) continue;
+        const item = context.workbook.worksheets.getItemOrNullObject(name);
+        item.load('isNullObject');
+        wanted.set(name, item);
+      }
     }
     await context.sync();
     const createdNames = new Set(actions.filter(action => action.op === 'addSheet').map(action => action.name));
@@ -547,6 +698,7 @@ async function applyExcelActions(actions) {
         if (action.fill) range.format.fill.color = action.fill;
         if (action.align) range.format.horizontalAlignment = action.align;
         if (action.wrap != null) range.format.wrapText = action.wrap;
+        if (action.border) applyBorders(range, action.border, action.borderColor || '#000000');
         if (action.numberFormat) {
           const size = rangeSize(action.range);
           range.numberFormat = Array.from({ length: size.rows }, () => Array.from({ length: size.cols }, () => action.numberFormat));
@@ -579,6 +731,48 @@ async function applyExcelActions(actions) {
         const end = indexToColumn(columnIndex(action.column) + action.count - 1);
         sheet.getRange(`${action.column}:${end}`).insert('Right');
         undo.push({ host: 'excel', op: 'deleteColumns', sheet: action.sheet, column: action.column, count: action.count });
+        continue;
+      }
+      if (action.op === 'deleteColumns') {
+        const end = indexToColumn(columnIndex(action.column) + action.count - 1);
+        const block = sheet.getRange(`${action.column}1:${end}30`);
+        block.load(['values', 'formulas']);
+        await context.sync();
+        undo.push({ host: 'excel', op: 'restoreColumns', sheet: action.sheet, column: action.column, count: action.count, rows: 30, formulas: block.formulas, values: block.values });
+        sheet.getRange(`${action.column}:${end}`).delete('Left');
+        continue;
+      }
+      if (action.op === 'conditionalFormat') {
+        const range = sheet.getRange(action.range);
+        const cf = addConditionalFormat(range, action);
+        cf.load('id');
+        await context.sync();
+        undo.push({ host: 'excel', op: 'conditionalFormat', sheet: action.sheet, range: action.range, id: cf.id });
+        continue;
+      }
+      if (action.op === 'filter') {
+        const range = sheet.getRange(action.range);
+        if (action.values) sheet.autoFilter.apply(range, action.key, { filterOn: 'Values', values: action.values });
+        else sheet.autoFilter.apply(range);
+        undo.push({ host: 'excel', op: 'filter', sheet: action.sheet });
+        continue;
+      }
+      if (action.op === 'freeze') {
+        const loc = sheet.freezePanes.getLocationOrNullObject();
+        loc.load(['isNullObject', 'address']);
+        await context.sync();
+        undo.push({ host: 'excel', op: 'freeze', sheet: action.sheet, address: loc.isNullObject ? '' : loc.address });
+        if (!action.rows && !action.columns) sheet.freezePanes.unfreeze();
+        else sheet.freezePanes.freezeAt(sheet.getRange(`${indexToColumn(action.columns + 1)}${action.rows + 1}`));
+        continue;
+      }
+      if (action.op === 'pivot') {
+        const source = wanted.get(action.sourceSheet).getRange(action.source);
+        const pivot = sheet.pivotTables.add(action.name, source, sheet.getRange(action.at));
+        for (const field of action.rows) pivot.rowHierarchies.add(pivot.hierarchies.getItem(field));
+        for (const field of action.columns) pivot.columnHierarchies.add(pivot.hierarchies.getItem(field));
+        for (const field of action.values) pivot.dataHierarchies.add(pivot.hierarchies.getItem(field));
+        undo.push({ host: 'excel', op: 'pivot', sheet: action.sheet, name: action.name });
         continue;
       }
       if (action.op === 'autofit') {
@@ -652,6 +846,20 @@ async function undoExcel(records) {
       } else if (rec.op === 'deleteColumns') {
         const end = indexToColumn(columnIndex(rec.column) + rec.count - 1);
         sheet.getRange(`${rec.column}:${end}`).delete('Left');
+      } else if (rec.op === 'restoreColumns') {
+        const end = indexToColumn(columnIndex(rec.column) + rec.count - 1);
+        sheet.getRange(`${rec.column}:${end}`).insert('Right');
+        const range = sheet.getRange(`${rec.column}1:${end}${rec.rows}`);
+        if (rec.formulas) range.formulas = rec.formulas;
+      } else if (rec.op === 'conditionalFormat') {
+        sheet.getRange(rec.range).conditionalFormats.getItem(rec.id).delete();
+      } else if (rec.op === 'filter') {
+        sheet.autoFilter.remove();
+      } else if (rec.op === 'freeze') {
+        if (rec.address) sheet.freezePanes.freezeAt(sheet.getRange(String(rec.address).split('!').pop().replace(/\$/g, '')));
+        else sheet.freezePanes.unfreeze();
+      } else if (rec.op === 'pivot') {
+        sheet.pivotTables.getItem(rec.name).delete();
       } else if (rec.op === 'addSheet') {
         context.workbook.worksheets.getItem(rec.name).delete();
       } else if (rec.op === 'renameSheet') {
@@ -672,9 +880,16 @@ async function applyWordActions(actions) {
     const undo = [];
     for (const action of actions) {
       const selection = context.document.getSelection();
-      if (action.op !== 'insertText') selection.load('text');
+      if (action.op !== 'insertText' && action.op !== 'replaceAll') selection.load('text');
       await context.sync();
-      if (action.op === 'replaceSelection') {
+      if (action.op === 'replaceAll') {
+        const found = context.document.body.search(action.find, { matchCase: action.matchCase });
+        found.load('items');
+        await context.sync();
+        const hits = (found.items || []).slice(0, 30);
+        if (action.replace) undo.push({ host: 'word', op: 'replaceAll', find: action.replace, replace: action.find, matchCase: true });
+        hits.forEach(item => item.insertText(action.replace, 'Replace'));
+      } else if (action.op === 'replaceSelection') {
         undo.push({ host: 'word', op: 'replaceSelection', text: selection.text || '' });
         selection.insertText(action.text, 'Replace');
       } else if (action.op === 'insertText') {
@@ -686,6 +901,7 @@ async function applyWordActions(actions) {
         undo.push({ host: 'word', op: 'formatSelection', bold: selection.font?.bold, italic: selection.font?.italic });
         if (typeof action.bold === 'boolean') selection.font.bold = action.bold;
         if (typeof action.italic === 'boolean') selection.font.italic = action.italic;
+        if (action.highlight) selection.font.highlightColor = action.highlight;
       } else if (action.op === 'styleSelection') {
         undo.push({ host: 'word', op: 'styleSelection', style: selection.style || 'Normal' });
         selection.style = action.style;
@@ -705,6 +921,12 @@ async function undoWord(records) {
         if (rec.bold != null) selection.font.bold = rec.bold;
         if (rec.italic != null) selection.font.italic = rec.italic;
       } else if (rec.op === 'styleSelection') selection.style = rec.style;
+      else if (rec.op === 'replaceAll' && typeof context.document.body.search === 'function') {
+        const found = context.document.body.search(rec.find, { matchCase: rec.matchCase });
+        found.load('items');
+        await context.sync();
+        (found.items || []).slice(0, 30).forEach(item => item.insertText(rec.replace, 'Replace'));
+      }
       else if (rec.op === 'removeText' && typeof context.document.body.search === 'function') {
         const found = context.document.body.search(rec.text, { matchCase: true });
         found.load('items');

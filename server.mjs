@@ -16,11 +16,16 @@ When the user asks to change the file, reply with a short explanation plus one f
 
 Excel actions:
 - {"op":"set","sheet":"Sheet1","range":"A1:B2","values":[["Name","Total"],["Ada",100]]} — a formula is a string that starts with =. A single cell may use "value" instead of "values".
-- {"op":"format","sheet":"Sheet1","range":"A1:B1","bold":true,"italic":false,"fill":"#1F4E79","fontColor":"#FFFFFF","numberFormat":"#,##0","align":"center","wrap":true}
+- {"op":"format","sheet":"Sheet1","range":"A1:B1","bold":true,"italic":false,"fill":"#1F4E79","fontColor":"#FFFFFF","numberFormat":"#,##0","align":"center","wrap":true,"border":"all","borderColor":"#000000"} — border is all, outside, bottom, or none
 - {"op":"clear","sheet":"Sheet1","range":"C2:C20"}
 - {"op":"insertRows","sheet":"Sheet1","row":5,"count":1}
 - {"op":"insertColumns","sheet":"Sheet1","column":"C","count":1}
 - {"op":"deleteRows","sheet":"Sheet1","row":5,"count":1}
+- {"op":"deleteColumns","sheet":"Sheet1","column":"C","count":1}
+- {"op":"conditionalFormat","sheet":"Sheet1","range":"B2:B20","rule":"cellValue","operator":"greater","value":100,"fill":"#C6EFCE"} — operator is greater, less, equal, notEqual, greaterOrEqual, lessOrEqual, or between (between also needs "value2"). rule may instead be duplicates, unique, blanks, aboveAverage, or colorScale (colorScale uses minColor and maxColor)
+- {"op":"filter","sheet":"Sheet1","range":"A1:C20","column":"B","values":["East"]} — omit values to show the filter dropdowns only
+- {"op":"freeze","sheet":"Sheet1","rows":1,"columns":0} — rows 0 and columns 0 unfreezes
+- {"op":"pivot","sheet":"Summary","sourceSheet":"Sheet1","source":"A1:C20","at":"A2","name":"SalesPivot","rows":["Region"],"columns":["Product"],"values":["Amount"]} — rows, columns, and values are header names from the source
 - {"op":"addSheet","name":"Summary"}
 - {"op":"renameSheet","sheet":"Sheet1","name":"Data"}
 - {"op":"autofit","sheet":"Sheet1","range":"A:D"}
@@ -30,8 +35,9 @@ Excel actions:
 
 Word actions:
 - {"op":"replaceSelection","text":"Revised paragraph."}
+- {"op":"replaceAll","find":"TODO","replace":"Done","matchCase":false}
 - {"op":"insertText","text":"Added at the end.","where":"end"} — where is start or end
-- {"op":"formatSelection","bold":true,"italic":false}
+- {"op":"formatSelection","bold":true,"italic":false,"highlight":"yellow"} — highlight is yellow, green, blue, red, pink, turquoise, teal, gray, or none
 - {"op":"styleSelection","style":"Heading 1"} — Heading 1, Heading 2, Heading 3, Title, or Normal
 
 Use only actions for the open host. Do not propose WEBSERVICE, FILTERXML, or RTD unless the user explicitly asks. Do not invent a sheet or range you have not seen, except addSheet.`;

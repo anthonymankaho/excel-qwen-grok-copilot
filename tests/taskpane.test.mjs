@@ -95,10 +95,23 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets })
     const fill = { load() {} };
     let fillColor;
     Object.defineProperty(fill, 'color', { get() { return fillColor; }, set(v) { fillColor = v; writes.push({ sheet: sheetName, cell: addr, kind: 'fill', value: v }); } });
+    cell.address = addr;
     cell.format = {
       font, fill, load() {},
+      borders: { getItem(edge) { return { set style(v) { writes.push({ sheet: sheetName, cell: addr, kind: 'border', edge, style: v }); }, set color(v) { writes.push({ sheet: sheetName, cell: addr, kind: 'borderColor', edge, color: v }); } }; } },
       autofitColumns() { writes.push({ sheet: sheetName, cell: addr, kind: 'autofitColumns' }); },
       autofitRows() { writes.push({ sheet: sheetName, cell: addr, kind: 'autofitRows' }); }
+    };
+    let cfCount = 0;
+    cell.conditionalFormats = {
+      add(type) {
+        cfCount += 1;
+        const rec = { sheet: sheetName, cell: addr, kind: 'conditionalFormat', type, id: `cf${cfCount}` };
+        writes.push(rec);
+        const paint = { fill: { set color(v) { rec.fill = v; } }, font: { set color(v) { rec.fontColor = v; } } };
+        return { get id() { return rec.id; }, load() {}, cellValue: { format: paint, set rule(v) { rec.rule = v; } }, colorScale: { set criteria(v) { rec.criteria = v; } }, preset: { format: paint, set rule(v) { rec.preset = v; } }, delete() { writes.push({ kind: 'deleteConditionalFormat', id: rec.id }); } };
+      },
+      getItem(id) { return { delete() { writes.push({ kind: 'deleteConditionalFormat', id }); } }; }
     };
     let numberFormat = [['']];
     Object.defineProperty(cell, 'numberFormat', {
@@ -136,6 +149,28 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets })
       tables: {
         add() { writes.push({ sheet: name, kind: 'table' }); return { set name(v) { writes.push({ sheet: name, kind: 'tableName', name: v }); }, delete() { writes.push({ kind: 'deleteTable' }); } }; },
         getItem(tableName) { return { delete() { writes.push({ kind: 'deleteTable', name: tableName }); } }; }
+      },
+      autoFilter: {
+        apply(_range, key, criteria) { writes.push({ sheet: name, kind: 'autoFilter', key, criteria }); },
+        remove() { writes.push({ sheet: name, kind: 'autoFilterRemove' }); }
+      },
+      freezePanes: {
+        getLocationOrNullObject() { return { isNullObject: true, address: '', load() {} }; },
+        freezeAt(range) { writes.push({ sheet: name, kind: 'freeze', address: range?.address || '' }); },
+        unfreeze() { writes.push({ sheet: name, kind: 'unfreeze' }); }
+      },
+      pivotTables: {
+        add(pivotName, source, dest) {
+          writes.push({ sheet: name, kind: 'pivot', name: pivotName, source: source?.address || '', at: dest?.address || '' });
+          const hierarchies = { getItem(field) { return { field }; } };
+          return {
+            hierarchies,
+            rowHierarchies: { add(item) { writes.push({ kind: 'pivotRow', field: item.field }); } },
+            columnHierarchies: { add(item) { writes.push({ kind: 'pivotColumn', field: item.field }); } },
+            dataHierarchies: { add(item) { writes.push({ kind: 'pivotValue', field: item.field }); } }
+          };
+        },
+        getItem(pivotName) { return { delete() { writes.push({ kind: 'deletePivot', name: pivotName }); } }; }
       }
     };
   }
@@ -144,6 +179,8 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets })
     let current = false;
     Object.defineProperty(wordFont, key, { get() { return current; }, set(v) { current = v; writes.push({ kind: 'wordFont', key, value: v }); } });
   }
+  let highlight = 'None';
+  Object.defineProperty(wordFont, 'highlightColor', { get() { return highlight; }, set(v) { highlight = v; writes.push({ kind: 'wordHighlight', value: v }); } });
   const wordDoc = { selectionText: 'Hello team', bodyText: 'Hello team. More text.', style: 'Normal', font: wordFont };
   const sandbox = {
     console, JSON, Math, String, Array, Object, Promise, RegExp, Number, TextEncoder, TextDecoder, AbortController,
@@ -184,7 +221,7 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets })
             get text() { return wordDoc.bodyText; },
             load() {},
             insertText(text, where) { writes.push({ kind: 'wordBody', where, text }); },
-            search() { return { load() {}, items: [{ insertText() { writes.push({ kind: 'wordRemove' }); } }] }; }
+            search(text, options) { writes.push({ kind: 'wordSearch', text, matchCase: !!options?.matchCase }); return { load() {}, items: [{ insertText(next) { writes.push({ kind: next ? 'wordReplace' : 'wordRemove', text: next }); } }] }; }
           }
         },
         sync: async () => {}
@@ -545,4 +582,43 @@ test('Direct revise replaces and styles the Word selection', async () => {
   assert.ok(sb.writes.some(w => w.kind === 'wordFont' && w.key === 'bold' && w.value === true));
   assert.ok(sb.writes.some(w => w.kind === 'wordStyle' && w.style === 'Heading 1'));
   assert.ok(sb.writes.some(w => w.kind === 'wordBody' && w.where === 'End'));
+});
+
+test('Direct revise applies conditional formats, a filter, freeze, borders, and a pivot', async () => {
+  const reply = { text: 'Shape the sheet.\n```json\n{"actions":[{"op":"conditionalFormat","sheet":"Sheet1","range":"B2:B10","rule":"cellValue","operator":"greater","value":100,"fill":"#C6EFCE"},{"op":"conditionalFormat","sheet":"Sheet1","range":"C2:C10","rule":"colorScale","minColor":"#F8696B","maxColor":"#63BE7B"},{"op":"conditionalFormat","sheet":"Sheet1","range":"A2:A10","rule":"duplicates","fill":"#FCE4D6"},{"op":"filter","sheet":"Sheet1","range":"A1:C10","column":"A","values":["East"]},{"op":"freeze","sheet":"Sheet1","rows":1},{"op":"deleteColumns","sheet":"Sheet1","column":"D","count":1},{"op":"format","sheet":"Sheet1","range":"A1:C1","border":"bottom","borderColor":"#1F4E79"},{"op":"pivot","sheet":"Sheet1","source":"A1:C10","at":"E2","name":"SalesPivot","rows":["Region"],"values":["Amount"]}]}\n```', model: 'm' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+  await boot(sb);
+  sb.els('directRevise').checked = true;
+  await ask(sb, 'shape more');
+  const cellValue = sb.writes.find(w => w.kind === 'conditionalFormat' && w.type === 'CellValue');
+  assert.equal(cellValue.rule.operator, 'GreaterThan');
+  assert.equal(cellValue.rule.formula1, '=100');
+  assert.equal(cellValue.fill, '#C6EFCE');
+  const scale = sb.writes.find(w => w.kind === 'conditionalFormat' && w.type === 'ColorScale');
+  assert.equal(scale.criteria.minimum.color, '#F8696B');
+  assert.equal(scale.criteria.maximum.color, '#63BE7B');
+  const duplicates = sb.writes.find(w => w.kind === 'conditionalFormat' && w.type === 'PresetCriteria');
+  assert.equal(duplicates.preset.criterion, 'DuplicateValues');
+  const filter = sb.writes.find(w => w.kind === 'autoFilter');
+  assert.equal(filter.key, 0);
+  assert.equal(filter.criteria.filterOn, 'Values');
+  assert.equal(filter.criteria.values[0], 'East');
+  assert.equal(sb.writes.find(w => w.kind === 'freeze').address, 'A2');
+  assert.ok(sb.writes.some(w => w.kind === 'delete' && w.direction === 'Left' && w.cell === 'D:D'));
+  assert.ok(sb.writes.some(w => w.kind === 'border' && w.edge === 'EdgeBottom' && w.style === 'Continuous'));
+  assert.equal(sb.writes.find(w => w.kind === 'pivot').name, 'SalesPivot');
+  assert.ok(sb.writes.some(w => w.kind === 'pivotRow' && w.field === 'Region'));
+  assert.ok(sb.writes.some(w => w.kind === 'pivotValue' && w.field === 'Amount'));
+});
+
+test('Direct revise replaces every match in Word and highlights the selection', async () => {
+  const reply = { text: 'Clean it.\n```json\n{"actions":[{"op":"replaceAll","find":"Hello","replace":"Hi","matchCase":true},{"op":"formatSelection","highlight":"yellow"}]}\n```', model: 'm' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+  sb.officeCb({ host: 'Word' });
+  await flush(); await flush();
+  sb.els('directRevise').checked = true;
+  await ask(sb, 'clean');
+  assert.ok(sb.writes.some(w => w.kind === 'wordSearch' && w.text === 'Hello' && w.matchCase === true));
+  assert.ok(sb.writes.some(w => w.kind === 'wordReplace' && w.text === 'Hi'));
+  assert.ok(sb.writes.some(w => w.kind === 'wordHighlight' && w.value === 'Yellow'));
 });
