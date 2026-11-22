@@ -1,28 +1,41 @@
 # Qwen + Grok for Excel and Word
 
-A local task pane for desktop Excel and Word. It reads the file, plans the work, and revises it with Qwen or Grok. Three modes sit in the composer: **Chat** never writes, **Plan** shows the steps and waits for **Approve**, and **Agent** runs a short loop. **Direct** applies safe Agent actions immediately. Deletes, clears, renames, and formulas that can reach the network wait for a click. **Undo last apply** is on the card.
+A local task pane for desktop Excel and Word. You ask in plain language. Qwen or Grok plans the work, and the pane revises the open file through a fixed list of actions. The pane and the relay both live on this computer at `http://127.0.0.1:3000`. Excel for the web, Word for the web, and company-wide deployment need an HTTPS host and an admin install. This copy does not.
 
-The pane and the relay both live on this computer at `http://127.0.0.1:3000`. Excel for the web, Word for the web, and company-wide deployment need an HTTPS host and an admin install. This copy does not.
+## What this update revises
+
+This is the Copilot-style revise. The earlier pane sent one prompt, attached a large dump of the active sheet, and applied one batch of actions. This update adds a mode, a plan, a short agent loop, checks calculated from the workbook, and an audit card.
+
+- **Chat, Plan, and Agent** sit in the composer. Chat answers and leaves the file alone. Plan shows the steps and waits for **Approve**. Agent runs the steps.
+- **Metadata first.** Plan and Agent send the workbook name, sheet names, used-range size, table names when Excel exposes them, and the selection address. They ask for one range when they need cell values. Chat still sends the selection, or the used range when the selection is a single cell.
+- **The model plans. The pane writes.** Actions stay on the existing list: values, formulas, formatting, rows, columns, sheets, autofit, sort, charts, tables, and the Word selection actions. The model cannot call Office JavaScript on its own.
+- **The pane reads the result.** After a write, Agent loads the cells again. It does not treat a reply as success until that read comes back.
+- **Finance checks are calculated here.** Debit against credit, formula errors (`#N/A`, `#VALUE!`, `#REF!`, and the same family), blank required fields, duplicate keys, row count, and a total that moved. The model cannot mark these as passed. A failed check stops the loop.
+- **A failed check is a workpaper, not a silent fix.** The card states the issue, the evidence, a possible cause, the check, and the recommended action. A journal entry is a draft. The pane does not clear a reconciliation difference on its own.
+- **Auto** chooses Qwen or Grok only when that key is already loaded. A finance, Plan, or Agent request prefers Grok when that key is present and **Fast** is off. Otherwise it prefers Qwen. If the chosen provider errors, the pane tries the other loaded key once.
+- **An audit card** closes each Chat, Plan, and Agent turn: request, mode, provider, plan, context sent, actions, blocked actions, and check results. API keys are left out. **New chat** clears the trail.
+- **Direct, Apply, and Undo stay.** With Direct on, Agent writes safe actions immediately. Deletes, clears, renames, and formulas that can reach the network wait for a click. With Direct off, you approve the plan and then press **Apply edits**. **Undo last apply** is on the card. **Stop** cancels the current round. The loop ends after 4 rounds.
+
+Restart the relay and reopen the pane after you install this update. The manifest is 1.2.0.0. Word still needs `npm run start:word` once.
 
 ## What it can change
 
 In Excel:
 
 - Values and formulas on a cell or a range
-- Bold, italic, fill, font color, number format, alignment, wrap, and borders
-- Conditional formatting: a value rule, a color scale, duplicates, unique values, blanks, or above average
-- An AutoFilter, including keeping only chosen values
-- Frozen rows and columns
-- Insert or delete rows and columns, add or rename a sheet, autofit, and sort
-- A column, bar, line, or pie chart, a table, and a pivot built from header names in the source range
+- Bold, italic, fill, font color, number format, alignment, and wrap
+- Clear a range
+- Insert or delete rows, insert columns, add or rename a sheet, autofit, and sort
+- A column, bar, line, or pie chart, and a table with a name
 
 In Word:
 
-- Replace the selection, or replace every match of a phrase
+- Replace the selection
 - Insert text at the start or end of the document
-- Bold, italic, highlight, and the styles Heading 1, Heading 2, Heading 3, Title, and Normal
+- Bold and italic on the selection
+- The styles Heading 1, Heading 2, Heading 3, Title, and Normal
 
-It does not run Python in Excel. A pivot only uses the header names you can see in the source range.
+It does not run Python in Excel. Borders, conditional formatting, filters, freeze panes, pivots, and replacing every match of a phrase in Word are outside this update.
 
 ## First time on a computer
 
@@ -47,13 +60,13 @@ After a code change, restart the relay (`npm run relay-stop`, then `npm run rela
 
 The context card shows what the next question will send.
 
-- In Chat, a multi-cell Excel selection is sent. A single cell falls back to the used range of the active sheet. Formulas appear as `value [=formula]`. The read stops at the first 150 rows and 30 columns, then at 45,000 characters. A truncation note says so. Plan and Agent send sheet names and the selection address first.
-- In Word, the selection is sent. An empty selection sends the document body, with the same character cap.
+- In Chat, a multi-cell Excel selection is sent. A single cell falls back to the used range of the active sheet. Formulas appear as `value [=formula]`. The read stops at the first 150 rows and 30 columns, then at 45,000 characters. A truncation note says so.
+- In Plan and Agent, the next question sends workbook metadata: the workbook name, up to 30 sheet names, each used range’s address and size, table names when Excel exposes them, and the selection address. Tick **＋ Whole sheet** when that question should include the active sheet’s grid.
+- In Word Chat, the selection is sent. An empty selection sends the document body, with the same character cap. Plan and Agent send a short document outline and wait to be asked for the selection.
 - The card refreshes when the selection changes. **↻ Refresh** reads it again.
 - Untick **Send context** to ask with no file data.
-- **＋ Whole sheet** forces the active Excel sheet for the next question only.
 
-Ask in the box and press Enter. Shift+Enter adds a line. **Summarize**, **Explain**, **Write formula**, and **Revise** fill a starting prompt. Replies stream. The send button becomes **Stop** while a reply is running. **New chat** clears the conversation. **Fast** skips deep thinking: Qwen turns thinking off, and Grok uses low reasoning effort.
+Ask in the box and press Enter. Shift+Enter adds a line. **Summarize**, **Explain**, **Write formula**, and **Revise** fill a starting prompt. Replies stream. The send button becomes **Stop** while a reply is running. **New chat** clears the conversation and the audit trail. **Fast** skips deep thinking: Qwen turns thinking off, and Grok uses low reasoning effort.
 
 The footer pill sets Chat, Plan, or Agent, and Qwen, Grok, or Auto. Each provider needs its own key. The dot is green when that key is loaded, amber when the relay is up and the key is not, and red when the relay is down.
 
@@ -63,32 +76,44 @@ History stays in memory. Reloading the pane clears it. Each request sends at mos
 
 ## Modes
 
-**Chat** sends the selection and answers. Any action list in the reply is ignored.
+**Chat** sends the selection and answers. Any action list in the reply is ignored, including when Direct is on.
 
-**Plan** sends workbook metadata first: sheet names, the selection address, and used-range size. It does not send the cell grid unless you tick **＋ Whole sheet**. The reply is a plan with the goal, steps, assumptions, inputs, risks, and the checks it wants. Nothing is written until you press **Approve**.
+**Plan** inspects metadata, then returns one plan: goal, steps, assumptions, required inputs, risks, and the checks it wants. Proposed actions sit on the same card. Nothing is written until you press **Approve**. If Direct is off, **Approve** is followed by **Apply edits**.
 
-**Agent** uses the same metadata first. It can ask for one range, run that step, read the cells back, and calculate checks from the sheet. The loop stops at 4 rounds, when you press **Stop**, or when a check fails. A failed debit-and-credit check, a formula error, a blank required field, a duplicate key, or a total that moved is reported as issue, evidence, possible cause, and what to do next. The model does not get to mark those checks as passed.
+**Agent** uses the same metadata. It can ask for one range, run the safe actions for that step, read those cells back, and calculate the checks. The loop stops at 4 rounds, when you press **Stop**, when the plan needs you, or when a check fails. With Direct off, a step that would write waits for **Approve**, then **Apply edits**.
 
-**Auto**, next to the mode, picks Qwen or Grok only from keys already loaded in the relay. A finance or Agent request prefers Grok when that key is present and **Fast** is off. Otherwise it prefers Qwen. It will not send the workbook to a provider that has no key. If the chosen provider errors and the other key is loaded, the pane tries that provider once.
+**Auto**, next to the mode, picks Qwen or Grok only from keys already loaded in the relay. It will not send the workbook to a provider that has no key.
 
-The audit card at the end of a Chat, Plan, or Agent turn lists the request, the provider, the context that was sent, the actions, and the check results. It does not include API keys.
+The audit card lists the request, the provider, the context that was sent, the actions, and the check results.
+
+### Checks the pane calculates
+
+| Check | What the pane compares |
+|---|---|
+| Debit = credit | The first two numeric columns in the requested range. A difference beyond 0.005 fails. |
+| Formula errors | `#N/A`, `#VALUE!`, `#REF!`, `#DIV/0!`, `#NAME?`, `#NULL!`, `#NUM!` |
+| Blank required fields | Empty cells in the requested columns, on rows that otherwise have data |
+| Duplicate keys | The same key on more than one row |
+| Row count | Whether the number of rows changed. A change is a warning. |
+| Total movement | Whether the sum moved beyond the tolerance. A move fails. |
+
+When a check fails, the card keeps the difference and tells you to review it. It does not post the entry or force the totals to match.
 
 ## Direct revise
 
-Leave **Direct** ticked, next to Fast, when you want the file changed. Ask for the change in plain language. The reply explains it and returns a list of actions. Safe actions are written at once. The card lists what changed and offers **Undo last apply**.
+Leave **Direct** ticked, next to Fast, when Agent should write safe changes as it goes. The card lists what changed and offers **Undo last apply**.
 
-Turn **Direct** off to hold every action until you press **Apply edits**.
+Turn **Direct** off to hold the plan until **Approve**, and then hold every action until **Apply edits**.
 
-These formulas are never written automatically, even with Direct on: `WEBSERVICE`, `FILTERXML`, `RTD`, `HYPERLINK`, and the same family of calls. The card marks them and waits for **Apply risky changes**.
+These formulas are never written automatically, even with Direct on: `WEBSERVICE`, `FILTERXML`, `RTD`, `HYPERLINK`, and the same family of calls. The card marks them and waits for **Apply risky changes**. Deletes, clears, and sheet renames also wait for a click in Agent mode.
 
 **Undo last apply** reverses that batch:
 
 - Cell values and formulas go back to what was there. A cell that was empty is cleared.
-- Inserted rows and columns are removed. Deleted rows are restored. Deleted columns are restored for the first 30 rows.
-- A new sheet, chart, table, or pivot is removed. A renamed sheet gets its previous name.
-- A filter is removed. Freeze goes back to the previous freeze, or unfreezes.
+- Inserted rows and columns are removed. Deleted rows are restored for columns A through H. A cleared range is put back.
+- A new sheet, chart, or table is removed. A renamed sheet gets its previous name. A sort is put back.
 - Autofit is not reversed.
-- In Word, the selection is put back, and a find-and-replace puts the previous wording back when the new text can be found.
+- In Word, the selection text, bold, italic, and style are put back. Inserted text is removed when the pane can still find that exact wording.
 
 Excel’s own Undo (`Ctrl+Z`) is still available for edits Excel recorded.
 
@@ -128,16 +153,16 @@ Each computer runs its own relay and stores its own keys.
 | `npm run autostart` | Install logon start and the minute self-heal task |
 | `npm run autostart-remove` | Remove logon start and the self-heal task |
 | `npm run stop` | Remove the sideload |
-| `npm run check` | Syntax-check `server.mjs` and `public/taskpane.js` |
-| `npm test` | Run the offline pane and relay tests |
+| `npm run check` | Syntax-check the relay, the agent core, and the task pane |
+| `npm test` | Run the offline pane, agent, and relay tests |
 
 Auto-start is Windows-only. It uses `%APPDATA%`.
 
 ## Tests
 
-`npm run check` and `npm test` need no API key. The pane tests stub the page, Excel, Word, and the stream. They cover context, the click-gated edit card, Direct revise, Undo, risky formulas, Word replace, Chat, Plan, Agent, and a debit-and-credit stop. The relay tests cover the loopback lock, the Qwen URL allowlist, Fast mode, and stream errors.
+`npm run check` and `npm test` need no API key. The pane tests stub the page, Excel, Word, and the stream. They cover context, the click-gated edit card, Direct revise, Undo, risky formulas, Word replace of the selection, Chat, Plan, Agent, a debit-and-credit stop, and Auto staying on a provider that has a key. The relay tests cover the loopback lock, the Qwen URL allowlist, Fast mode, the Agent mode note, and stream errors.
 
-Before trusting a change in the real app, start the relay, load a key, ask one question, and confirm the answer. For a revise, confirm the card and use Undo once.
+Before trusting a change in the real app, start the relay, load a key, ask one question in Chat, and confirm the answer. For a revise, use Plan or Agent, confirm the card, and use Undo once.
 
 ## If something is wrong
 
@@ -150,6 +175,7 @@ Before trusting a change in the real app, start the relay, load a key, ask one q
 | Invalid conversation message | The message plus context is over 50,000 characters. Shorten it, or untick **Send context** |
 | Provider HTTP 401 | The key and the URL do not match. `sk-sp-…` needs the Token Plan URL. A regular Qwen key needs the pay-as-you-go URL |
 | Qwen endpoint rejected | Use the Token Plan URL, or `https://<region>.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` |
-| A reply takes too long | Press **Stop**. Tick **Fast** for a shorter Grok reply |
+| A reply takes too long | Press **Stop**. Tick **Fast** for a shorter reply |
+| Stopped. A validation failed | Read the audit card. The difference is still in the sheet. Correct it yourself, then ask again |
 | A change looks wrong | Press **Undo last apply**, or Excel `Ctrl+Z` |
 | The add-in is missing in Word | Run `npm run start:word` once with Word closed |
