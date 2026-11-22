@@ -263,12 +263,47 @@ function riskyEdit(value) {
   return typeof value === 'string' && RISKY_FORMULA.test(value.trim());
 }
 
-const CHART_TYPES = { column: 'ColumnClustered', bar: 'BarClustered', line: 'Line', pie: 'Pie' };
+const CHART_TYPES = {
+  column: 'ColumnClustered', bar: 'BarClustered', line: 'Line', pie: 'Pie',
+  columnstacked: 'ColumnStacked', columnstacked100: 'ColumnStacked100',
+  barstacked: 'BarStacked', barstacked100: 'BarStacked100',
+  linestacked: 'LineStacked', linemarkers: 'LineMarkers', linemarkersstacked: 'LineMarkersStacked',
+  area: 'Area', areastacked: 'AreaStacked', areastacked100: 'AreaStacked100',
+  doughnut: 'Doughnut', doughnutexploded: 'DoughnutExploded', pieexploded: 'PieExploded',
+  pieofpie: 'PieOfPie', barofpie: 'BarOfPie',
+  scatter: 'XYScatter', xyscatter: 'XYScatter', xyscattersmooth: 'XYScatterSmooth',
+  xyscatterlines: 'XYScatterLines', xyscattersmoothnomarkers: 'XYScatterSmoothNoMarkers',
+  radar: 'Radar', radarmarkers: 'RadarMarkers', radarfilled: 'RadarFilled',
+  bubble: 'Bubble', surface: 'Surface', stockhlc: 'StockHLC', stockohlc: 'StockOHLC'
+};
 const PIVOT_AGGREGATIONS = {
   sum: 'Sum', count: 'Count', average: 'Average', max: 'Max', min: 'Min',
   countnumbers: 'CountNumbers', product: 'Product', stddev: 'StandardDeviation', variance: 'Variance'
 };
 const PIVOT_LAYOUTS = { tabular: 'Tabular', compact: 'Compact', outline: 'Outline' };
+const BORDER_EDGES = {
+  top: 'EdgeTop', bottom: 'EdgeBottom', left: 'EdgeLeft', right: 'EdgeRight',
+  insidevertical: 'InsideVertical', insidehorizontal: 'InsideHorizontal',
+  diagonaldown: 'DiagonalDown', diagonalup: 'DiagonalUp',
+  edgetop: 'EdgeTop', edgebottom: 'EdgeBottom', edgeleft: 'EdgeLeft', edgeright: 'EdgeRight',
+  all: 'all', outline: 'outline'
+};
+const BORDER_STYLES = {
+  none: 'None', continuous: 'Continuous', solid: 'Continuous', dash: 'Dash', dashed: 'Dash',
+  dashdot: 'DashDot', dashdotdot: 'DashDotDot', dot: 'Dot', dotted: 'Dot', double: 'Double', slantdashdot: 'SlantDashDot'
+};
+const BORDER_WEIGHTS = { hairline: 'Hairline', thin: 'Thin', medium: 'Medium', thick: 'Thick' };
+const CF_OPERATORS = {
+  between: 'Between', notbetween: 'NotBetween', equalto: 'EqualTo', equal: 'EqualTo', '==': 'EqualTo',
+  notequalto: 'NotEqualTo', notequal: 'NotEqualTo', '!=': 'NotEqualTo',
+  greaterthan: 'GreaterThan', '>': 'GreaterThan', lessthan: 'LessThan', '<': 'LessThan',
+  greaterthanorequal: 'GreaterThanOrEqual', '>=': 'GreaterThanOrEqual',
+  lessthanorequal: 'LessThanOrEqual', '<=': 'LessThanOrEqual'
+};
+const FILTER_ON = {
+  values: 'Values', custom: 'Custom', topitems: 'TopItems', bottomitems: 'BottomItems',
+  toppercent: 'TopPercent', bottompercent: 'BottomPercent', cellcolor: 'CellColor', fontcolor: 'FontColor'
+};
 const WORD_STYLES = { 'heading 1': 'Heading 1', 'heading 2': 'Heading 2', 'heading 3': 'Heading 3', title: 'Title', normal: 'Normal' };
 
 function indexToColumn(n) {
@@ -364,6 +399,12 @@ function normalizeAction(raw) {
     }
     const style = WORD_STYLES[String(raw.style || '').trim().toLowerCase()];
     return style ? { host: 'word', op, style } : null;
+  }
+  if (op === 'replaceAll' && !raw.sheet) {
+    const text = typeof raw.text === 'string' ? raw.text : '';
+    const replacement = typeof raw.replacement === 'string' ? raw.replacement : '';
+    if (!text || text.length > 500 || replacement.length > 500) return null;
+    return { host: 'word', op, text, replacement, matchCase: raw.matchCase === true, matchWholeWord: raw.matchWholeWord === true, bulk: true };
   }
   if (op === 'addSheet') {
     const name = normalizeSheet(raw.name);
@@ -479,6 +520,129 @@ function normalizeAction(raw) {
       rows, columns, filters, values, layout, grandTotals: raw.grandTotals !== false
     };
   }
+  if (op === 'filter') {
+    const range = boundedRange(raw.range, 100000);
+    if (!range) return null;
+    if (raw.clear === true) return { host: 'excel', op, sheet, range, clear: true, bulk: true };
+    const start = columnIndex(range.split(':')[0].match(/^([A-Z]+)/)[1]);
+    let key = -1;
+    if (typeof raw.column === 'number' && raw.column >= 1 && raw.column <= 16384) key = raw.column - 1;
+    else if (typeof raw.column === 'string' && /^[A-Za-z]{1,3}$/.test(raw.column.trim())) key = columnIndex(raw.column.trim().toUpperCase()) - start;
+    if (key < 0 || key >= rangeSize(range).cols) return null;
+    const filterOn = FILTER_ON[String(raw.filterOn || 'values').toLowerCase()];
+    if (!filterOn) return null;
+    const criteria = { filterOn };
+    if (filterOn === 'Values') {
+      if (!Array.isArray(raw.values) || raw.values.length < 1 || raw.values.length > 200) return null;
+      const values = raw.values.map(value => String(value));
+      if (values.some(value => !value || value.length > 200)) return null;
+      criteria.values = values;
+    } else if (filterOn === 'Custom') {
+      const c1 = typeof raw.criterion1 === 'string' ? raw.criterion1.trim() : '';
+      if (!c1 || c1.length > 100) return null;
+      criteria.criterion1 = c1;
+      if (raw.criterion2 != null && String(raw.criterion2).trim()) {
+        const c2 = String(raw.criterion2).trim();
+        if (c2.length > 100) return null;
+        criteria.criterion2 = c2;
+        criteria.operator = String(raw.operator || 'And').toLowerCase() === 'or' ? 'Or' : 'And';
+      }
+    } else if (filterOn === 'CellColor' || filterOn === 'FontColor') {
+      if (!colorOk(raw.color)) return null;
+      criteria.color = raw.color;
+    } else {
+      const count = positiveInt(raw.count, 1000);
+      if (!count) return null;
+      criteria.criterion1 = String(count);
+    }
+    return { host: 'excel', op, sheet, range, key, criteria };
+  }
+  if (op === 'conditionalFormat') {
+    const range = boundedRange(raw.range, 100000);
+    if (!range) return null;
+    if (raw.clear === true) return { host: 'excel', op, sheet, range, clear: true, bulk: true };
+    const operator = CF_OPERATORS[String(raw.operator || '').toLowerCase()];
+    if (!operator) return null;
+    const formula1 = raw.formula1 == null ? '' : String(raw.formula1).trim();
+    if (!formula1 || formula1.length > 100) return null;
+    const needsSecond = operator === 'Between' || operator === 'NotBetween';
+    const formula2 = raw.formula2 == null ? '' : String(raw.formula2).trim();
+    if (needsSecond && (!formula2 || formula2.length > 100)) return null;
+    if (!needsSecond && formula2) return null;
+    const action = { host: 'excel', op, sheet, range, operator, formula1 };
+    if (needsSecond) action.formula2 = formula2;
+    if (raw.fill != null) { if (!colorOk(raw.fill)) return null; action.fill = raw.fill; }
+    if (raw.fontColor != null) { if (!colorOk(raw.fontColor)) return null; action.fontColor = raw.fontColor; }
+    if (typeof raw.bold === 'boolean') action.bold = raw.bold;
+    return action.fill || action.fontColor || action.bold != null ? action : null;
+  }
+  if (op === 'borders') {
+    const range = boundedRange(raw.range, 100000);
+    if (!range) return null;
+    const edge = BORDER_EDGES[String(raw.edge || 'all').toLowerCase()];
+    const style = BORDER_STYLES[String(raw.style || 'continuous').toLowerCase()];
+    const weight = BORDER_WEIGHTS[String(raw.weight || 'thin').toLowerCase()];
+    if (!edge || !style || !weight) return null;
+    const action = { host: 'excel', op, sheet, range, edge, style, weight };
+    if (raw.color != null) { if (!colorOk(raw.color)) return null; action.color = raw.color; }
+    return action;
+  }
+  if (op === 'freeze') {
+    if (raw.unfreeze === true) return { host: 'excel', op, sheet, unfreeze: true };
+    const rows = raw.rows == null ? 0 : Number(raw.rows);
+    const columns = raw.columns == null ? 0 : Number(raw.columns);
+    if (!Number.isInteger(rows) || !Number.isInteger(columns) || rows < 0 || columns < 0 || rows > 1048576 || columns > 16384) return null;
+    if (!rows && !columns) return null;
+    return { host: 'excel', op, sheet, rows, columns };
+  }
+  if (op === 'replaceAll') {
+    const text = typeof raw.text === 'string' ? raw.text : '';
+    const replacement = typeof raw.replacement === 'string' ? raw.replacement : '';
+    if (!text || text.length > 500 || replacement.length > 500) return null;
+    return { host: 'excel', op, sheet, text, replacement, completeMatch: raw.completeMatch === true, matchCase: raw.matchCase === true, bulk: true };
+  }
+  if (op === 'dataValidation') {
+    const range = boundedRange(raw.range, 100000);
+    if (!range) return null;
+    if (raw.clear === true) return { host: 'excel', op, sheet, range, clear: true, bulk: true };
+    if (!Array.isArray(raw.list) || raw.list.length < 1 || raw.list.length > 200) return null;
+    const items = raw.list.map(item => String(item).trim());
+    if (items.some(item => !item || item.length > 100 || item.includes(','))) return null;
+    return { host: 'excel', op, sheet, range, list: items, ignoreBlanks: raw.ignoreBlanks !== false };
+  }
+  if (op === 'namedRange') {
+    const name = typeof raw.name === 'string' ? raw.name.trim() : '';
+    if (!/^[A-Za-z_][A-Za-z0-9_.]{0,60}$/.test(name) || /^[A-Za-z]{1,3}[0-9]+$/.test(name)) return null;
+    const range = normalizeRange(raw.range);
+    if (!range) return null;
+    return { host: 'excel', op, sheet, name, range };
+  }
+  if (op === 'hide') {
+    const target = String(raw.target || '').toLowerCase();
+    if (!['rows', 'columns', 'sheet'].includes(target)) return null;
+    const hidden = raw.hidden !== false;
+    if (target === 'sheet') return { host: 'excel', op, sheet, target, hidden };
+    // Whole-row ("5:10") and whole-column ("D:E") addresses are the natural way to hide.
+    const text = String(raw.range || '').trim();
+    const range = target === 'rows' && /^\d+:\d+$/.test(text)
+      ? text
+      : /[0-9]/.test(text) ? boundedRange(text, 100000) : normalizeColumns(text);
+    if (!range) return null;
+    return { host: 'excel', op, sheet, target, range, hidden };
+  }
+  if (op === 'tableColumn') {
+    const table = typeof raw.table === 'string' ? raw.table.trim() : '';
+    const name = typeof raw.name === 'string' ? raw.name.trim() : '';
+    if (!table || table.length > 60 || !name || name.length > 60) return null;
+    const formula = typeof raw.formula === 'string' ? raw.formula.trim() : '';
+    if (formula && (!formula.startsWith('=') || formula.length > 500)) return null;
+    if (!formula) {
+      if (!Array.isArray(raw.values) || raw.values.length < 1 || raw.values.length > 5000) return null;
+      if (raw.values.some(value => !cellValueOk(value))) return null;
+      return { host: 'excel', op, sheet, table, name, formula: '', values: raw.values.map(value => [value]) };
+    }
+    return { host: 'excel', op, sheet, table, name, formula, values: null };
+  }
   return null;
 }
 
@@ -511,7 +675,9 @@ function parseRevision(text) {
 }
 
 function actionIsRisky(action) {
-  return action.op === 'set' && action.grid.some(row => row.some(riskyEdit));
+  if (action.op === 'set') return action.grid.some(row => row.some(riskyEdit));
+  if (action.op === 'tableColumn') return Boolean(action.formula && riskyEdit(action.formula));
+  return false;
 }
 
 function describeAction(action) {
@@ -536,6 +702,38 @@ function describeAction(action) {
     const columns = action.columns.join(', ') || 'none';
     return `PivotTable ${action.name} at ${action.destinationSheet}!${action.destinationCell} from ${action.sheet}!${action.range} · rows ${rows} · columns ${columns} · ${values}`;
   }
+  if (action.op === 'filter') {
+    if (action.clear) return `Clear all filters on ${action.sheet} (not reversible by Undo)`;
+    const detail = action.criteria.filterOn === 'Values'
+      ? `values ${action.criteria.values.join(', ')}`
+      : action.criteria.filterOn === 'Custom'
+        ? `${action.criteria.criterion1}${action.criteria.criterion2 ? ` ${action.criteria.operator} ${action.criteria.criterion2}` : ''}`
+        : action.criteria.color || action.criteria.criterion1 || '';
+    return `Filter ${action.sheet}!${action.range} column ${indexToColumn(columnIndex(action.range.split(':')[0].match(/^([A-Z]+)/)[1]) + action.key)} · ${action.criteria.filterOn} ${detail}`;
+  }
+  if (action.op === 'conditionalFormat') {
+    if (action.clear) return `Clear conditional formats on ${action.sheet}!${action.range} (not reversible by Undo)`;
+    return `Highlight ${action.sheet}!${action.range} where ${action.operator} ${action.formula1}${action.formula2 ? ` and ${action.formula2}` : ''}`;
+  }
+  if (action.op === 'borders') return `Borders ${action.edge} on ${action.sheet}!${action.range} (${action.style}, ${action.weight})`;
+  if (action.op === 'freeze') {
+    if (action.unfreeze) return `Unfreeze panes on ${action.sheet}`;
+    return `Freeze ${action.rows} row(s) and ${action.columns} column(s) on ${action.sheet}`;
+  }
+  if (action.op === 'replaceAll') {
+    const where = action.host === 'word' ? 'in the document' : `on ${action.sheet}`;
+    return `Replace every "${action.text}" with "${action.replacement}" ${where} (not reversible by Undo)`;
+  }
+  if (action.op === 'dataValidation') {
+    if (action.clear) return `Clear data validation on ${action.sheet}!${action.range} (not reversible by Undo)`;
+    return `Dropdown on ${action.sheet}!${action.range}: ${action.list.join(', ')}`;
+  }
+  if (action.op === 'namedRange') return `Name ${action.sheet}!${action.range} as ${action.name}`;
+  if (action.op === 'hide') {
+    const verb = action.hidden ? 'Hide' : 'Unhide';
+    return action.target === 'sheet' ? `${verb} sheet ${action.sheet}` : `${verb} ${action.target} ${action.sheet}!${action.range}`;
+  }
+  if (action.op === 'tableColumn') return `Add column ${action.name} to table ${action.table}${action.formula ? ` = ${action.formula}` : ''}`;
   if (action.op === 'replaceSelection') return 'Replace the Word selection';
   if (action.op === 'insertText') return `Insert text at the ${action.where} of the document`;
   if (action.op === 'formatSelection') return 'Format the Word selection';
@@ -641,7 +839,12 @@ async function applyExcelActions(actions) {
         continue;
       }
       if (action.op === 'deleteRows') {
-        const addr = `A${action.row}:${indexToColumn(8)}${action.row + action.count - 1}`;
+        // Capture the full used width, not just A:H, so Undo can restore every column.
+        const used = sheet.getUsedRangeOrNullObject();
+        used.load(['isNullObject', 'columnCount']);
+        await context.sync();
+        const width = Math.max(8, Math.min(used.isNullObject ? 8 : used.columnCount, 200));
+        const addr = `A${action.row}:${indexToColumn(width)}${action.row + action.count - 1}`;
         const range = sheet.getRange(addr);
         range.load(['values', 'formulas']);
         await context.sync();
@@ -657,6 +860,32 @@ async function applyExcelActions(actions) {
       }
       if (action.op === 'autofit') {
         const range = sheet.getRange(action.range);
+        // Capture each width and height first: autofit itself reports nothing to undo.
+        const clean = action.range.replace(/\$/g, '').toUpperCase();
+        const columnOnly = /^[A-Z]+:[A-Z]+$/.test(clean);
+        const match = clean.match(/^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/);
+        const firstCol = columnOnly ? columnIndex(clean.split(':')[0]) : match ? columnIndex(match[1]) : 0;
+        const lastCol = columnOnly ? columnIndex(clean.split(':')[1]) : match ? columnIndex(match[3] || match[1]) : 0;
+        const firstRow = !columnOnly && match ? Number(match[2]) : 0;
+        const lastRow = !columnOnly && match ? Number(match[4] || match[2]) : 0;
+        const widths = [];
+        const heights = [];
+        for (let c = firstCol; c > 0 && c <= lastCol && c - firstCol < 200; c++) {
+          const one = sheet.getRange(indexToColumn(c) + '1');
+          one.format.load('columnWidth');
+          widths.push({ column: indexToColumn(c), one });
+        }
+        for (let r = firstRow; r > 0 && r <= lastRow && r - firstRow < 500; r++) {
+          const one = sheet.getRange('A' + r);
+          one.format.load('rowHeight');
+          heights.push({ row: r, one });
+        }
+        await context.sync();
+        undo.push({
+          host: 'excel', op: 'autofit', sheet: action.sheet,
+          widths: widths.map(item => ({ column: item.column, width: item.one.format.columnWidth })),
+          heights: heights.map(item => ({ row: item.row, height: item.one.format.rowHeight }))
+        });
         range.format.autofitColumns();
         range.format.autofitRows();
         continue;
@@ -711,6 +940,103 @@ async function applyExcelActions(actions) {
         }
         pivot.refresh();
         undo.push({ host: 'excel', op: 'pivot', sheet: action.destinationSheet, name: action.name, createdSheet });
+        continue;
+      }
+      if (action.op === 'filter') {
+        if (action.clear) sheet.autoFilter.clearCriteria();
+        else {
+          sheet.autoFilter.apply(sheet.getRange(action.range), action.key, action.criteria);
+          undo.push({ host: 'excel', op: 'filter', sheet: action.sheet, key: action.key });
+        }
+        continue;
+      }
+      if (action.op === 'conditionalFormat') {
+        const range = sheet.getRange(action.range);
+        if (action.clear) { range.conditionalFormats.clearAll(); continue; }
+        const cf = range.conditionalFormats.add('CellValue');
+        cf.cellValue.rule = action.formula2
+          ? { operator: action.operator, formula1: action.formula1, formula2: action.formula2 }
+          : { operator: action.operator, formula1: action.formula1 };
+        if (action.fill) cf.cellValue.format.fill.color = action.fill;
+        if (action.fontColor) cf.cellValue.format.font.color = action.fontColor;
+        if (action.bold != null) cf.cellValue.format.font.bold = action.bold;
+        cf.load('id');
+        await context.sync();
+        undo.push({ host: 'excel', op: 'conditionalFormat', sheet: action.sheet, range: action.range, id: cf.id });
+        continue;
+      }
+      if (action.op === 'borders') {
+        const range = sheet.getRange(action.range);
+        const edges = action.edge === 'all'
+          ? ['EdgeTop', 'EdgeBottom', 'EdgeLeft', 'EdgeRight', 'InsideVertical', 'InsideHorizontal']
+          : action.edge === 'outline' ? ['EdgeTop', 'EdgeBottom', 'EdgeLeft', 'EdgeRight'] : [action.edge];
+        const targets = edges.map(edge => {
+          const border = range.format.borders.getItem(edge);
+          border.load(['style', 'weight', 'color']);
+          return { edge, border };
+        });
+        await context.sync();
+        undo.push({
+          host: 'excel', op: 'borders', sheet: action.sheet, range: action.range,
+          edges: targets.map(({ edge, border }) => ({ edge, style: border.style, weight: border.weight, color: border.color }))
+        });
+        for (const { border } of targets) {
+          border.style = action.style;
+          border.weight = action.weight;
+          if (action.color) border.color = action.color;
+        }
+        continue;
+      }
+      if (action.op === 'freeze') {
+        const location = sheet.freezePanes.getLocationOrNullObject();
+        location.load(['isNullObject', 'address']);
+        await context.sync();
+        undo.push({ host: 'excel', op: 'freeze', sheet: action.sheet, address: location.isNullObject ? '' : location.address });
+        if (action.unfreeze) sheet.freezePanes.unfreeze();
+        else {
+          if (action.rows) sheet.freezePanes.freezeRows(action.rows);
+          if (action.columns) sheet.freezePanes.freezeColumns(action.columns);
+        }
+        continue;
+      }
+      if (action.op === 'replaceAll') {
+        sheet.replaceAll(action.text, action.replacement, { completeMatch: action.completeMatch, matchCase: action.matchCase });
+        continue;
+      }
+      if (action.op === 'dataValidation') {
+        const range = sheet.getRange(action.range);
+        if (action.clear) { range.dataValidation.clear(); continue; }
+        range.dataValidation.rule = { list: { inCellDropDown: true, source: action.list.join(',') } };
+        range.dataValidation.ignoreBlanks = action.ignoreBlanks;
+        undo.push({ host: 'excel', op: 'dataValidation', sheet: action.sheet, range: action.range });
+        continue;
+      }
+      if (action.op === 'namedRange') {
+        context.workbook.names.add(action.name, sheet.getRange(action.range));
+        undo.push({ host: 'excel', op: 'namedRange', name: action.name });
+        continue;
+      }
+      if (action.op === 'hide') {
+        if (action.target === 'sheet') {
+          sheet.load('visibility');
+          await context.sync();
+          undo.push({ host: 'excel', op: 'hideSheet', sheet: action.sheet, visibility: sheet.visibility });
+          sheet.visibility = action.hidden ? 'Hidden' : 'Visible';
+          continue;
+        }
+        const range = sheet.getRange(action.range);
+        const property = action.target === 'rows' ? 'rowHidden' : 'columnHidden';
+        range.load(property);
+        await context.sync();
+        undo.push({ host: 'excel', op: 'hide', sheet: action.sheet, range: action.range, property, previous: range[property] });
+        range[property] = action.hidden;
+        continue;
+      }
+      if (action.op === 'tableColumn') {
+        const table = sheet.tables.getItem(action.table);
+        const values = action.formula ? [[action.formula]] : action.values;
+        table.columns.add(undefined, values, action.name);
+        undo.push({ host: 'excel', op: 'tableColumn', sheet: action.sheet, table: action.table, name: action.name });
       }
     }
     await context.sync();
@@ -767,6 +1093,38 @@ async function undoExcel(records) {
       } else if (rec.op === 'pivot') {
         if (rec.createdSheet) context.workbook.worksheets.getItem(rec.sheet).delete();
         else sheet.pivotTables.getItem(rec.name).delete();
+      } else if (rec.op === 'filter') {
+        sheet.autoFilter.clearColumnCriteria(rec.key);
+      } else if (rec.op === 'conditionalFormat') {
+        sheet.getRange(rec.range).conditionalFormats.getItem(rec.id).delete();
+      } else if (rec.op === 'borders') {
+        const range = sheet.getRange(rec.range);
+        for (const edge of rec.edges) {
+          const border = range.format.borders.getItem(edge.edge);
+          border.style = edge.style;
+          border.weight = edge.weight;
+          border.color = edge.color;
+        }
+      } else if (rec.op === 'freeze') {
+        if (rec.address) sheet.freezePanes.freezeAt(rec.address);
+        else sheet.freezePanes.unfreeze();
+      } else if (rec.op === 'dataValidation') {
+        sheet.getRange(rec.range).dataValidation.clear();
+      } else if (rec.op === 'namedRange') {
+        context.workbook.names.getItem(rec.name).delete();
+      } else if (rec.op === 'hideSheet') {
+        context.workbook.worksheets.getItem(rec.sheet).visibility = rec.visibility || 'Visible';
+      } else if (rec.op === 'hide') {
+        sheet.getRange(rec.range)[rec.property] = rec.previous;
+      } else if (rec.op === 'tableColumn') {
+        sheet.tables.getItem(rec.table).columns.getItem(rec.name).delete();
+      } else if (rec.op === 'autofit') {
+        for (const item of rec.widths || []) {
+          if (item.width != null) sheet.getRange(item.column + '1').format.columnWidth = item.width;
+        }
+        for (const item of rec.heights || []) {
+          if (item.height != null) sheet.getRange('A' + item.row).format.rowHeight = item.height;
+        }
       }
     }
     await context.sync();
@@ -796,6 +1154,11 @@ async function applyWordActions(actions) {
       } else if (action.op === 'styleSelection') {
         undo.push({ host: 'word', op: 'styleSelection', style: selection.style || 'Normal' });
         selection.style = action.style;
+      } else if (action.op === 'replaceAll') {
+        const found = context.document.body.search(action.text, { matchCase: action.matchCase, matchWholeWord: action.matchWholeWord });
+        found.load('items');
+        await context.sync();
+        for (const item of found.items || []) item.insertText(action.replacement, 'Replace');
       }
     }
     await context.sync();
@@ -1356,8 +1719,10 @@ async function executeClassified(actions, { direct }) {
   let status = blocked.length ? 'BLOCKED' : 'SUCCESS';
   if (safe.length) {
     try {
-      await applyPlan(safe);
+      const records = await applyPlan(safe);
       status = blocked.length ? 'WARNING' : 'SUCCESS';
+      // Without this card the agent loop applied changes with no Undo offered at all.
+      renderAppliedCard(safe, records, blocked.length);
     } catch (error) {
       status = 'FAILED';
       toast(`Could not revise: ${error.message}`);
@@ -1365,6 +1730,31 @@ async function executeClassified(actions, { direct }) {
   }
   if (blocked.length) await renderPlanCard(blocked, 0, { manualOnly: true });
   return { status, blocked: blocked.length, applied: safe.length };
+}
+
+function renderAppliedCard(actions, records, blockedCount) {
+  const conversation = $('conversation');
+  const card = document.createElement('div');
+  card.className = 'message assistant edits-card';
+  const label = document.createElement('div');
+  label.className = 'message-label';
+  label.textContent = blockedCount
+    ? `REVISED ${actions.length} · ${blockedCount} STILL NEED A CLICK`
+    : `REVISED ${actions.length} CHANGE${actions.length === 1 ? '' : 'S'}`;
+  card.append(label);
+  actions.forEach(action => {
+    const row = document.createElement('div');
+    row.className = 'edit-row';
+    row.textContent = describeAction(action);
+    card.append(row);
+  });
+  const buttonRow = document.createElement('div');
+  buttonRow.className = 'button-row';
+  const noun = actions.some(action => action.host === 'word') && !actions.some(action => action.host === 'excel') ? 'document' : 'workbook';
+  if (records.length) attachUndo(buttonRow, label, records, noun);
+  card.append(buttonRow);
+  conversation.append(card);
+  conversation.scrollTop = conversation.scrollHeight;
 }
 
 function renderModePlan(plan, actions, skipped) {

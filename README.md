@@ -51,6 +51,22 @@ Copilot-parity work, stage 1 of 3. Two capabilities added, both verified against
 
 **Not reachable, confirmed against the typings:** Python in Excel (no API — "Python" appears only in error-subtype enums) and the native Copilot ribbon/inline UX (a task pane cannot become that surface).
 
+### 2026-11-22 (Tiers 2 and 3) — the rest of the reachable Copilot action list
+
+**Tier 2 — six actions:** `filter` (value lists, custom criteria, top/bottom items or percent, cell/font colour, and clear), `conditionalFormat` (cell-value rules with fill, font colour and bold, and clear), `borders` (any edge, outline or all; style, weight, colour), `freeze` (rows, columns, unfreeze), `replaceAll` on a sheet, and `dataValidation` dropdowns.
+
+**Tier 3 — depth and trust:** `namedRange`, `hide` for rows, columns and sheets, `tableColumn` for calculated columns, chart types expanded from 4 to 30, Word `replaceAll`, and **Undo completed** — autofit now captures and restores every column width and row height, and deleted rows are restored across the full used width instead of only A–H.
+
+**A real defect found and fixed while completing Undo:** `executeClassified` applied safe actions but discarded the undo records and rendered no card, so **Agent mode with Direct on offered no Undo button at all**, contradicting this README. A new applied-card renderer lists what changed and attaches Undo for every batch.
+
+**Irreversible changes are now click-gated.** A `bulk` flag marks replace-all and the three clear operations; `isDestructive` honours it, so they wait for approval even with Direct on, and the card row says "not reversible by Undo".
+
+**Verified with the real model:** asked to freeze the header, border the range, highlight Total USD over 10000, add an MUK/MCA/GPL dropdown and name Q2:Q753, `qwen4-max` emitted **all five** new actions with correct parameters (`GreaterThan 10000 #FFC7CE`, `all Continuous Thin`, `AgingUSD Q2:Q753`).
+
+`npm run check` passes. `npm test` → **62 pass / 2 fail**, still only the pre-existing Windows `spawn unzip ENOENT` packaging failures. Nine new tests cover the Tier 2 and Tier 3 actions, bulk gating, autofit undo, and rejection of malformed payloads.
+
+處理狀態（2026-11-22，Tier 2 及 3）：**Tier 2 六個 action** — `filter`（值清單、自訂條件、top/bottom 項目或百分比、儲存格／字型顏色、清除）、`conditionalFormat`（儲存格值規則配合填色、字型顏色與粗體、清除）、`borders`（任何邊、外框或全部；樣式、粗幼、顏色）、`freeze`（列、欄、取消凍結）、工作表 `replaceAll`、`dataValidation` 下拉清單。**Tier 3 深度與信任** — `namedRange`、`hide`（列／欄／工作表）、`tableColumn` 計算欄、圖表類型由 4 擴至 30、Word `replaceAll`，以及**完成 Undo**：autofit 現會擷取並還原每個欄寬與列高，刪除的列會按整個已用寬度還原而非只限 A–H。**完成 Undo 時發現並修正一個真實缺陷：** `executeClassified` 套用安全 action 後丟棄 undo 記錄且不渲染卡片，令 **Agent 模式開啟 Direct 時完全沒有 Undo 按鈕**，與本 README 所述不符；新增的「已套用」卡片渲染器會列出改動並為每批附上 Undo。**不可逆改動現需點擊批准：** `bulk` 標記取代全部與三個清除操作，`isDestructive` 會尊重它，故即使開啟 Direct 亦等待批准，卡片該行會註明「not reversible by Undo」。**已用真實模型驗證：** 要求凍結表頭、為範圍加框、標示 Total USD 大於 10000、加入 MUK/MCA/GPL 下拉並把 Q2:Q753 命名時，`qwen4-max` 發出**全部五個**新 action 且參數正確。`npm run check` 通過；`npm test` 為 **62 通過／2 失敗**，仍只是那兩個既有的 Windows `spawn unzip ENOENT` 打包失敗。新增九個測試覆蓋 Tier 2 與 Tier 3 action、bulk 審批、autofit undo 與無效 payload 拒絕。
+
 處理狀態（2026-11-22，較後）：**已安裝於 Surface Book** — 上文原本說本機未安裝，現已更正。clone 位於 `C:\Users\Anthony Man\excel-qwen-grok-copilot`（OneDrive 以外），已 sideload 進桌面 Excel，relay 在 `127.0.0.1:3000`；刻意**未**安裝 auto-start。已實測：pane 經 Settings 載入 key，`POST /api/chat` 回傳真實 `qwen4-max` 答案。
 
 **已修正 agent 讀回的四個缺陷。** 原本 Agent 無法審閱活頁簿或起草 pivot：它要求讀取範圍，pane 記錄 `Execute SUCCESS · 0 actions`，並告訴模型 `Observed: SUCCESS`，但模型完全收不到儲存格。它其後正確地拒絕猜測欄位。四個缺陷為：`readGrid` 只讀 8 欄（17 欄的 ageing 表丟失 I:Q，桶與金額欄位看不見）；agent 讀取上限只有 160 格（`Summary!A1:S40` 共 760 格、`Combined Aging (USD)!A1:Q25` 共 425 格被靜默丟棄）；範圍被拒時回饋誤導的 `Observed: SUCCESS`；`normalizePlan` 丟棄字串形式的 plan 令計劃卡片空白。現已分別改為：保留完整欄寬、上限 `READ_MAX_CELLS` = 2000、明確回報「No range was read: 原因」並記入 audit、接受字串 plan。超出 context 預算的讀取現會附上明確的 `[truncated: ...]` 標記。`npm run check` 通過；`npm test` 為 **52 通過／2 失敗**，兩個失敗是既有的 `spawn unzip ENOENT` 打包測試（Windows 沒有 `unzip`），與是次改動無關。新增三個測試覆蓋寬表讀取、誠實拒絕與字串 plan。
@@ -81,8 +97,15 @@ In Excel:
 - Bold, italic, fill, font color, number format, alignment, and wrap
 - Clear a range
 - Insert or delete rows, insert columns, add or rename a sheet, autofit, and sort
-- A column, bar, line, or pie chart, and a table with a name
+- A chart in 30 types (column, bar, line, pie, area, doughnut, scatter, radar, bubble, surface, stock and their stacked variants), and a table with a name
 - A **native PivotTable** on a new or existing sheet: row, column and filter fields, value fields with a chosen aggregation (Sum, Count, Average, Max, Min, CountNumbers, Product, StandardDeviation, Variance), Tabular/Compact/Outline layout, and grand totals
+- **Filters** — by value list, custom criteria such as `>1000`, top/bottom items or percent, and cell or font colour
+- **Conditional highlighting** — cell-value rules (greater than, between, equal to, and the rest) with fill, font colour and bold
+- **Borders** on any edge or all edges, with style, weight and colour
+- **Freeze panes**, and unhide
+- **Find and replace every match** on a sheet
+- **Dropdowns** (data validation lists) on a range
+- **Named ranges**, **hidden rows, columns and sheets**, and **calculated table columns**
 
 In Word:
 
@@ -90,8 +113,9 @@ In Word:
 - Insert text at the start or end of the document
 - Bold and italic on the selection
 - The styles Heading 1, Heading 2, Heading 3, Title, and Normal
+- **Replace every match** of a phrase in the whole document
 
-It does not run Python in Excel — Office.js exposes no API for it. Borders, conditional formatting, filters, freeze panes, and replacing every match of a phrase in Word are outside this update.
+**Two things are genuinely out of reach, not merely unbuilt.** It cannot run **Python in Excel** — Office.js exposes no API for it; "Python" appears in the typings only inside error-subtype enums. And it cannot become the **native Copilot surface** — the ribbon-integrated pane, inline ghost suggestions and the built-in Analyze Data experience are not something a sideloaded task pane can turn into. Everything else on the Copilot action list is now implemented.
 
 ## First time on a computer
 
@@ -166,9 +190,11 @@ These formulas are never written automatically, even with Direct on: `WEBSERVICE
 **Undo last apply** reverses that batch:
 
 - Cell values and formulas go back to what was there. A cell that was empty is cleared.
-- Inserted rows and columns are removed. Deleted rows are restored for columns A through H. A cleared range is put back.
-- A new sheet, chart, or table is removed. A renamed sheet gets its previous name. A sort is put back.
-- Autofit is not reversed.
+- Inserted rows and columns are removed. Deleted rows are restored across the **full used width** of the sheet, up to 200 columns. A cleared range is put back.
+- A new sheet, chart, table, PivotTable or named range is removed. A renamed sheet gets its previous name. A sort is put back.
+- **Autofit is reversed**: each column width and row height is captured first and put back.
+- A filter is cleared on the column it was applied to. A conditional format, a dropdown, a calculated table column, and hidden rows, columns or sheets are all restored. Freeze panes go back to their previous position.
+- **Not reversible by Undo**, so these always wait for your click: replacing every match on a sheet or in a document, clearing all filters, clearing all conditional formats, and clearing data validation. The card says so on the row.
 - In Word, the selection text, bold, italic, and style are put back. Inserted text is removed when the pane can still find that exact wording.
 
 Excel’s own Undo (`Ctrl+Z`) is still available for edits Excel recorded.

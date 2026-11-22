@@ -115,7 +115,8 @@
   }
 
   function isDestructive(action) {
-    return DESTRUCTIVE.has(action?.op);
+    // bulk marks a change Undo cannot reverse, so it waits for a click like a delete.
+    return DESTRUCTIVE.has(action?.op) || action?.bulk === true;
   }
 
   function isExcelError(value) {

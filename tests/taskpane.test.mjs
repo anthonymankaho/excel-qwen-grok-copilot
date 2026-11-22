@@ -47,6 +47,7 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
   const cellStore = {};
   for (const [k, v] of Object.entries(cells || {})) cellStore[k] = { value: v.value ?? '', formula: v.formula ?? '' };
   const missing = new Set(missingSheets || []);
+  const sheetVisibility = {};
   const range = (obj) => ({
     load() {}, isNullObject: false,
     getCell() {
@@ -133,10 +134,62 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
     const fill = { load() {} };
     let fillColor;
     Object.defineProperty(fill, 'color', { get() { return fillColor; }, set(v) { fillColor = v; writes.push({ sheet: sheetName, cell: addr, kind: 'fill', value: v }); } });
+    const borderState = {};
+    const sizeState = { columnWidth: 64, rowHeight: 15 };
+    let rowHidden = false;
+    let columnHidden = false;
+    Object.defineProperty(cell, 'rowHidden', {
+      get: () => rowHidden,
+      set: v => { rowHidden = v; writes.push({ sheet: sheetName, cell: addr, kind: 'rowHidden', value: v }); }
+    });
+    Object.defineProperty(cell, 'columnHidden', {
+      get: () => columnHidden,
+      set: v => { columnHidden = v; writes.push({ sheet: sheetName, cell: addr, kind: 'columnHidden', value: v }); }
+    });
     cell.format = {
       font, fill, load() {},
+      get columnWidth() { return sizeState.columnWidth; },
+      set columnWidth(v) { sizeState.columnWidth = v; writes.push({ sheet: sheetName, cell: addr, kind: 'columnWidth', value: v }); },
+      get rowHeight() { return sizeState.rowHeight; },
+      set rowHeight(v) { sizeState.rowHeight = v; writes.push({ sheet: sheetName, cell: addr, kind: 'rowHeight', value: v }); },
       autofitColumns() { writes.push({ sheet: sheetName, cell: addr, kind: 'autofitColumns' }); },
-      autofitRows() { writes.push({ sheet: sheetName, cell: addr, kind: 'autofitRows' }); }
+      autofitRows() { writes.push({ sheet: sheetName, cell: addr, kind: 'autofitRows' }); },
+      borders: {
+        getItem(edge) {
+          const st = (borderState[edge] ||= { style: 'None', weight: 'Hairline', color: '#000000' });
+          const border = { load() {} };
+          for (const key of ['style', 'weight', 'color']) {
+            Object.defineProperty(border, key, {
+              get: () => st[key],
+              set: v => { st[key] = v; writes.push({ sheet: sheetName, cell: addr, kind: 'border', edge, key, value: v }); }
+            });
+          }
+          return border;
+        }
+      }
+    };
+    let cfSeq = 0;
+    cell.conditionalFormats = {
+      add(type) {
+        const id = 'cf' + (++cfSeq);
+        const rec = { sheet: sheetName, cell: addr, kind: 'conditionalFormat', id, type, rule: null, fill: null, fontColor: null, bold: null };
+        writes.push(rec);
+        return {
+          load() {}, get id() { return id; },
+          cellValue: {
+            set rule(v) { rec.rule = v; },
+            format: { fill: { set color(v) { rec.fill = v; } }, font: { set color(v) { rec.fontColor = v; }, set bold(v) { rec.bold = v; } } }
+          },
+          delete() { writes.push({ kind: 'deleteConditionalFormat', id }); }
+        };
+      },
+      clearAll() { writes.push({ sheet: sheetName, cell: addr, kind: 'clearConditionalFormats' }); },
+      getItem(id) { return { delete() { writes.push({ kind: 'deleteConditionalFormat', id }); } }; }
+    };
+    cell.dataValidation = {
+      set rule(v) { writes.push({ sheet: sheetName, cell: addr, kind: 'dataValidation', rule: v }); },
+      set ignoreBlanks(v) { writes.push({ sheet: sheetName, cell: addr, kind: 'dataValidationIgnoreBlanks', value: v }); },
+      clear() { writes.push({ sheet: sheetName, cell: addr, kind: 'clearDataValidation' }); }
     };
     let numberFormat = [['']];
     Object.defineProperty(cell, 'numberFormat', {
@@ -161,6 +214,8 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
       get name() { return currentName; },
       set name(v) { writes.push({ kind: 'renameSheet', from: currentName, name: v }); currentName = v; },
       delete() { writes.push({ sheet: name, kind: 'deleteSheet' }); },
+      get visibility() { return sheetVisibility[name] || 'Visible'; },
+      set visibility(v) { sheetVisibility[name] = v; writes.push({ sheet: name, kind: 'visibility', value: v }); },
       getRange: addr => makeWritableRange(name, addr),
       getUsedRangeOrNullObject: () => ({ isNullObject: true, load() {} }),
       charts: {
@@ -173,7 +228,15 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
       },
       tables: {
         add() { writes.push({ sheet: name, kind: 'table' }); return { set name(v) { writes.push({ sheet: name, kind: 'tableName', name: v }); }, delete() { writes.push({ kind: 'deleteTable' }); } }; },
-        getItem(tableName) { return { delete() { writes.push({ kind: 'deleteTable', name: tableName }); } }; }
+        getItem(tableName) {
+          return {
+            delete() { writes.push({ kind: 'deleteTable', name: tableName }); },
+            columns: {
+              add(index, values, columnName) { writes.push({ sheet: name, kind: 'tableColumn', table: tableName, name: columnName, values }); },
+              getItem(columnName) { return { delete() { writes.push({ kind: 'deleteTableColumn', table: tableName, name: columnName }); } }; }
+            }
+          };
+        }
       },
       pivotTables: {
         add(pivotName, source, destination) {
@@ -200,6 +263,23 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
           };
         },
         getItem(pivotName) { return { delete() { writes.push({ kind: 'deletePivot', name: pivotName }); } }; }
+      },
+      autoFilter: {
+        apply(range, columnIndex, criteria) { writes.push({ sheet: name, kind: 'filter', range: range.address, columnIndex, criteria }); },
+        clearCriteria() { writes.push({ sheet: name, kind: 'clearFilters' }); },
+        clearColumnCriteria(columnIndex) { writes.push({ sheet: name, kind: 'clearFilterColumn', columnIndex }); },
+        reapply() { writes.push({ sheet: name, kind: 'reapplyFilter' }); }
+      },
+      freezePanes: {
+        freezeRows(count) { writes.push({ sheet: name, kind: 'freezeRows', count }); },
+        freezeColumns(count) { writes.push({ sheet: name, kind: 'freezeColumns', count }); },
+        unfreeze() { writes.push({ sheet: name, kind: 'unfreeze' }); },
+        freezeAt(addr) { writes.push({ sheet: name, kind: 'freezeAt', address: addr }); },
+        getLocationOrNullObject() { return { isNullObject: true, address: '', load() {} }; }
+      },
+      replaceAll(text, replacement, criteria) {
+        writes.push({ sheet: name, kind: 'replaceAll', text, replacement, criteria });
+        return { value: 1 };
       }
     };
   }
@@ -225,6 +305,10 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
           getSelectedRange: () => range(selection),
           name: 'Book1',
           load() {},
+          names: {
+            add(name, reference) { writes.push({ kind: 'namedRange', name, reference: reference.address }); return { delete() { writes.push({ kind: 'deleteNamedRange', name }); } }; },
+            getItem(name) { return { delete() { writes.push({ kind: 'deleteNamedRange', name }); } }; }
+          },
           worksheets: {
             load() {},
             items: [{ name: 'Sheet1', load() {} }],
@@ -252,7 +336,10 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
             get text() { return wordDoc.bodyText; },
             load() {},
             insertText(text, where) { writes.push({ kind: 'wordBody', where, text }); },
-            search() { return { load() {}, items: [{ insertText() { writes.push({ kind: 'wordRemove' }); } }] }; }
+            search(term, options) {
+              writes.push({ kind: 'wordSearch', term, options });
+              return { load() {}, items: [{ insertText(text, where) { writes.push({ kind: 'wordReplace', term, text, where }); } }] };
+            }
           }
         },
         sync: async () => {}
@@ -861,4 +948,153 @@ test('A pivot action without value fields or with a bad aggregation is rejected'
     await ask(sb, 'draft a pivot');
     assert.equal(sb.writes.some(w => w.kind === 'pivot'), false, JSON.stringify(action));
   }
+});
+
+async function runActions(actions, prompt) {
+  const reply = { model: 'm', text: 'Applying.\n```json\n{"actions":' + JSON.stringify(actions) + ',"decision":"COMPLETE"}\n```' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  sb.els('directRevise').checked = true;
+  await ask(sb, prompt);
+  return sb;
+}
+
+test('Filter, conditional format, borders, freeze and dropdown all apply', async () => {
+  const sb = await runActions([
+    { op: 'filter', sheet: 'Sheet1', range: 'A1:C10', column: 'A', filterOn: 'Values', values: ['MUK'] },
+    { op: 'conditionalFormat', sheet: 'Sheet1', range: 'C2:C10', operator: 'GreaterThan', formula1: '100', fill: '#FFC7CE' },
+    { op: 'borders', sheet: 'Sheet1', range: 'A1:C10', edge: 'all', style: 'Continuous', weight: 'Thin', color: '#1F4E79' },
+    { op: 'freeze', sheet: 'Sheet1', rows: 1, columns: 0 },
+    { op: 'dataValidation', sheet: 'Sheet1', range: 'B2:B10', list: ['MUK', 'MCA'] }
+  ], 'format and filter the table');
+  const filter = sb.writes.find(w => w.kind === 'filter');
+  assert.ok(filter, 'filter applied');
+  assert.equal(filter.columnIndex, 0);
+  assert.equal(filter.criteria.filterOn, 'Values');
+  assert.equal(filter.criteria.values.join(','), 'MUK');
+  const cf = sb.writes.find(w => w.kind === 'conditionalFormat');
+  assert.ok(cf, 'conditional format applied');
+  assert.equal(cf.type, 'CellValue');
+  assert.equal(cf.rule.operator, 'GreaterThan');
+  assert.equal(cf.rule.formula1, '100');
+  assert.equal(cf.fill, '#FFC7CE');
+  const borders = sb.writes.filter(w => w.kind === 'border');
+  assert.equal(borders.length, 18);
+  assert.ok(borders.some(b => b.edge === 'EdgeTop' && b.key === 'style' && b.value === 'Continuous'));
+  assert.ok(borders.some(b => b.edge === 'InsideHorizontal' && b.key === 'weight' && b.value === 'Thin'));
+  assert.ok(sb.writes.some(w => w.kind === 'freezeRows' && w.count === 1));
+  const dv = sb.writes.find(w => w.kind === 'dataValidation');
+  assert.ok(dv, 'dropdown applied');
+  assert.equal(dv.rule.list.source, 'MUK,MCA');
+  assert.equal(dv.rule.list.inCellDropDown, true);
+});
+
+test('Bulk changes wait for a click even with Direct on', async () => {
+  const sb = await runActions([
+    { op: 'replaceAll', sheet: 'Sheet1', text: 'OLD', replacement: 'NEW' },
+    { op: 'filter', sheet: 'Sheet1', range: 'A1:C10', clear: true },
+    { op: 'conditionalFormat', sheet: 'Sheet1', range: 'A1:C10', clear: true },
+    { op: 'dataValidation', sheet: 'Sheet1', range: 'B2:B10', clear: true }
+  ], 'clean everything up');
+  for (const kind of ['replaceAll', 'clearFilters', 'clearConditionalFormats', 'clearDataValidation']) {
+    assert.equal(sb.writes.some(w => w.kind === kind), false, kind + ' must wait for approval');
+  }
+  assert.match(visible(sb.els('conversation')), /not reversible by Undo/);
+});
+
+test('Malformed filter, highlight, border, freeze, replace and dropdown payloads are rejected', async () => {
+  const bad = [
+    { op: 'filter', sheet: 'Sheet1', range: 'A1:C10', column: 'Z', filterOn: 'Values', values: ['x'] },
+    { op: 'filter', sheet: 'Sheet1', range: 'A1:C10', column: 'A', filterOn: 'Values', values: [] },
+    { op: 'filter', sheet: 'Sheet1', range: 'A1:C10', column: 'A', filterOn: 'Nonsense' },
+    { op: 'conditionalFormat', sheet: 'Sheet1', range: 'A1:C10', operator: 'Between', formula1: '1' },
+    { op: 'conditionalFormat', sheet: 'Sheet1', range: 'A1:C10', operator: 'GreaterThan', formula1: '1' },
+    { op: 'conditionalFormat', sheet: 'Sheet1', range: 'A1:C10', operator: 'Sideways', formula1: '1', fill: '#FFC7CE' },
+    { op: 'borders', sheet: 'Sheet1', range: 'A1:C10', edge: 'sideways' },
+    { op: 'borders', sheet: 'Sheet1', range: 'A1:C10', weight: 'enormous' },
+    { op: 'freeze', sheet: 'Sheet1' },
+    { op: 'freeze', sheet: 'Sheet1', rows: -1 },
+    { op: 'replaceAll', sheet: 'Sheet1', text: '', replacement: 'x' },
+    { op: 'dataValidation', sheet: 'Sheet1', range: 'A1:C10', list: ['a,b'] },
+    { op: 'dataValidation', sheet: 'Sheet1', range: 'A1:C10', list: [] }
+  ];
+  const kinds = ['filter', 'conditionalFormat', 'border', 'freezeRows', 'freezeColumns', 'replaceAll', 'dataValidation'];
+  for (const action of bad) {
+    const sb = await runActions([action], 'try this');
+    assert.equal(sb.writes.some(w => kinds.includes(w.kind)), false, JSON.stringify(action));
+  }
+});
+
+test('Named range, hide, calculated table column and an extra chart type all apply', async () => {
+  const sb = await runActions([
+    { op: 'namedRange', sheet: 'Sheet1', range: 'C2:C10', name: 'AgingUSD' },
+    { op: 'hide', sheet: 'Sheet1', target: 'rows', range: 'A5:A20', hidden: true },
+    { op: 'hide', sheet: 'Sheet1', target: 'columns', range: 'D:E', hidden: true },
+    { op: 'hide', sheet: 'Sheet1', target: 'sheet', hidden: true },
+    { op: 'tableColumn', sheet: 'Sheet1', table: 'SalesTable', name: 'Margin', formula: '=[@Revenue]-[@Cost]' },
+    { op: 'chart', sheet: 'Sheet1', range: 'A1:B10', type: 'doughnut', title: 'Mix' }
+  ], 'tidy and extend the table');
+  const named = sb.writes.find(w => w.kind === 'namedRange');
+  assert.ok(named, 'named range created');
+  assert.equal(named.name, 'AgingUSD');
+  assert.equal(named.reference, 'Sheet1!C2:C10');
+  assert.ok(sb.writes.some(w => w.kind === 'rowHidden' && w.value === true));
+  assert.ok(sb.writes.some(w => w.kind === 'columnHidden' && w.value === true));
+  assert.ok(sb.writes.some(w => w.kind === 'visibility' && w.value === 'Hidden'));
+  const column = sb.writes.find(w => w.kind === 'tableColumn');
+  assert.ok(column, 'calculated column added');
+  assert.equal(column.table, 'SalesTable');
+  assert.equal(column.name, 'Margin');
+  assert.equal(column.values[0][0], '=[@Revenue]-[@Cost]');
+  const chart = sb.writes.find(w => w.kind === 'chart');
+  assert.ok(chart);
+  assert.equal(chart.type, 'Doughnut');
+});
+
+test('Autofit captures widths and heights so Undo can restore them', async () => {
+  const sb = await runActions([{ op: 'autofit', sheet: 'Sheet1', range: 'A1:C3' }], 'autofit please');
+  assert.ok(sb.writes.some(w => w.kind === 'autofitColumns'));
+  assert.ok(sb.writes.some(w => w.kind === 'autofitRows'));
+  const cards = sb.els('conversation').children;
+  const card = cards.find(c => String(c.className).includes('edits-card'));
+  assert.ok(card, 'a revision card was rendered');
+  const row = (card.children || []).find(c => c.className === 'button-row');
+  const undo = row && (row.children || []).find(c => /Undo/.test(c.textContent));
+  assert.ok(undo, 'an Undo button is offered');
+  await fire(undo, 'click'); await flush(); await flush();
+  assert.ok(sb.writes.some(w => w.kind === 'columnWidth' && w.value === 64), 'column width restored');
+  assert.ok(sb.writes.some(w => w.kind === 'rowHeight' && w.value === 15), 'row height restored');
+});
+
+test('Malformed named range, hide and table column payloads are rejected', async () => {
+  const bad = [
+    { op: 'namedRange', sheet: 'Sheet1', range: 'A1:B2', name: 'A1' },
+    { op: 'namedRange', sheet: 'Sheet1', range: 'A1:B2', name: 'has space' },
+    { op: 'namedRange', sheet: 'Sheet1', range: 'nonsense', name: 'Good' },
+    { op: 'hide', sheet: 'Sheet1', target: 'diagonal', range: 'A1:B2' },
+    { op: 'hide', sheet: 'Sheet1', target: 'rows' },
+    { op: 'tableColumn', sheet: 'Sheet1', table: 'T', name: 'C', formula: 'no equals sign' },
+    { op: 'tableColumn', sheet: 'Sheet1', table: 'T', name: 'C' },
+    { op: 'chart', sheet: 'Sheet1', range: 'A1:B2', type: 'treemap' }
+  ];
+  const kinds = ['namedRange', 'rowHidden', 'columnHidden', 'visibility', 'tableColumn', 'chart'];
+  for (const action of bad) {
+    const sb = await runActions([action], 'try this');
+    assert.equal(sb.writes.some(w => kinds.includes(w.kind)), false, JSON.stringify(action));
+  }
+});
+
+test('Word replace-all is click-gated and then replaces every match', async () => {
+  const reply = { model: 'm', text: 'Replacing.\n```json\n{"actions":[{"op":"replaceAll","text":"team","replacement":"group"}],"decision":"COMPLETE"}\n```' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+  sb.officeCb({ host: 'Word' });
+  await flush(); await flush();
+  sb.els('workMode').value = 'agent';
+  sb.els('directRevise').checked = true;
+  await ask(sb, 'replace team with group everywhere');
+  assert.equal(sb.writes.some(w => w.kind === 'wordSearch'), false, 'bulk replace waits for a click');
+  assert.match(visible(sb.els('conversation')), /not reversible by Undo/);
+  const risky = sb.els('conversation').children.flatMap(card => card.children || []).find(el => el.className === 'button-row');
+  assert.ok(risky, 'an approval card was rendered');
 });
