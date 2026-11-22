@@ -2,6 +2,59 @@
 
 A local task pane for desktop Excel and Word. You ask in plain language. Qwen or Grok plans the work, and the pane revises the open file through a fixed list of actions. On this PC the pane and the relay both live at `http://127.0.0.1:3000`. Excel on the web uses the HTTPS copy at `https://excel-qwen-grok.anthonym-354.workers.dev`. Company-wide deployment still needs an admin install.
 
+---
+
+## Install 安裝
+
+**Teammates — this is the whole install.** Each person uses their own API key; none is bundled, and the owner's key is never shared.
+
+### From a terminal (recommended) 用終端機（建議）
+
+**Close Excel and Word first**, then run these three lines:
+
+```powershell
+cd "C:\Users\Your Name\Qwen-Grok-for-Excel-and-Word"
+npm run setup
+npm start
+```
+
+- **`npm run setup`** — checks Node.js 20+, runs `npm install`, prints the next steps. Installs no auto-start, writes no key.
+- **`npm start`** — sideloads the add-in into desktop Excel and opens Excel. **Leave that terminal window open: it *is* the relay.**
+
+Then in Excel: **Home → Add-ins → Qwen + Grok for Excel and Word** → **Settings** → pick Qwen or Grok → paste **your own** key → leave **Remember** ticked → **Use key**. The dot turns green.
+
+Plain npm is identical: `npm install` then `npm start`. Requires **Node.js 20+** from https://nodejs.org.
+
+> **Quote the path.** If your user folder contains a space — e.g. `C:\Users\Anthony Man` — PowerShell splits an unquoted path and `cd` fails.
+> **路徑要加引號。** 使用者資料夾若含空格，未加引號的路徑會令 PowerShell 的 `cd` 失敗。
+
+### From the zip 用 zip
+
+Get `Qwen-Grok-for-Excel-and-Word.zip` from the owner, extract it, and run the same commands in that folder. `START-HERE.txt` inside is the one-page quick start.
+
+The owner rebuilds it with `npm run package`, which writes `download/Qwen-Grok-for-Excel-and-Word.zip`. That folder is **git-ignored on purpose**: a committed zip would be stale the moment the code changes. If you have repository access, clone and run `npm run setup` instead — you always get current code.
+
+### Or double-click 或雙擊
+
+`Setup and Start.bat` does the same install **plus** a logon auto-start and a per-minute keep-alive task. Skip it if you do not want background automation — `npm start` alone is enough.
+
+### Word, and Excel on the web
+
+- **Word:** close Word, then `npm run start:word`.
+- **Excel on the web:** **Home → Add-ins → Upload My Add-in** → `manifest.cloudflare.xml`, then paste the **relay token** in Settings. No provider key needed — `QWEN_API_KEY` is already a Worker secret.
+
+### Documentation 文件
+
+| File | Purpose |
+|---|---|
+| **[SOP-INSTALL.md](SOP-INSTALL.md)** | **Installation 安裝程序** — prerequisites, CLI steps, verification, daily running, uninstall, troubleshooting, teammate handover |
+| **[SOP-USER-GUIDE.md](SOP-USER-GUIDE.md)** | **User guide 說明書** — modes and Direct, context control, every action, cards, Undo, keys/URLs/models, finance rules, limits |
+| [SOP.md](SOP.md) | Index of the two |
+
+**Stop the relay:** `npm run relay-stop` · **Remove the sideload:** `npm run stop` · **Remove auto-start:** `npm run autostart-remove`
+
+---
+
 ## Processing status · 處理狀態
 
 **2026-11-22 — Qwen Token Plan key rotated across the estate.**
@@ -132,14 +185,18 @@ In Word:
 
 ## First time on a computer
 
-1. Install Node.js 20 or newer.
+See **[Install](#install-安裝)** at the top for the short version. In full:
+
+1. Install Node.js 20 or newer from https://nodejs.org.
 2. Close Excel and Word.
-3. Double-click `Setup and Start.bat`. It installs dependencies, installs the Windows logon auto-start, sideloads the add-in into desktop Excel, and starts the relay.
-4. The same steps by hand: `npm install`, `npm run autostart`, then `npm start`.
+3. From the project folder run `npm run setup` (Node check + `npm install`), then `npm start`. This sideloads the add-in and starts the relay, and installs **no** auto-start.
+4. Prefer one double-click? `Setup and Start.bat` does the same **and** installs the Windows logon auto-start. By hand that is `npm install`, `npm run autostart`, then `npm start`.
 5. Open the pane from **Home > Add-ins**. The add-in name is **Qwen + Grok for Excel and Word**.
 6. Open Settings, pick Qwen or Grok, paste **your own** API key, leave **Remember key on this PC** ticked, and press **Use key**.
 
 To open the same add-in in Word, run `npm run start:word` once with Word closed. `npm start` only launches Excel.
+
+Full installation detail, verification and uninstall: **[SOP-INSTALL.md](SOP-INSTALL.md)**.
 
 ## Every later sign-in
 
@@ -265,6 +322,7 @@ Each computer runs its own relay and stores its own keys.
 
 | Command | What it does |
 |---|---|
+| `npm run setup` | **CLI install:** check Node 20+, run `npm install`, print the next steps. No auto-start, no key |
 | `npm start` | Sideload into desktop Excel and start the relay |
 | `npm run start:word` | Sideload into desktop Word and start the relay |
 | `npm run dev-server` | Run the relay in the foreground |
@@ -282,7 +340,7 @@ Auto-start is Windows-only. It uses `%APPDATA%`.
 
 ## Tests
 
-`npm run check` and `npm test` need no API key. The pane tests stub the page, Excel, Word, and the stream. They cover context, the click-gated edit card, Direct revise, Undo, risky formulas, Word replace of the selection, Chat, Plan, Agent, a debit-and-credit stop, and Auto staying on a provider that has a key. The relay tests cover the loopback lock, the Qwen URL allowlist, Fast mode, the Agent mode note, and stream errors.
+`npm run check` and `npm test` need no API key. The pane tests stub the page, Excel, Word, and the stream. They cover context, the click-gated edit card, Direct revise, Undo, risky formulas, Word replace of the selection, Chat, Plan, Agent, a debit-and-credit stop, and Auto staying on a provider that has a key. The relay tests cover the loopback lock, the Qwen URL allowlist, Fast mode, the Agent mode note, and stream errors. The download-zip tests read the pack with a pure-Node reader (`readZipEntry`, `listZipEntries`) rather than the Unix `unzip` binary, so **the whole suite passes on Windows**; they assert the zip carries both SOPs, both manifests, a `package.json` with a `setup` script, and no `.env`, `node_modules` or `.git` content.
 
 Before trusting a change in the real app, start the relay, load a key, ask one question in Chat, and confirm the answer. For a revise, use Plan or Agent, confirm the card, and use Undo once.
 

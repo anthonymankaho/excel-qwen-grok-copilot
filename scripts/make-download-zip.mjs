@@ -1,30 +1,60 @@
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { deflateRawSync, crc32 } from 'node:zlib';
+import { deflateRawSync, inflateRawSync, crc32 } from 'node:zlib';
 
 const ROOT_NAME = 'Qwen-Grok-for-Excel-and-Word';
 const SKIP_DIRS = new Set(['node_modules', '.git', '.wrangler', 'download']);
 
 export const START_HERE = `Qwen + Grok for Excel and Word
 
-This folder has no API keys.
+This folder has no API keys. Each person uses their own key.
 
-On this Windows PC
+INSTALL FROM A TERMINAL  (recommended)
 1. Install Node.js 20 or newer from https://nodejs.org
 2. Close Excel and Word.
-3. Double-click Setup and Start.bat.
-4. In Excel, open Home > Add-ins. The name is Qwen + Grok for Excel and Word.
-5. Open Settings, paste your own Qwen or Grok key, leave Remember ticked, and press Use key.
+3. Open PowerShell in this folder and run:
 
-Word needs one extra step: close Word, open a terminal in this folder, and run npm run start:word.
+     npm run setup
+     npm start
 
-Excel on the web
-Upload manifest.cloudflare.xml from Home > Add-ins > Upload My Add-in.
-The pane address is https://excel-qwen-grok.anthonym-354.workers.dev
-Paste the relay token in Settings. Qwen and Grok keys are Worker secrets, set with wrangler, and they are not in this zip.
+   If the folder path contains spaces, quote it:
+     cd "C:\\Users\\Your Name\\Qwen-Grok-for-Excel-and-Word"
 
-Read README.md for the full guide.
+   npm run setup checks Node 20+, runs npm install, and prints the next steps.
+   npm start sideloads the add-in and opens Excel. Leave that terminal window
+   open - it IS the relay.
+
+   Plain npm works the same:  npm install  then  npm start.
+   Neither route installs auto-start or writes any key.
+
+OR DOUBLE-CLICK
+   Setup and Start.bat does the same and ALSO installs a logon auto-start
+   plus a per-minute keep-alive task. Skip it if you do not want anything
+   running at sign-in. npm start alone is enough to use the add-in.
+
+FIRST USE
+4. In Excel: Home > Add-ins > Qwen + Grok for Excel and Word.
+5. Settings > pick Qwen or Grok > paste YOUR OWN key > leave Remember
+   ticked > Use key. The dot turns green.
+
+WORD
+   Close Word, then in this folder run:  npm run start:word
+
+EXCEL ON THE WEB
+   Upload manifest.cloudflare.xml from Home > Add-ins > Upload My Add-in.
+   Pane address: https://excel-qwen-grok.anthonym-354.workers.dev
+   Paste the relay token in Settings. Provider keys are Worker secrets set
+   with wrangler; they are not in this zip.
+
+DOCS
+   SOP-INSTALL.md     installation, CLI steps, troubleshooting
+   SOP-USER-GUIDE.md  how to use it / 說明書
+   README.md          full reference
+
+STOP
+   npm run relay-stop   stops the relay
+   npm run stop         removes the sideload from Excel
 `;
 
 export function shouldSkip(relativePath) {
@@ -103,6 +133,37 @@ export function zipBytes(files, stamp = new Date('2026-11-22T12:00:00Z')) {
   end.writeUInt32LE(directory.length, 12);
   end.writeUInt32LE(offset, 16);
   return Buffer.concat([...locals, directory, end]);
+}
+
+// Pure-Node zip reading, so the pack can be verified on Windows where the Unix
+// unzip binary does not exist. zipBytes writes no data descriptors, so the local
+// headers carry the compressed size.
+function walkEntries(bytes) {
+  const entries = [];
+  let offset = 0;
+  while (offset + 30 <= bytes.length && bytes.readUInt32LE(offset) === 0x04034b50) {
+    const method = bytes.readUInt16LE(offset + 8);
+    const compressedSize = bytes.readUInt32LE(offset + 18);
+    const nameLength = bytes.readUInt16LE(offset + 26);
+    const extraLength = bytes.readUInt16LE(offset + 28);
+    const name = bytes.toString('utf8', offset + 30, offset + 30 + nameLength);
+    const start = offset + 30 + nameLength + extraLength;
+    entries.push({ name, method, data: bytes.subarray(start, start + compressedSize) });
+    offset = start + compressedSize;
+  }
+  return entries;
+}
+
+export function listZipEntries(bytes) {
+  return walkEntries(bytes).map((entry) => entry.name);
+}
+
+export function readZipEntry(bytes, name) {
+  const entry = walkEntries(bytes).find((item) => item.name === name);
+  if (!entry) return null;
+  if (entry.method === 0) return entry.data.toString('utf8');
+  if (entry.method === 8) return inflateRawSync(entry.data).toString('utf8');
+  throw new Error(`Unsupported zip compression method ${entry.method} for ${name}`);
 }
 
 export async function makeDownloadZip(projectRoot, outFile) {

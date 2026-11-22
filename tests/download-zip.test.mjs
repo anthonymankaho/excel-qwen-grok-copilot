@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { promisify } from 'node:util';
-import { makeDownloadZip, shouldSkip, zipBytes } from '../scripts/make-download-zip.mjs';
+import { listZipEntries, makeDownloadZip, readZipEntry, shouldSkip, zipBytes } from '../scripts/make-download-zip.mjs';
 
 const projectRoot = path.resolve(import.meta.dirname, '..');
 
@@ -25,8 +23,10 @@ test('a packed file round-trips through the zip', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'eqgc-zip-'));
   const file = path.join(dir, 'sample.zip');
   await writeFile(file, bytes);
-  const { stdout } = await promisify(execFile)('unzip', ['-p', file, 'Qwen-Grok-for-Excel-and-Word/hello.txt']);
-  assert.equal(stdout, 'ready');
+  const saved = await readFile(file);
+  assert.equal(readZipEntry(saved, 'Qwen-Grok-for-Excel-and-Word/hello.txt'), 'ready');
+  assert.deepEqual(listZipEntries(saved), ['Qwen-Grok-for-Excel-and-Word/hello.txt']);
+  assert.equal(readZipEntry(saved, 'Qwen-Grok-for-Excel-and-Word/absent.txt'), null);
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -35,16 +35,25 @@ test('the project zip has the installer and leaves secrets out', async () => {
   const outFile = path.join(dir, 'Qwen-Grok-for-Excel-and-Word.zip');
   try {
     const names = await makeDownloadZip(projectRoot, outFile);
-    assert.ok(names.includes('Qwen-Grok-for-Excel-and-Word/START-HERE.txt'));
-    assert.ok(names.includes('Qwen-Grok-for-Excel-and-Word/Setup and Start.bat'));
-    assert.ok(names.includes('Qwen-Grok-for-Excel-and-Word/manifest.xml'));
-    assert.ok(names.includes('Qwen-Grok-for-Excel-and-Word/manifest.cloudflare.xml'));
-    assert.ok(names.includes('Qwen-Grok-for-Excel-and-Word/public/index.html'));
+    for (const expected of [
+      'START-HERE.txt', 'Setup and Start.bat', 'manifest.xml', 'manifest.cloudflare.xml',
+      'public/index.html', 'package.json', 'SOP-INSTALL.md', 'SOP-USER-GUIDE.md', 'README.md'
+    ]) {
+      assert.ok(names.includes(`Qwen-Grok-for-Excel-and-Word/${expected}`), `${expected} is packed`);
+    }
     assert.equal(names.some((name) => name.includes('.env') || name.includes('node_modules') || name.includes('.git/')), false);
     const saved = await readFile(outFile);
     assert.equal(saved.readUInt32LE(0), 0x04034b50);
-    const { stdout } = await promisify(execFile)('unzip', ['-p', outFile, 'Qwen-Grok-for-Excel-and-Word/START-HERE.txt']);
-    assert.match(stdout, /This folder has no API keys/);
+    assert.deepEqual(listZipEntries(saved), names);
+    const startHere = readZipEntry(saved, 'Qwen-Grok-for-Excel-and-Word/START-HERE.txt');
+    assert.match(startHere, /This folder has no API keys/);
+    assert.match(startHere, /npm install/);
+    assert.match(startHere, /npm start/);
+    assert.match(startHere, /SOP-INSTALL\.md/);
+    assert.match(startHere, /SOP-USER-GUIDE\.md/);
+    const pkg = JSON.parse(readZipEntry(saved, 'Qwen-Grok-for-Excel-and-Word/package.json'));
+    assert.ok(pkg.scripts.start, 'the packed package.json can launch the add-in');
+    assert.ok(pkg.scripts.setup, 'the packed package.json has the CLI setup entry point');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
