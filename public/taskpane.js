@@ -4,6 +4,7 @@ const MAX_CONTEXT_ROWS = 150;
 const MAX_CONTEXT_COLS = 30;
 const CELL_CHAR_LIMIT = 32767;
 const KEY_STORE = 'eqgc.keys.v1';
+const RELAY_STORE = 'eqgc.relay.v1';
 const RISKY_FORMULA = /^=.*\b(?:WEBSERVICE|FILTERXML|RTD|REGISTER\.ID|CALL|DDE|INFO|HYPERLINK)\s*\(/i;
 const state = { messages: [], lastAnswer: '', busy: false, officeReady: false, forceSheet: false, turn: 0, host: '', audit: [] };
 const $ = id => document.getElementById(id);
@@ -18,7 +19,24 @@ function rememberKey(provider, key) {
   try { localStorage.setItem(KEY_STORE, JSON.stringify(all)); } catch { /* storage unavailable: session-only */ }
 }
 let keysReady = null;
+let sessionRelayToken = '';
+function hostedRelay() {
+  const host = globalThis.location?.hostname || '';
+  return host !== '' && host !== '127.0.0.1' && host !== 'localhost';
+}
+function relayToken() {
+  if (sessionRelayToken) return sessionRelayToken;
+  try { return localStorage.getItem(RELAY_STORE) || ''; } catch { return ''; }
+}
+function rememberRelay(token) {
+  sessionRelayToken = token || '';
+  try {
+    if (token) localStorage.setItem(RELAY_STORE, token);
+    else localStorage.removeItem(RELAY_STORE);
+  } catch { /* storage unavailable: the token stays for this pane session */ }
+}
 function ensureKeys() {
+  if (hostedRelay()) return Promise.resolve();
   if (!keysReady) keysReady = (async () => {
     const stored = storedKeys();
     let allOk = true;
@@ -31,7 +49,11 @@ function ensureKeys() {
 }
 
 async function api(path, body) {
-  const response = await fetch(`${API}/api/${path}`, { method: body ? 'POST' : 'GET', headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  const headers = {};
+  if (body) headers['Content-Type'] = 'application/json';
+  const token = relayToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(`${API}/api/${path}`, { method: body ? 'POST' : 'GET', headers, body: body ? JSON.stringify(body) : undefined });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
   return data;
@@ -943,7 +965,10 @@ async function streamChat(payload) {
   let bubble = null;
   let text = '';
   try {
-    const response = await fetch(`${API}/api/chat-stream`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: controller.signal });
+    const headers = { 'Content-Type': 'application/json' };
+    const token = relayToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const response = await fetch(`${API}/api/chat-stream`, { method: 'POST', headers, body: JSON.stringify(payload), signal: controller.signal });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new Error(data.error || `Request failed (${response.status})`);
@@ -1432,9 +1457,36 @@ function newChat() {
   clearConversation();
 }
 
+function applyHostedChrome() {
+  if (!hostedRelay()) return;
+  $('relayFields')?.classList.remove('hidden');
+  $('localKeyFields')?.classList.add('hidden');
+  const hint = $('keyHint');
+  if (hint) hint.textContent = 'This pane is served by Cloudflare. The relay token unlocks it. Qwen and Grok keys stay in Cloudflare secrets and are not typed here. Remember keeps the token in this pane only.';
+  const saved = relayToken();
+  if (saved) sessionRelayToken = saved;
+}
+
 async function refreshSettings() {
+  if (hostedRelay() && !relayToken()) {
+    const status = $('keyStatusHosted');
+    if (status) { status.textContent = 'Add the Cloudflare relay token'; status.style.color = '#777'; }
+    setRelayDot('warn');
+    return;
+  }
   try {
     const data = await api('health');
+    if (hostedRelay()) {
+      const provider = $('activeProvider').value === 'grok' ? 'grok' : 'qwen';
+      const active = Boolean(data.configured?.[provider]);
+      const status = $('keyStatusHosted');
+      if (status) {
+        status.textContent = active ? 'Relay token accepted · provider key is on Cloudflare' : 'Relay token accepted · add the provider key in Cloudflare';
+        status.style.color = active ? '#168251' : '#777';
+      }
+      setRelayDot(active ? 'ok' : 'warn');
+      return;
+    }
     const provider = $('provider').value;
     const remembered = Boolean(storedKeys()[provider]);
     const active = Boolean(data.configured[provider]);
@@ -1481,6 +1533,16 @@ $('refreshSelection').addEventListener('click', refreshContextCard);
 $('includeContext').addEventListener('change', refreshContextCard);
 $('addUsedRange').addEventListener('click', () => { state.forceSheet = true; refreshContextCard(); toast('Next question will use the whole active sheet.'); });
 $('saveKey').addEventListener('click', async () => {
+  if (hostedRelay()) {
+    const token = $('relayToken').value.trim();
+    if (token.length < 16) return toast('Enter the Cloudflare relay token.');
+    rememberRelay($('rememberKey').checked ? token : '');
+    if (!$('rememberKey').checked) sessionRelayToken = token;
+    $('relayToken').value = '';
+    await refreshSettings();
+    toast($('rememberKey').checked ? 'Relay token remembered in this pane.' : 'Relay token kept for this session.');
+    return;
+  }
   const apiKey = $('apiKey').value.trim(); if (!apiKey) return toast('Enter an API key first.');
   const provider = $('provider').value;
   try {
@@ -1493,6 +1555,12 @@ $('saveKey').addEventListener('click', async () => {
   catch (error) { toast(error.message); }
 });
 $('clearKey').addEventListener('click', async () => {
+  if (hostedRelay()) {
+    rememberRelay('');
+    await refreshSettings();
+    toast('Relay token cleared from this pane.');
+    return;
+  }
   const provider = $('provider').value;
   try { await api('clear-key', { provider }); rememberKey(provider, ''); keysReady = null; await refreshSettings(); toast('Key cleared.'); }
   catch (error) { toast(error.message); }
@@ -1521,6 +1589,8 @@ Office.onReady(info => {
     refreshContextCard();
     watchSelection();
   }
+  applyHostedChrome();
   refreshSettings();
   ensureKeys().then(refreshSettings);
 });
+applyHostedChrome();

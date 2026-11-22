@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0" xsi:type="TaskPaneApp">
+  <Id>7f3a9c2e-6b14-4e8d-a1f0-9c5d2e8b6a40</Id>
+  <Version>1.3.0.0</Version>
+  <ProviderName>Local Office AI Assistant</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="Qwen + Grok for Excel and Word"/>
+  <Description DefaultValue="Revise an Excel workbook or Word document with Qwen or Grok."/>
+  <IconUrl DefaultValue="https://excel-qwen-grok.anthonym-354.workers.dev/icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="https://excel-qwen-grok.anthonym-354.workers.dev/icon-64.png"/>
+  <SupportUrl DefaultValue="https://excel-qwen-grok.anthonym-354.workers.dev/"/>
+  <AppDomains><AppDomain>https://excel-qwen-grok.anthonym-354.workers.dev</AppDomain></AppDomains>
+  <Hosts><Host Name="Workbook"/><Host Name="Document"/></Hosts>
+  <DefaultSettings><SourceLocation DefaultValue="https://excel-qwen-grok.anthonym-354.workers.dev/"/></DefaultSettings>
+  <Permissions>ReadWriteDocument</Permissions>
+</OfficeApp>
