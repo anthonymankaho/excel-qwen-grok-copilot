@@ -1,6 +1,6 @@
 # Qwen + Grok for Excel and Word
 
-A local task pane for desktop Excel and Word. You ask in plain language. Qwen or Grok plans the work, and the pane revises the open file through a fixed list of actions. The pane and the relay both live on this computer at `http://127.0.0.1:3000`. Excel for the web, Word for the web, and company-wide deployment need an HTTPS host and an admin install. This copy does not.
+A local task pane for desktop Excel and Word. You ask in plain language. Qwen or Grok plans the work, and the pane revises the open file through a fixed list of actions. On this PC the pane and the relay both live at `http://127.0.0.1:3000`. Excel on the web uses the HTTPS copy at `https://excel-qwen-grok.anthonym-354.workers.dev`. Company-wide deployment still needs an admin install.
 
 ## What this update revises
 
@@ -133,6 +133,25 @@ A Token Plan key works only on the Token Plan URL. A regular QwenCloud key works
 
 The relay listens on `127.0.0.1` only and rejects any other Host or Origin.
 
+## Cloudflare
+
+The same pane is published at `https://excel-qwen-grok.anthonym-354.workers.dev` so Excel on the web can open it. The local server stays the way to run it on this PC.
+
+The manifest to upload in Excel is `manifest.cloudflare.xml` (version 1.3.0.0). It has its own add-in id, so it can sit beside the local sideload. With Microsoft 365 Premium, add it from **Home → Add-ins → Upload My Add-in**.
+
+The relay token is already stored as the Worker secret `RELAY_TOKEN`. In the hosted pane, open Settings, paste that token, and press **Use key**. The chat route rejects a request that does not carry it. A request from another site is rejected too. The Worker also refuses a pasted provider key and still allows only QwenCloud chat-completions URLs.
+
+Qwen and Grok keys are Worker secrets. They are not typed into the pane and they are not stored in this repository. From the project folder, after `npx wrangler login`:
+
+```bash
+npx wrangler secret put QWEN_API_KEY
+npx wrangler secret put GROK_API_KEY
+```
+
+To replace the relay token, run `npx wrangler secret put RELAY_TOKEN` with a passphrase of at least 16 characters, then paste the new value in Settings.
+
+A later code change is published with `npm run deploy:cloudflare` after `npx wrangler login`. Workbook text sent from the hosted pane goes to Cloudflare and then to Qwen or Grok.
+
 ## Another computer
 
 Each computer runs its own relay and stores its own keys.
@@ -153,8 +172,9 @@ Each computer runs its own relay and stores its own keys.
 | `npm run autostart` | Install logon start and the minute self-heal task |
 | `npm run autostart-remove` | Remove logon start and the self-heal task |
 | `npm run stop` | Remove the sideload |
-| `npm run check` | Syntax-check the relay, the agent core, and the task pane |
-| `npm test` | Run the offline pane, agent, and relay tests |
+| `npm run check` | Syntax-check the relay, the Worker, the agent core, and the task pane |
+| `npm test` | Run the offline pane, agent, relay, and Worker tests |
+| `npm run deploy:cloudflare` | Publish the pane and relay to Cloudflare |
 
 Auto-start is Windows-only. It uses `%APPDATA%`.
 

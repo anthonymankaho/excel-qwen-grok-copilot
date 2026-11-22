@@ -27,10 +27,16 @@
       <label for="qwenModel">Model</label><input id="qwenModel" value="qwen4-max" autocomplete="off">
       </div>
       <div id="grokFields" class="hidden"><label for="grokModel">Model</label><input id="grokModel" value="grok-4.7" autocomplete="off"></div>
-      <label for="apiKey">API key <span id="keyStatus" class="key-status"></span></label>
-      <input id="apiKey" type="password" placeholder="Enter key once; remembered if ticked below" autocomplete="new-password">
+      <div id="relayFields" class="hidden">
+        <label for="relayToken">Cloudflare relay token <span id="keyStatusHosted" class="key-status"></span></label>
+        <input id="relayToken" type="password" placeholder="Token that unlocks the hosted relay" autocomplete="new-password">
+      </div>
+      <div id="localKeyFields">
+        <label for="apiKey">API key <span id="keyStatus" class="key-status"></span></label>
+        <input id="apiKey" type="password" placeholder="Enter key once; remembered if ticked below" autocomplete="new-password">
+      </div>
       <div class="button-row"><button id="saveKey" class="primary">Use key</button><button id="clearKey" class="secondary">Clear key</button><label class="context-toggle"><input type="checkbox" id="rememberKey" checked> Remember key on this PC</label></div>
-      <p class="hint">Keys go only to the relay at 127.0.0.1 on this computer. With Remember ticked they persist in this pane’s local browser storage (this PC, this Windows user only); untick for memory-only sessions. Clear key removes both. Use your own key — never someone else’s personal Token Plan key.</p>
+      <p id="keyHint" class="hint">Keys go only to the relay at 127.0.0.1 on this computer. With Remember ticked they persist in this pane’s local browser storage (this PC, this Windows user only); untick for memory-only sessions. Clear key removes both. Use your own key — never someone else’s personal Token Plan key.</p>
     </section>
 
     <section class="context-card card">

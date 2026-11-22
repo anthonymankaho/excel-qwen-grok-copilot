@@ -116,12 +116,23 @@ Borders, conditional formatting, filters, freeze panes, pivots, and replacing ev
 | A change is wrong | **Undo last apply**, or Excel `Ctrl+Z` |
 | Word does not list the add-in | `npm run start:word` with Word closed |
 
-## 9. What leaves this computer
+## 9. Cloudflare
+
+Use this when the pane should open from an `https://` address, including Excel on the web. The published pane is `https://excel-qwen-grok.anthonym-354.workers.dev`.
+
+1. In Excel, use **Home → Add-ins → Upload My Add-in** and choose `manifest.cloudflare.xml`.
+2. Open Settings in the hosted pane, paste the relay token, and press **Use key**. Remember keeps it in that pane only. The matching `RELAY_TOKEN` secret is already on the Worker.
+3. From the project folder, run `npx wrangler login`, then `npx wrangler secret put QWEN_API_KEY` and `npx wrangler secret put GROK_API_KEY`. Do not put those keys in the repository or in chat.
+4. After a later code change, run `npm run deploy:cloudflare`. To replace the relay token, run `npx wrangler secret put RELAY_TOKEN` with a passphrase of at least 16 characters and paste the new value in Settings.
+
+The local `127.0.0.1` relay is unchanged. The hosted route rejects a missing token, a token that does not match, a call from another site, and a pasted provider key.
+
+## 10. What leaves this computer
 
 The relay binds to `127.0.0.1` and rejects any other Host or Origin. A Qwen call must be HTTPS chat-completions on `qwencloudapi.com` or `aliyuncs.com`. Redirects are not followed.
 
 A key is not written into the repository, and it is not written into the audit card. With Remember ticked, the pane stores it for this Windows user only. **Clear key** removes that copy and the relay copy.
 
-A question sends the prompt and the attached context to the provider you picked, or to the provider Auto selected from keys already loaded. Chat context includes cell values and formulas, or the Word selection or document text. Plan and Agent start with metadata and add a range only when a step asks for it. Nothing is sent before you ask.
+A question sends the prompt and the attached context to the provider you picked, or to the provider Auto selected from keys already loaded. Chat context includes cell values and formulas, or the Word selection or document text. Plan and Agent start with metadata and add a range only when a step asks for it. Nothing is sent before you ask. From the hosted pane, that same question also passes through Cloudflare.
 
 Keep the Token Plan key out of chat, files, and commits. Other people use their own keys.

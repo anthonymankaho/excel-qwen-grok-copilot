@@ -36,7 +36,7 @@ function fire(el, type, ev = {}) {
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets }) {
+function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, location }) {
   const els = new Map();
   const defaults = { provider: 'qwen', activeProvider: 'qwen', qwenModel: 'qwen4-max', qwenEndpoint: 'https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions' };
   const get = id => { if (!els.has(id)) { const el = makeElement(id); if (defaults[id]) el.value = defaults[id]; if (id === 'includeContext' || id === 'rememberKey') el.checked = true; els.set(id, el); } return els.get(id); };
@@ -200,7 +200,7 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets })
     },
     fetch: async (url, opts) => {
       const body = opts?.body ? JSON.parse(opts.body) : null;
-      calls.push({ url, body });
+      calls.push({ url, body, headers: opts?.headers || {} });
       if (url.endsWith('/api/health')) return { ok: true, status: 200, json: async () => ({ ok: true, configured: { qwen: true, grok: false } }) };
       const turnText = Array.isArray(reply?.turns) ? reply.turns[Math.min(streamTurn, reply.turns.length - 1)] : null;
       const data = turnText != null ? { text: turnText, model: reply.model || 'test-model' } : (reply || { text: 'mock answer', model: 'test-model' });
@@ -216,6 +216,7 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets })
       return { ok: true, status: 200, json: async () => data };
     }
   };
+  if (location) sandbox.location = location;
   sandbox.writes = writes; sandbox.calls = calls; sandbox.els = get; sandbox.store = store;
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox);
@@ -646,4 +647,17 @@ test('Auto stays on Qwen when Grok has no key', async () => {
   assert.equal(chatCalls(sb).at(-1).body.provider, 'qwen');
   assert.equal(chatCalls(sb).at(-1).body.mode, 'agent');
   assert.match(visible(sb.els('conversation')), /via qwen/);
+});
+
+test('A hosted pane sends the relay token and does not upload a provider key', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Noted.', model: 'qwen4-max' }, location: { hostname: 'excel-qwen-grok.example.workers.dev' } });
+  await boot(sb);
+  sb.els('relayToken').value = 'relay-token-0123456789';
+  sb.els('rememberKey').checked = true;
+  await fire(sb.els('saveKey'), 'click');
+  await flush();
+  assert.equal(sb.store['eqgc.relay.v1'], 'relay-token-0123456789');
+  assert.equal(sb.calls.some(call => String(call.url).includes('/api/configure')), false);
+  await ask(sb, 'hello from cloud');
+  assert.equal(chatCalls(sb).at(-1).headers.Authorization, 'Bearer relay-token-0123456789');
 });
