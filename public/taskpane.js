@@ -5,7 +5,7 @@ const MAX_CONTEXT_COLS = 30;
 const CELL_CHAR_LIMIT = 32767;
 const KEY_STORE = 'eqgc.keys.v1';
 const RISKY_FORMULA = /^=.*\b(?:WEBSERVICE|FILTERXML|RTD|REGISTER\.ID|CALL|DDE|INFO|HYPERLINK)\s*\(/i;
-const state = { messages: [], lastAnswer: '', busy: false, officeReady: false, forceSheet: false, turn: 0, host: '' };
+const state = { messages: [], lastAnswer: '', busy: false, officeReady: false, forceSheet: false, turn: 0, host: '', audit: [] };
 const $ = id => document.getElementById(id);
 let abortChat = null;
 
@@ -750,13 +750,13 @@ function attachUndo(actionsEl, label, records, noun) {
   actionsEl.append(undoBtn);
 }
 
-async function renderPlanCard(actions, skipped) {
+async function renderPlanCard(actions, skipped, options = {}) {
   const conversation = $('conversation');
   const card = document.createElement('div');
   card.className = 'message assistant edits-card';
   const label = document.createElement('div');
   label.className = 'message-label';
-  const direct = Boolean($('directRevise')?.checked);
+  const direct = !options.manualOnly && Boolean($('directRevise')?.checked);
   label.textContent = direct ? `DIRECT REVISE · ${actions.length}` : `PROPOSED REVISION · ${actions.length} · APPLY WITH YOUR CLICK`;
   card.append(label);
   actions.forEach(action => {
@@ -923,7 +923,7 @@ async function renderEditsCard(edits, skipped) {
 function dedupContext(messages) {
   // Older turns keep their prose only; re-sending every past 45k context block would multiply input tokens each turn.
   return messages.map((m, i) => (m.role === 'user' && i < messages.length - 1)
-    ? { ...m, content: m.content.replace(/\n\n\[(?:Excel (?:selection|used range)|Word (?:selection|document))[^\]]*\]\n[\s\S]*$/, '') }
+    ? { ...m, content: m.content.replace(/\n\n\[(?:Excel (?:selection|used range|workbook metadata|range)|Word (?:selection|document|document outline))[^\]]*\]\n[\s\S]*$/, '') }
     : m);
 }
 
@@ -1003,7 +1003,366 @@ function stopGeneration() {
   resetComposer();
 }
 
+function operatingMode() {
+  const value = $('workMode')?.value;
+  return value === 'chat' || value === 'plan' || value === 'agent' ? value : 'legacy';
+}
+
+async function readWorkbookMeta() {
+  if (!state.officeReady) return null;
+  if (state.host === 'Word') {
+    const text = 'host: Word\nAsk for the selection before quoting the document.';
+    return { header: '[Word document outline]', text, address: 'Document', kind: 'metadata', truncated: false, chars: text.length };
+  }
+  return Excel.run(async context => {
+    const book = context.workbook;
+    book.load?.('name');
+    const sheets = book.worksheets;
+    sheets.load?.('items/name');
+    await context.sync();
+    const lines = [`workbook: ${book.name || '(unsaved)'}`];
+    for (const sheet of (sheets.items || []).slice(0, 30)) {
+      let extra = '';
+      try {
+        const used = sheet.getUsedRangeOrNullObject?.();
+        if (used) {
+          used.load?.(['isNullObject', 'address', 'rowCount', 'columnCount']);
+          await context.sync();
+          if (!used.isNullObject) extra += ` used ${used.address} rows ${used.rowCount} cols ${used.columnCount}`;
+        }
+      } catch { /* this sheet has no used-range helper */ }
+      try {
+        const tables = sheet.tables;
+        tables?.load?.('items/name');
+        await context.sync();
+        const names = (tables?.items || []).map(table => table.name).filter(Boolean);
+        if (names.length) extra += ` tables ${names.join(', ')}`;
+      } catch { /* tables are not available here */ }
+      lines.push(`sheet: ${sheet.name || 'Sheet'}${extra}`);
+    }
+    const selected = book.getSelectedRange?.();
+    if (selected) {
+      selected.load?.(['address', 'rowCount', 'columnCount']);
+      await context.sync();
+      if (selected.address) lines.push(`selection: ${selected.address} rows ${selected.rowCount || ''} cols ${selected.columnCount || ''}`);
+    }
+    const text = lines.join('\n').slice(0, 4000);
+    return { header: '[Excel workbook metadata]', text, address: 'Workbook', kind: 'metadata', truncated: false, chars: text.length };
+  });
+}
+
+async function contextForMode(mode) {
+  if (!state.officeReady || !$('includeContext').checked) return null;
+  if (mode === 'chat' || state.forceSheet) return buildContext();
+  try { return await readWorkbookMeta(); }
+  catch { return buildContext(); }
+}
+
+async function readGrid(sheet, range) {
+  const size = rangeSize(range);
+  const rows = Math.min(size.rows, 20);
+  const cols = Math.min(size.cols, 8);
+  return Excel.run(async context => {
+    const worksheet = context.workbook.worksheets.getItem(sheet);
+    const cells = [];
+    for (let r = 0; r < rows; r++) {
+      const row = [];
+      for (let c = 0; c < cols; c++) {
+        const cell = worksheet.getRange(cellAddress(range, r, c));
+        cell.load(['values', 'formulas']);
+        row.push(cell);
+      }
+      cells.push(row);
+    }
+    await context.sync();
+    return {
+      values: cells.map(row => row.map(cell => cell.values?.[0]?.[0] ?? '')),
+      formulas: cells.map(row => row.map(cell => cell.formulas?.[0]?.[0] ?? ''))
+    };
+  });
+}
+
+async function gridsForChecks(checks) {
+  const grids = {};
+  for (const check of checks) {
+    try { grids[check.id] = await readGrid(check.sheet, check.range); }
+    catch { grids[check.id] = { values: [], formulas: [] }; }
+  }
+  return grids;
+}
+
+function usableChecks(plan) {
+  return (plan?.finalValidation || []).map(check => {
+    const sheet = normalizeSheet(check.sheet);
+    const range = boundedRange(check.range, 160);
+    return sheet && range ? { ...check, sheet, range } : null;
+  }).filter(Boolean);
+}
+
+async function routeForPrompt(text, mode) {
+  let configured = { qwen: false, grok: false };
+  try {
+    const health = await api('health');
+    configured = health.configured || configured;
+  } catch { /* the send path reports a down relay */ }
+  const selected = $('activeProvider').value === 'auto' ? 'auto' : ($('activeProvider').value || 'qwen');
+  const routed = AgentCore.routeProvider({ selected, mode, fast: Boolean($('fastMode').checked), text, ready: configured });
+  if (routed.error) return routed;
+  return {
+    ...routed,
+    model: routed.provider === 'grok' ? $('grokModel').value.trim() : $('qwenModel').value.trim(),
+    endpoint: $('qwenEndpoint').value.trim()
+  };
+}
+
+function renderAuditCard() {
+  if (!state.audit.length) return;
+  const conversation = $('conversation');
+  const card = document.createElement('div');
+  card.className = 'message assistant audit-card';
+  const label = document.createElement('div');
+  label.className = 'message-label';
+  label.textContent = 'AUDIT';
+  const body = document.createElement('div');
+  body.className = 'edit-row';
+  body.textContent = AgentCore.summarize(state.audit);
+  card.append(label, body);
+  conversation.append(card);
+  conversation.scrollTop = conversation.scrollHeight;
+}
+
+function renderValidation(results) {
+  const conversation = $('conversation');
+  const card = document.createElement('div');
+  card.className = 'message assistant edits-card';
+  const label = document.createElement('div');
+  label.className = 'message-label';
+  const failed = results.filter(result => result.status === 'FAIL');
+  label.textContent = failed.length ? `VALIDATION FAILED · ${failed.length}` : `VALIDATION · ${results.length}`;
+  card.append(label);
+  results.forEach(result => {
+    const row = document.createElement('div');
+    row.className = result.status === 'FAIL' ? 'edit-warning' : 'edit-note';
+    row.textContent = `${result.status} ${result.check}: before ${result.before} after ${result.after} difference ${result.difference}`;
+    card.append(row);
+    if (result.status === 'FAIL') {
+      const explained = AgentCore.explainFailure(result);
+      const note = document.createElement('div');
+      note.className = 'edit-warning';
+      note.textContent = `${explained.issue} — ${explained.possibleCause} ${explained.recommendedAction}`;
+      card.append(note);
+    }
+  });
+  conversation.append(card);
+  conversation.scrollTop = conversation.scrollHeight;
+}
+
+async function executeClassified(actions, { direct }) {
+  const blocked = [];
+  const safe = [];
+  for (const action of actions) {
+    if (!direct || actionIsRisky(action) || AgentCore.isDestructive(action)) blocked.push(action);
+    else safe.push(action);
+  }
+  let status = blocked.length ? 'BLOCKED' : 'SUCCESS';
+  if (safe.length) {
+    try {
+      await applyPlan(safe);
+      status = blocked.length ? 'WARNING' : 'SUCCESS';
+    } catch (error) {
+      status = 'FAILED';
+      toast(`Could not revise: ${error.message}`);
+    }
+  }
+  if (blocked.length) await renderPlanCard(blocked, 0, { manualOnly: true });
+  return { status, blocked: blocked.length, applied: safe.length };
+}
+
+function renderModePlan(plan, actions, skipped) {
+  const conversation = $('conversation');
+  const card = document.createElement('div');
+  card.className = 'message assistant edits-card';
+  const label = document.createElement('div');
+  label.className = 'message-label';
+  label.textContent = plan ? `PLAN · ${plan.goal}` : 'PLAN · APPROVAL REQUIRED';
+  card.append(label);
+  (plan?.steps || []).forEach(step => {
+    const row = document.createElement('div');
+    row.className = 'edit-row';
+    row.textContent = `${step.id}. ${step.objective}${step.requiresApproval ? ' · approval' : ''}`;
+    card.append(row);
+  });
+  for (const [title, items] of [['Assumptions', plan?.assumptions], ['Inputs', plan?.requiredInputs], ['Risks', plan?.risks]]) {
+    if (!items?.length) continue;
+    const row = document.createElement('div');
+    row.className = 'edit-note';
+    row.textContent = `${title}: ${items.join('; ')}`;
+    card.append(row);
+  }
+  actions.forEach(action => {
+    const row = document.createElement('div');
+    row.className = 'edit-row';
+    row.textContent = describeAction(action);
+    card.append(row);
+  });
+  if (skipped) {
+    const note = document.createElement('div');
+    note.className = 'edit-note';
+    note.textContent = `${skipped} change${skipped === 1 ? '' : 's'} skipped.`;
+    card.append(note);
+  }
+  const buttonRow = document.createElement('div');
+  buttonRow.className = 'button-row';
+  const approve = document.createElement('button');
+  approve.className = 'primary';
+  approve.textContent = 'Approve';
+  const dismiss = document.createElement('button');
+  dismiss.className = 'secondary';
+  dismiss.textContent = 'Dismiss';
+  approve.addEventListener('click', async () => {
+    approve.disabled = true;
+    dismiss.disabled = true;
+    if (!actions.length) { toast('The plan has no actions to run.'); return; }
+    const result = await executeClassified(actions, { direct: Boolean($('directRevise').checked) });
+    state.audit.push(AgentCore.audit({ kind: 'execute', status: result.status, count: actions.length, blocked: result.blocked }));
+    label.textContent = result.status === 'SUCCESS' ? 'PLAN APPROVED · APPLIED' : `PLAN APPROVED · ${result.status}`;
+    renderAuditCard();
+  });
+  dismiss.addEventListener('click', () => card.remove());
+  buttonRow.append(approve, dismiss);
+  card.append(buttonRow);
+  conversation.append(card);
+  conversation.scrollTop = conversation.scrollHeight;
+}
+
+async function sendAgentPrompt(prompt) {
+  const clean = prompt.trim();
+  if (!clean || state.busy) return;
+  const turn = ++state.turn;
+  state.busy = true;
+  $('send').textContent = '■';
+  $('send').setAttribute?.('aria-label', 'Stop');
+  try {
+    await ensureKeys();
+    if (turn !== state.turn) return;
+    const mode = operatingMode();
+    let routed = await routeForPrompt(clean, mode);
+    if (routed.error) { toast(routed.error); return; }
+    state.audit.push(AgentCore.audit({ kind: 'request', mode, provider: routed.provider, reason: routed.reason, text: clean.slice(0, 500) }));
+    let ctx = null;
+    try { ctx = await contextForMode(mode); } catch (error) { if (turn === state.turn) toast(`Could not read workbook context: ${error.message}`); }
+    if (turn !== state.turn) return;
+    const content = `${clean}${ctx ? `\n\n${ctx.header}\n${ctx.text}` : ''}\n\n[Mode: ${mode}]`;
+    if (content.length > 49_500) { toast('Message plus workbook context is too large — shorten the message or turn context off.'); return; }
+    state.forceSheet = false;
+    state.messages.push({ role: 'user', content });
+    renderMessage('user', clean + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
+    state.audit.push(AgentCore.audit({ kind: 'context', address: ctx?.address || 'none', chars: ctx?.chars || 0 }));
+    let guard = 0;
+    let retried = false;
+    while (guard < AgentCore.MAX_LOOPS) {
+      if (turn !== state.turn) return;
+      let result;
+      try {
+        result = await streamChat({ provider: routed.provider, model: routed.model, endpoint: routed.endpoint, messages: dedupContext(state.messages.slice(-24)), fast: $('fastMode').checked, host: state.host === 'Word' ? 'word' : 'excel', mode });
+      } catch (error) {
+        if (error.name === 'AbortError' || retried || !routed.fallback || turn !== state.turn) throw error;
+        retried = true;
+        state.audit.push(AgentCore.audit({ kind: 'fallback', provider: routed.fallback, reason: error.message }));
+        routed = { ...routed, provider: routed.fallback, model: routed.fallback === 'grok' ? $('grokModel').value.trim() : $('qwenModel').value.trim(), fallback: '' };
+        continue;
+      }
+      if (turn !== state.turn) return;
+      const envelope = AgentCore.parseEnvelope(result.text);
+      const revision = parseRevision(result.text);
+      state.messages.push({ role: 'assistant', content: result.text });
+      state.lastAnswer = envelope.prose || revision.prose;
+      $('insertAnswer').disabled = !state.lastAnswer;
+      $('lastAnswerState').textContent = result.model ? `via ${result.model}` : '';
+      result.bubble.children[result.bubble.children.length - 1].textContent = state.lastAnswer;
+      state.audit.push(AgentCore.audit({ kind: 'model', provider: routed.provider, model: result.model, decision: envelope.decision || 'COMPLETE', plan: envelope.plan?.goal || '' }));
+      const normalized = envelope.actions ? normalizeActions(envelope.actions) : { actions: revision.actions || [], skipped: revision.skipped || 0 };
+      if (mode === 'chat') {
+        if (normalized.actions.length || revision.edits) {
+          state.audit.push(AgentCore.audit({ kind: 'blocked', reason: 'chat mode does not write' }));
+          toast('Chat mode does not change the file.');
+        }
+        break;
+      }
+      if (mode === 'plan' || envelope.decision === 'NEEDS_USER' || (mode === 'agent' && !$('directRevise').checked && normalized.actions.length)) {
+        renderModePlan(envelope.plan, normalized.actions, normalized.skipped);
+        break;
+      }
+      if (envelope.contextRequest && !normalized.actions.length && guard < AgentCore.MAX_LOOPS - 1) {
+        const sheet = normalizeSheet(envelope.contextRequest.sheet);
+        const range = boundedRange(envelope.contextRequest.range, 160);
+        if (sheet && range) {
+          const grid = await readGrid(sheet, range);
+          const text = annotateRows(grid.values, grid.formulas).slice(0, 8000);
+          const note = `Requested context.\n\n[Excel range ${sheet}!${range}]\n${text}`;
+          state.messages.push({ role: 'user', content: note });
+          state.audit.push(AgentCore.audit({ kind: 'context', address: `${sheet}!${range}`, chars: text.length }));
+          guard += 1;
+          continue;
+        }
+      }
+      const checks = usableChecks(envelope.plan);
+      const beforeGrids = await gridsForChecks(checks);
+      const before = {};
+      checks.forEach(check => {
+        const values = beforeGrids[check.id]?.values || [];
+        before[check.id] = { before: check.check === 'rowCount' ? values.length : AgentCore.sumNumbers(values) };
+      });
+      let exec = { status: 'SUCCESS', blocked: 0, applied: 0 };
+      if (normalized.actions.length) exec = await executeClassified(normalized.actions, { direct: Boolean($('directRevise').checked) });
+      state.audit.push(AgentCore.audit({ kind: 'execute', status: exec.status, count: normalized.actions.length, blocked: exec.blocked }));
+      const afterGrids = await gridsForChecks(checks);
+      const validations = checks.map(check => AgentCore.evaluateGridCheck(check, afterGrids[check.id], before[check.id]));
+      validations.forEach(result => state.audit.push(AgentCore.audit({ kind: 'validation', status: result.status, check: result.check, before: result.before, after: result.after, difference: result.difference })));
+      if (validations.length) renderValidation(validations);
+      const next = AgentCore.decide({ decision: envelope.decision, validations, iteration: guard, maxLoops: AgentCore.MAX_LOOPS });
+      if (next === 'FAILED') {
+        state.audit.push(AgentCore.audit({ kind: 'stopped', reason: 'validation failed' }));
+        toast('Stopped. A validation failed. Nothing further will run.');
+        break;
+      }
+      if (next === 'CONTINUE' || next === 'REPLAN') {
+        const observed = validations.map(result => `${result.check} ${result.status}`).join('; ') || exec.status;
+        state.messages.push({ role: 'user', content: `Observed: ${observed}. Continue only if every check passed.` });
+        guard += 1;
+        continue;
+      }
+      break;
+    }
+    if (guard >= AgentCore.MAX_LOOPS) {
+      state.audit.push(AgentCore.audit({ kind: 'stopped', reason: 'loop limit' }));
+      toast('Stopped at the loop limit.');
+    }
+    renderAuditCard();
+    refreshContextCard();
+  } catch (error) {
+    const bodyEl = error.bubble?.parent ? error.bubble.children[error.bubble.children.length - 1] : null;
+    if (error.name === 'AbortError') {
+      if (bodyEl) bodyEl.textContent = error.partial ? `${error.partial}\n\n(stopped)` : '(stopped)';
+      if (error.bubble?.parent) toast('Stopped.');
+      return;
+    }
+    if (turn !== state.turn) return;
+    if (!state.lastAnswer) $('insertAnswer').disabled = true;
+    if (bodyEl) {
+      bodyEl.textContent = error.partial ? `${error.partial}\n\n(${error.message})` : `Error: ${error.message}`;
+      toast(error.message);
+    } else {
+      renderMessage('assistant', `Error: ${error.message}`);
+      toast(error.message);
+    }
+  } finally {
+    if (turn === state.turn) resetComposer();
+  }
+}
+
 async function sendPrompt(prompt) {
+  if (operatingMode() !== 'legacy') return sendAgentPrompt(prompt);
   const clean = prompt.trim();
   if (!clean || state.busy) return;
   const turn = ++state.turn;
@@ -1067,6 +1426,7 @@ function newChat() {
   state.messages = [];
   state.lastAnswer = '';
   state.forceSheet = false;
+  state.audit = [];
   $('insertAnswer').disabled = true;
   $('lastAnswerState').textContent = '';
   clearConversation();
@@ -1111,7 +1471,12 @@ async function insertAnswer() {
 $('settingsToggle').addEventListener('click', () => { $('settings').classList.toggle('hidden'); refreshSettings(); });
 $('closeSettings').addEventListener('click', () => $('settings').classList.add('hidden'));
 $('provider').addEventListener('change', toggleProviderFields);
-$('activeProvider').addEventListener('change', () => { $('provider').value = $('activeProvider').value; toggleProviderFields(); });
+$('activeProvider').addEventListener('change', () => {
+  const value = $('activeProvider').value;
+  if (value !== 'qwen' && value !== 'grok') return;
+  $('provider').value = value;
+  toggleProviderFields();
+});
 $('refreshSelection').addEventListener('click', refreshContextCard);
 $('includeContext').addEventListener('change', refreshContextCard);
 $('addUsedRange').addEventListener('click', () => { state.forceSheet = true; refreshContextCard(); toast('Next question will use the whole active sheet.'); });

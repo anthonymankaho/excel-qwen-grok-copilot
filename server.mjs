@@ -34,7 +34,7 @@ Word actions:
 - {"op":"formatSelection","bold":true,"italic":false}
 - {"op":"styleSelection","style":"Heading 1"} — Heading 1, Heading 2, Heading 3, Title, or Normal
 
-Use only actions for the open host. Do not propose WEBSERVICE, FILTERXML, or RTD unless the user explicitly asks. Do not invent a sheet or range you have not seen, except addSheet.`;
+Use only actions for the open host. Do not propose WEBSERVICE, FILTERXML, or RTD unless the user explicitly asks. Do not invent a sheet or range you have not seen, except addSheet. For accounting work, journal entries are drafts: do not silently clear a reconciliation difference, and do not claim that debits equal credits unless a pane validation says so.`;
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.xml': 'application/xml; charset=utf-8', '.png': 'image/png', '.json': 'application/json; charset=utf-8' };
 
 function send(res, status, data, type = 'application/json; charset=utf-8') {
@@ -131,6 +131,13 @@ function hostNote(host) {
     : '\nThe open file is an Excel workbook. Use only Excel actions.';
 }
 
+function modeNote(mode) {
+  if (mode === 'chat') return '\nMODE CHAT: Answer from the context. Do not emit an actions or edits block.';
+  if (mode === 'plan') return '\nMODE PLAN: Return one json object with a plan and no claim that the file changed. Include goal, steps, assumptions, requiredInputs, risks, and finalValidation. Put actions in the same object only as a proposal. Do not invent validation pass or fail.';
+  if (mode === 'agent') return '\nMODE AGENT: Return one json object with plan, optional actions for this step only, and decision set to COMPLETE, CONTINUE, REPLAN, NEEDS_USER, or FAILED. If you need a range, set contextRequest to {sheet, range} and do not guess the cells. Finance checks are calculated by the pane from the workbook. A failed check stops the loop. Destructive actions wait for the user.';
+  return '';
+}
+
 function resolveModel(model, fallback) {
   if (model == null || (typeof model === 'string' && model.trim() === '')) return { model: fallback };
   if (typeof model !== 'string' || !MODEL_RE.test(model.trim())) return { error: 'Invalid model name.' };
@@ -151,13 +158,13 @@ export function prepareChat(body, secrets) {
     if (!url) return { status: 400, error: 'Qwen endpoint must be an HTTPS QwenCloud chat completions URL.' };
     const model = resolveModel(body.model, 'qwen4-max');
     if (model.error) return { status: 400, error: model.error };
-    payload = { model: model.model, messages: [{ role: 'system', content: SYSTEM_PROMPT + hostNote(body.host) }, ...messages], stream: false };
+    payload = { model: model.model, messages: [{ role: 'system', content: SYSTEM_PROMPT + hostNote(body.host) + modeNote(body.mode) }, ...messages], stream: false };
     if (body.fast) payload.enable_thinking = false;
   } else {
     url = new URL('https://api.x.ai/v1/responses');
     const model = resolveModel(body.model, 'grok-4.7');
     if (model.error) return { status: 400, error: model.error };
-    payload = { model: model.model, instructions: SYSTEM_PROMPT + hostNote(body.host), input: messages.map(({ role, content }) => ({ role, content })), store: false };
+    payload = { model: model.model, instructions: SYSTEM_PROMPT + hostNote(body.host) + modeNote(body.mode), input: messages.map(({ role, content }) => ({ role, content })), store: false };
     if (body.fast) payload.reasoning = { effort: 'low' };
   }
   return { provider, model: payload.model, url, payload };

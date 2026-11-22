@@ -38,6 +38,8 @@ test('Fast disables Qwen thinking and lowers Grok effort; bad models are rejecte
   const slow = prepareChat({ provider: 'grok', messages, fast: false }, secrets);
   assert.equal(slow.payload.reasoning, undefined);
   assert.match(prepareChat({ provider: 'qwen', endpoint: qwenUrl, messages, host: 'word' }, secrets).payload.messages[0].content, /Word document/);
+  assert.match(prepareChat({ provider: 'qwen', endpoint: qwenUrl, messages, mode: 'agent' }, secrets).payload.messages[0].content, /MODE AGENT/);
+  assert.equal(prepareChat({ provider: 'qwen', endpoint: qwenUrl, messages }, secrets).payload.messages[0].content.includes('MODE AGENT'), false);
   assert.match(slow.payload.instructions, /Excel workbook/);
   const bad = prepareChat({ provider: 'qwen', endpoint: qwenUrl, messages, model: '../etc/passwd' }, secrets);
   assert.equal(bad.status, 400);
