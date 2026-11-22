@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0" xsi:type="TaskPaneApp">
   <Id>c42d1d4e-bce1-4efe-9f70-66f64889f4cc</Id>
-  <Version>1.0.0.0</Version>
-  <ProviderName>Local Excel AI Assistant</ProviderName>
+  <Version>1.1.0.0</Version>
+  <ProviderName>Local Office AI Assistant</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
-  <DisplayName DefaultValue="Qwen + Grok for Excel"/>
-  <Description DefaultValue="Chat with Qwen or Grok using selected Excel cells as context."/>
+  <DisplayName DefaultValue="Qwen + Grok for Excel and Word"/>
+  <Description DefaultValue="Revise an Excel workbook or Word document with Qwen or Grok."/>
   <IconUrl DefaultValue="http://127.0.0.1:3000/icon-32.png"/>
   <HighResolutionIconUrl DefaultValue="http://127.0.0.1:3000/icon-64.png"/>
   <SupportUrl DefaultValue="http://127.0.0.1:3000/"/>
   <AppDomains><AppDomain>http://127.0.0.1:3000</AppDomain></AppDomains>
-  <Hosts><Host Name="Workbook"/></Hosts>
+  <Hosts><Host Name="Workbook"/><Host Name="Document"/></Hosts>
   <DefaultSettings><SourceLocation DefaultValue="http://127.0.0.1:3000/"/></DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
 </OfficeApp>

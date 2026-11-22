@@ -4,6 +4,10 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+if (!process.env.APPDATA) {
+  console.error('Auto-start is only supported on Windows (APPDATA is not set).');
+  process.exit(1);
+}
 const startupDir = path.join(process.env.APPDATA, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup');
 const item = path.join(startupDir, 'ExcelQwenGrokRelay.bat');
 const TASK = 'ExcelQwenGrokRelayEnsure';
