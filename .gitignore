@@ -1,6 +1,5 @@
 node_modules/
 .wrangler/
-download/
 .env
 .env.*
 !.env.example

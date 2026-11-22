@@ -30,9 +30,9 @@ Plain npm is identical: `npm install` then `npm start`. Requires **Node.js 20+**
 
 ### From the zip 用 zip
 
-Get `Qwen-Grok-for-Excel-and-Word.zip` from the owner, extract it, and run the same commands in that folder. `START-HERE.txt` inside is the one-page quick start.
+Get `Qwen-Grok-for-Excel-and-Word.zip` from the owner, or download it from **[`download/`](download/Qwen-Grok-for-Excel-and-Word.zip)** in this repository. Extract it and run the same commands in that folder. `START-HERE.txt` inside is the one-page quick start. The zip carries **no keys**.
 
-The owner rebuilds it with `npm run package`, which writes `download/Qwen-Grok-for-Excel-and-Word.zip`. That folder is **git-ignored on purpose**: a committed zip would be stale the moment the code changes. If you have repository access, clone and run `npm run setup` instead — you always get current code.
+The zip is a build artifact: rebuild it with `npm run package` after any code or doc change, and commit the result so the download never serves stale code. If you have repository access, cloning and running `npm run setup` is always the most current route.
 
 ### Or double-click 或雙擊
 
