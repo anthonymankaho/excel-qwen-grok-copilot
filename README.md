@@ -38,11 +38,24 @@ A read that exceeds the context budget now carries an explicit `[truncated: ...]
 
 `npm run check` passes. `npm test` → **52 pass / 2 fail**; both failures are the pre-existing `spawn unzip ENOENT` packaging tests (Windows ships no `unzip` binary) and are unrelated to this change. Three new tests cover the wide read, the honest rejection, and the prose plan.
 
-**Still out of scope:** native PivotTable creation. The agent offers a formula-driven SUMIFS cross-tab instead.
+### 2026-11-22 (Tier 1) — native PivotTable and sheet profiling
+
+Copilot-parity work, stage 1 of 3. Two capabilities added, both verified against the real `qwen4-max` model and the official Office.js typings.
+
+- **`pivot` action — a real native PivotTable.** `worksheet.pivotTables.add(name, source, destination)`, then `rowHierarchies` / `columnHierarchies` / `filterHierarchies` / `dataHierarchies`, `layout.layoutType`, grand totals, and `refresh()`. The destination sheet is created when missing. Undo deletes the pivot, and deletes the sheet too when this action created it. This replaces the earlier "pivots are out of scope" limitation — it was a product choice, not a platform one.
+- **`profileRequest` — column statistics instead of raw cells.** The pane reads a whole range in one batch (bounded at 2,000 rows × 60 columns) and returns each column's header, filled/blank counts, distinct count, sample values with counts, and numeric sum/min/max. This is what lets the model choose pivot fields on a sheet far larger than the context window.
+
+**Verified end-to-end with the real model:** asked to draft a pivot for `Combined Aging (USD)`, `qwen4-max` replied that it would build a *native PivotTable* and emitted `profileRequest {sheet:"Combined Aging (USD)", range:"A1:Q753"}` — 12,801 cells that the previous 160-cell cap silently dropped. Its prose `plan` string is now retained rather than discarded.
+
+`npm run check` passes. `npm test` → **55 pass / 2 fail**, the same two pre-existing Windows `spawn unzip ENOENT` packaging failures. Three new tests cover profiling output, native pivot creation with fields and aggregation, and rejection of malformed pivot payloads.
+
+**Not reachable, confirmed against the typings:** Python in Excel (no API — "Python" appears only in error-subtype enums) and the native Copilot ribbon/inline UX (a task pane cannot become that surface).
 
 處理狀態（2026-11-22，較後）：**已安裝於 Surface Book** — 上文原本說本機未安裝，現已更正。clone 位於 `C:\Users\Anthony Man\excel-qwen-grok-copilot`（OneDrive 以外），已 sideload 進桌面 Excel，relay 在 `127.0.0.1:3000`；刻意**未**安裝 auto-start。已實測：pane 經 Settings 載入 key，`POST /api/chat` 回傳真實 `qwen4-max` 答案。
 
-**已修正 agent 讀回的四個缺陷。** 原本 Agent 無法審閱活頁簿或起草 pivot：它要求讀取範圍，pane 記錄 `Execute SUCCESS · 0 actions`，並告訴模型 `Observed: SUCCESS`，但模型完全收不到儲存格。它其後正確地拒絕猜測欄位。四個缺陷為：`readGrid` 只讀 8 欄（17 欄的 ageing 表丟失 I:Q，桶與金額欄位看不見）；agent 讀取上限只有 160 格（`Summary!A1:S40` 共 760 格、`Combined Aging (USD)!A1:Q25` 共 425 格被靜默丟棄）；範圍被拒時回饋誤導的 `Observed: SUCCESS`；`normalizePlan` 丟棄字串形式的 plan 令計劃卡片空白。現已分別改為：保留完整欄寬、上限 `READ_MAX_CELLS` = 2000、明確回報「No range was read: 原因」並記入 audit、接受字串 plan。超出 context 預算的讀取現會附上明確的 `[truncated: ...]` 標記。`npm run check` 通過；`npm test` 為 **52 通過／2 失敗**，兩個失敗是既有的 `spawn unzip ENOENT` 打包測試（Windows 沒有 `unzip`），與是次改動無關。新增三個測試覆蓋寬表讀取、誠實拒絕與字串 plan。**仍超出範圍：** 原生 PivotTable 建立，agent 會改提 SUMIFS 交叉匯總。
+**已修正 agent 讀回的四個缺陷。** 原本 Agent 無法審閱活頁簿或起草 pivot：它要求讀取範圍，pane 記錄 `Execute SUCCESS · 0 actions`，並告訴模型 `Observed: SUCCESS`，但模型完全收不到儲存格。它其後正確地拒絕猜測欄位。四個缺陷為：`readGrid` 只讀 8 欄（17 欄的 ageing 表丟失 I:Q，桶與金額欄位看不見）；agent 讀取上限只有 160 格（`Summary!A1:S40` 共 760 格、`Combined Aging (USD)!A1:Q25` 共 425 格被靜默丟棄）；範圍被拒時回饋誤導的 `Observed: SUCCESS`；`normalizePlan` 丟棄字串形式的 plan 令計劃卡片空白。現已分別改為：保留完整欄寬、上限 `READ_MAX_CELLS` = 2000、明確回報「No range was read: 原因」並記入 audit、接受字串 plan。超出 context 預算的讀取現會附上明確的 `[truncated: ...]` 標記。`npm run check` 通過；`npm test` 為 **52 通過／2 失敗**，兩個失敗是既有的 `spawn unzip ENOENT` 打包測試（Windows 沒有 `unzip`），與是次改動無關。新增三個測試覆蓋寬表讀取、誠實拒絕與字串 plan。
+
+處理狀態（2026-11-22，Tier 1）：Copilot 看齊工程第 1 階段（共 3 階段）。新增兩項能力，均已對真實 `qwen4-max` 模型與官方 Office.js typings 核實。**`pivot` action — 真正的原生 PivotTable**：`pivotTables.add(name, source, destination)` 加上 row／column／filter／data hierarchies、layout、總計與 `refresh()`；目的地工作表不存在時自動建立；Undo 會刪除 pivot，若工作表是由本 action 建立則一併刪除。這取代了先前「pivots 超出範圍」的限制 — 那是產品選擇，非平台限制。**`profileRequest` — 以欄位統計代替原始儲存格**：pane 一次批次讀取整個範圍（上限 2,000 列 × 60 欄），回傳每欄的表頭、已填／空白數、相異值數、樣本值與次數，以及數值 sum／min／max。這令模型能在遠超 context 視窗的工作表上正確挑選 pivot 欄位。**已用真實模型端到端驗證：** 要求為 `Combined Aging (USD)` 起草 pivot 時，`qwen4-max` 回覆會建立*原生 PivotTable*，並發出 `profileRequest {sheet:"Combined Aging (USD)", range:"A1:Q753"}` — 即先前 160 格上限會靜默丟棄的 12,801 格；其字串 `plan` 現已保留而非丟棄。`npm run check` 通過；`npm test` 為 **55 通過／2 失敗**，仍是那兩個既有的 Windows `spawn unzip ENOENT` 打包失敗。**已核實無法達到：** Python in Excel（沒有 API，「Python」只出現在錯誤子類型列舉）與原生 Copilot 功能區／行內介面（任務窗格無法變成該介面）。
 
 ## What this update revises
 
@@ -69,6 +82,7 @@ In Excel:
 - Clear a range
 - Insert or delete rows, insert columns, add or rename a sheet, autofit, and sort
 - A column, bar, line, or pie chart, and a table with a name
+- A **native PivotTable** on a new or existing sheet: row, column and filter fields, value fields with a chosen aggregation (Sum, Count, Average, Max, Min, CountNumbers, Product, StandardDeviation, Variance), Tabular/Compact/Outline layout, and grand totals
 
 In Word:
 
@@ -77,7 +91,7 @@ In Word:
 - Bold and italic on the selection
 - The styles Heading 1, Heading 2, Heading 3, Title, and Normal
 
-It does not run Python in Excel. Borders, conditional formatting, filters, freeze panes, pivots, and replacing every match of a phrase in Word are outside this update.
+It does not run Python in Excel — Office.js exposes no API for it. Borders, conditional formatting, filters, freeze panes, and replacing every match of a phrase in Word are outside this update.
 
 ## First time on a computer
 

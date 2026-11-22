@@ -65,6 +65,17 @@
     return { sheet, range };
   }
 
+  // A profile asks for column statistics instead of raw cells, so a 753-row sheet
+  // can be understood without shipping every cell into the context window.
+  function normalizeProfileRequest(raw) {
+    if (!raw || typeof raw.sheet !== 'string') return null;
+    const sheet = raw.sheet.trim();
+    if (!sheet || sheet.length > 31) return null;
+    const range = typeof raw.range === 'string' ? raw.range.trim() : '';
+    if (range.length > 32) return null;
+    return { sheet, range };
+  }
+
   function parseEnvelope(text) {
     const source = String(text || '');
     const blocks = [...source.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)];
@@ -72,18 +83,19 @@
       try {
         const parsed = JSON.parse(blocks[i][1]);
         if (!parsed || typeof parsed !== 'object') continue;
-        if (!parsed.plan && !parsed.decision && !parsed.contextRequest && !parsed.actions) continue;
+        if (!parsed.plan && !parsed.decision && !parsed.contextRequest && !parsed.profileRequest && !parsed.actions) continue;
         const prose = (source.slice(0, blocks[i].index) + source.slice(blocks[i].index + blocks[i][0].length)).trim();
         return {
           prose,
           plan: normalizePlan(parsed.plan),
           actions: Array.isArray(parsed.actions) ? parsed.actions : null,
           decision: normalizeDecision(parsed.decision),
-          contextRequest: normalizeContextRequest(parsed.contextRequest)
+          contextRequest: normalizeContextRequest(parsed.contextRequest),
+          profileRequest: normalizeProfileRequest(parsed.profileRequest)
         };
       } catch { /* not this block */ }
     }
-    return { prose: source, plan: null, actions: null, decision: '', contextRequest: null };
+    return { prose: source, plan: null, actions: null, decision: '', contextRequest: null, profileRequest: null };
   }
 
   function routeProvider({ selected, mode, fast, text, ready }) {

@@ -88,8 +88,42 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
     while (n > 0) { const m = (n - 1) % 26; letters = String.fromCharCode(65 + m) + letters; n = Math.floor((n - 1) / 26); }
     return letters + (Number(match[2]) + rowOffset);
   }
+  function colNum(letters) {
+    let n = 0;
+    for (const ch of String(letters).toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
+    return n;
+  }
+  function colName(n) {
+    let s = '';
+    while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+    return s;
+  }
+  // A multi-cell range must return a real grid, not a 1x1, or whole-range reads
+  // (profiling) cannot be exercised.
+  function gridFor(sheetName, addr) {
+    const m = String(addr).match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
+    if (!m) return null;
+    const values = [], formulas = [];
+    for (let r = Number(m[2]); r <= Number(m[4]); r++) {
+      const vr = [], fr = [];
+      for (let c = colNum(m[1]); c <= colNum(m[3]); c++) {
+        const cur = cellStore[`${sheetName}!${colName(c)}${r}`] || { value: '', formula: '' };
+        vr.push(cur.value); fr.push(cur.formula);
+      }
+      values.push(vr); formulas.push(fr);
+    }
+    return { values, formulas };
+  }
   function makeWritableRange(sheetName, addr) {
     const cell = target(sheetName, addr);
+    const grid = gridFor(sheetName, addr);
+    cell.address = `${sheetName}!${addr}`;
+    if (grid) {
+      Object.defineProperty(cell, 'values', { get: () => grid.values, configurable: true });
+      Object.defineProperty(cell, 'formulas', { get: () => grid.formulas, configurable: true });
+      cell.rowCount = grid.values.length;
+      cell.columnCount = grid.values[0].length;
+    }
     cell.getCell = (r, c) => makeWritableRange(sheetName, shiftAddress(addr, r, c));
     const font = { load() {} };
     for (const key of ['bold', 'italic', 'color']) {
@@ -140,6 +174,32 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
       tables: {
         add() { writes.push({ sheet: name, kind: 'table' }); return { set name(v) { writes.push({ sheet: name, kind: 'tableName', name: v }); }, delete() { writes.push({ kind: 'deleteTable' }); } }; },
         getItem(tableName) { return { delete() { writes.push({ kind: 'deleteTable', name: tableName }); } }; }
+      },
+      pivotTables: {
+        add(pivotName, source, destination) {
+          const rec = {
+            sheet: name, kind: 'pivot', name: pivotName,
+            source: source.address, destination: destination.address,
+            rows: [], columns: [], filters: [], values: [], layout: null, grandTotals: null, refreshed: false
+          };
+          writes.push(rec);
+          const hierarchy = field => ({ field });
+          return {
+            layout: {
+              set layoutType(v) { rec.layout = v; },
+              set showRowGrandTotals(v) { rec.grandTotals = v; },
+              set showColumnGrandTotals(v) { rec.grandTotals = v; }
+            },
+            hierarchies: { getItem: hierarchy },
+            rowHierarchies: { add(h) { rec.rows.push(h.field); } },
+            columnHierarchies: { add(h) { rec.columns.push(h.field); } },
+            filterHierarchies: { add(h) { rec.filters.push(h.field); } },
+            dataHierarchies: { add(h) { const d = { field: h.field, summarizeBy: '', name: '' }; rec.values.push(d); return d; } },
+            refresh() { rec.refreshed = true; },
+            delete() { writes.push({ kind: 'deletePivot', name: pivotName }); }
+          };
+        },
+        getItem(pivotName) { return { delete() { writes.push({ kind: 'deletePivot', name: pivotName }); } }; }
       }
     };
   }
@@ -724,4 +784,81 @@ test('An over-limit read request is reported as not read, never as Observed SUCC
   assert.match(fed, /5200 cells, over the 2000-cell read limit/);
   assert.equal(/Observed: SUCCESS/.test(fed), false);
   assert.equal(sb.writes.length, 0);
+});
+
+test('A profile request returns column statistics, not raw cells', async () => {
+  const cells = {
+    'Aging!A1': { value: 'Entity' }, 'Aging!B1': { value: 'Bucket' }, 'Aging!C1': { value: 'Total USD' },
+    'Aging!A2': { value: 'MUK' }, 'Aging!B2': { value: 'Current' }, 'Aging!C2': { value: 100 },
+    'Aging!A3': { value: 'MUK' }, 'Aging!B3': { value: '31-60' }, 'Aging!C3': { value: 200 },
+    'Aging!A4': { value: 'MCA' }, 'Aging!B4': { value: 'Current' }, 'Aging!C4': { value: 50 }
+  };
+  const reply = {
+    model: 'm',
+    turns: [
+      'Profiling first.\n```json\n{"actions":[],"profileRequest":{"sheet":"Aging","range":"A1:C4"},"decision":"CONTINUE"}\n```',
+      'Now I know the fields.\n```json\n{"actions":[],"decision":"COMPLETE"}\n```'
+    ]
+  };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, cells });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  sb.els('directRevise').checked = true;
+  await ask(sb, 'build an ageing pivot');
+  assert.equal(chatCalls(sb).length, 2);
+  const fed = lastContent(sb);
+  assert.match(fed, /\[Excel profile Aging!A1:C4 — 3 data rows sampled, 3 columns\]/);
+  assert.match(fed, /A \| Entity \| filled 3 \| distinct 2/);
+  assert.match(fed, /MUK \(2\)/);
+  assert.match(fed, /C \| Total USD \| filled 3 \| distinct 3 \| numeric 3 \| sum 350 \| min 50 \| max 200/);
+  assert.match(visible(sb.els('conversation')), /Context Aging!A1:C4 \(profile\)/);
+});
+
+test('A pivot action creates a real native PivotTable with fields and aggregation', async () => {
+  const action = {
+    op: 'pivot', sheet: 'Aging', range: 'A1:C4', name: 'Aging Pivot',
+    destinationSheet: 'Pivot - Aging', destinationCell: 'A3',
+    rows: ['Entity'], columns: ['Bucket'], filters: [],
+    values: [{ field: 'Total USD', summarizeBy: 'Sum' }], layout: 'Tabular', grandTotals: true
+  };
+  const reply = { model: 'm', text: 'Building it.\n```json\n{"plan":"Add the pivot.","actions":[' + JSON.stringify(action) + '],"decision":"COMPLETE"}\n```' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, missingSheets: ['Pivot - Aging'] });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  sb.els('directRevise').checked = true;
+  await ask(sb, 'draft a pivot table for Aging');
+  const pivot = sb.writes.find(w => w.kind === 'pivot');
+  assert.ok(pivot, 'a native PivotTable was created');
+  assert.equal(pivot.name, 'Aging Pivot');
+  assert.equal(pivot.source, 'Aging!A1:C4');
+  assert.equal(pivot.destination, 'Pivot - Aging!A3');
+  assert.equal(pivot.rows.join(','), 'Entity');
+  assert.equal(pivot.columns.join(','), 'Bucket');
+  assert.equal(pivot.values.length, 1);
+  assert.equal(pivot.values[0].field, 'Total USD');
+  assert.equal(pivot.values[0].summarizeBy, 'Sum');
+  assert.equal(pivot.layout, 'Tabular');
+  assert.equal(pivot.grandTotals, true);
+  assert.equal(pivot.refreshed, true);
+  assert.ok(sb.writes.some(w => w.kind === 'addSheet' || w.name === 'Pivot - Aging'), 'destination sheet was created');
+});
+
+test('A pivot action without value fields or with a bad aggregation is rejected', async () => {
+  const base = { op: 'pivot', sheet: 'Aging', range: 'A1:C4', name: 'P', rows: ['Entity'], values: [{ field: 'Total USD' }] };
+  const bad = [
+    { ...base, values: [] },
+    { ...base, values: [{ field: 'Total USD', summarizeBy: 'Median' }] },
+    { ...base, rows: [], columns: [] },
+    { ...base, rows: 'Entity' },
+    { ...base, values: [{ field: '' }] }
+  ];
+  for (const action of bad) {
+    const reply = { model: 'm', text: 'Try.\n```json\n{"actions":[' + JSON.stringify(action) + '],"decision":"COMPLETE"}\n```' };
+    const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+    await boot(sb);
+    sb.els('workMode').value = 'agent';
+    sb.els('directRevise').checked = true;
+    await ask(sb, 'draft a pivot');
+    assert.equal(sb.writes.some(w => w.kind === 'pivot'), false, JSON.stringify(action));
+  }
 });

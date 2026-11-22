@@ -17,6 +17,7 @@ Excel actions:
 - {"op":"sort","sheet":"Sheet1","range":"A1:B20","column":"B","ascending":false,"hasHeaders":true}
 - {"op":"chart","sheet":"Sheet1","range":"A1:B20","type":"column","title":"Sales"} — type is column, bar, line, or pie
 - {"op":"table","sheet":"Sheet1","range":"A1:B20","name":"SalesTable"}
+- {"op":"pivot","sheet":"Data","range":"A1:Q753","name":"Aging Pivot","destinationSheet":"Pivot - Aging","destinationCell":"A3","rows":["Entity"],"columns":["Bucket"],"values":[{"field":"Total USD","summarizeBy":"Sum"}],"filters":["Currency"],"layout":"Tabular","grandTotals":true} — a real native PivotTable, not a formula imitation. The source range must include the header row and every field name must match a header exactly. The destination sheet is created when it does not exist. rows, columns and filters are arrays of header names; values is an array of {field, summarizeBy, name}. summarizeBy is Sum, Count, Average, Max, Min, CountNumbers, Product, StandardDeviation or Variance. layout is Tabular, Compact or Outline. At least one row or column field and at least one value field are required.
 
 Word actions:
 - {"op":"replaceSelection","text":"Revised paragraph."}
@@ -95,10 +96,12 @@ function hostNote(host) {
     : '\nThe open file is an Excel workbook. Use only Excel actions.';
 }
 
+const PROFILE_NOTE = ' To understand a sheet with many rows, set profileRequest to {sheet, range} instead of contextRequest: you receive each column\'s header, filled and blank counts, distinct count, sample values with counts, and numeric sum, min and max. Prefer it before choosing pivot or SUMIFS fields. A read counts as successful only when cell values or a profile actually reach you; if the pane says nothing was read, request a smaller range rather than assuming success.';
+
 function modeNote(mode) {
   if (mode === 'chat') return '\nMODE CHAT: Answer from the context. Do not emit an actions or edits block.';
-  if (mode === 'plan') return '\nMODE PLAN: Return one json object with a plan and no claim that the file changed. Include goal, steps, assumptions, requiredInputs, risks, and finalValidation. Put actions in the same object only as a proposal. Do not invent validation pass or fail.';
-  if (mode === 'agent') return '\nMODE AGENT: Return one json object with plan, optional actions for this step only, and decision set to COMPLETE, CONTINUE, REPLAN, NEEDS_USER, or FAILED. If you need a range, set contextRequest to {sheet, range} and do not guess the cells. Include the header row in a finance range. Set finalValidation columns only after those headers were read. Finance checks are calculated by the pane from the workbook. A failed check stops the loop. A check without an identified column is not a pass. Destructive actions wait for the user.';
+  if (mode === 'plan') return '\nMODE PLAN: Return one json object with a plan and no claim that the file changed. Include goal, steps, assumptions, requiredInputs, risks, and finalValidation. Put actions in the same object only as a proposal. Do not invent validation pass or fail.' + PROFILE_NOTE;
+  if (mode === 'agent') return '\nMODE AGENT: Return one json object with plan, optional actions for this step only, and decision set to COMPLETE, CONTINUE, REPLAN, NEEDS_USER, or FAILED. If you need a range, set contextRequest to {sheet, range} and do not guess the cells. Include the header row in a finance range. Set finalValidation columns only after those headers were read. Finance checks are calculated by the pane from the workbook. A failed check stops the loop. A check without an identified column is not a pass. Destructive actions wait for the user.' + PROFILE_NOTE;
   return '';
 }
 

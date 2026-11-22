@@ -3,6 +3,9 @@ const CONTEXT_CAP = 45_000; // Relay rejects messages over 50,000 chars; leave r
 const MAX_CONTEXT_ROWS = 150;
 const MAX_CONTEXT_COLS = 30;
 const READ_MAX_CELLS = 2000; // One read-back batch. Full column width is kept; rows are trimmed to fit.
+const PROFILE_MAX_ROWS = 2000; // Profiling reads whole ranges, so it is bounded separately from READ_MAX_CELLS.
+const PROFILE_MAX_COLS = 60;
+const PROFILE_DISTINCT = 12; // Sample values shown per column; enough to identify a grouping field.
 const CELL_CHAR_LIMIT = 32767;
 const KEY_STORE = 'eqgc.keys.v1';
 const RELAY_STORE = 'eqgc.relay.v1';
@@ -261,6 +264,11 @@ function riskyEdit(value) {
 }
 
 const CHART_TYPES = { column: 'ColumnClustered', bar: 'BarClustered', line: 'Line', pie: 'Pie' };
+const PIVOT_AGGREGATIONS = {
+  sum: 'Sum', count: 'Count', average: 'Average', max: 'Max', min: 'Min',
+  countnumbers: 'CountNumbers', product: 'Product', stddev: 'StandardDeviation', variance: 'Variance'
+};
+const PIVOT_LAYOUTS = { tabular: 'Tabular', compact: 'Compact', outline: 'Outline' };
 const WORD_STYLES = { 'heading 1': 'Heading 1', 'heading 2': 'Heading 2', 'heading 3': 'Heading 3', title: 'Title', normal: 'Normal' };
 
 function indexToColumn(n) {
@@ -434,6 +442,43 @@ function normalizeAction(raw) {
     const range = /[0-9]/.test(String(raw.range || '')) ? boundedRange(raw.range, 2000) : normalizeColumns(raw.range);
     return range ? { host: 'excel', op, sheet, range } : null;
   }
+  if (op === 'pivot') {
+    // The source range is handed to Excel rather than read into the pane, so it may
+    // be far larger than a normal read or write range.
+    const range = boundedRange(raw.range, 1000000);
+    if (!range) return null;
+    const name = typeof raw.name === 'string' ? raw.name.trim() : '';
+    if (!name || name.length > 60 || /[\r\n]/.test(name)) return null;
+    const destinationSheet = normalizeSheet(raw.destinationSheet || name);
+    const destinationCell = normalizeCell(raw.destinationCell || 'A3');
+    if (!destinationSheet || !destinationCell) return null;
+    const fieldList = value => {
+      if (!Array.isArray(value) || value.length > 8) return null;
+      const list = value.map(item => typeof item === 'string' ? item.trim() : '');
+      return list.every(item => item && item.length <= 100) ? list : null;
+    };
+    const rows = fieldList(raw.rows || []);
+    const columns = fieldList(raw.columns || []);
+    const filters = fieldList(raw.filters || []);
+    if (!rows || !columns || !filters || rows.length + columns.length < 1) return null;
+    if (!Array.isArray(raw.values) || raw.values.length < 1 || raw.values.length > 8) return null;
+    const values = [];
+    for (const item of raw.values) {
+      const field = typeof item?.field === 'string' ? item.field.trim() : '';
+      if (!field || field.length > 100) return null;
+      const summarizeBy = item.summarizeBy == null ? 'Sum' : PIVOT_AGGREGATIONS[String(item.summarizeBy).toLowerCase()];
+      if (!summarizeBy) return null;
+      const label = item.name == null ? field : String(item.name).trim();
+      if (!label || label.length > 100) return null;
+      values.push({ field, summarizeBy, name: label });
+    }
+    const layout = PIVOT_LAYOUTS[String(raw.layout || 'tabular').toLowerCase()];
+    if (!layout) return null;
+    return {
+      host: 'excel', op, sheet, range, name, destinationSheet, destinationCell,
+      rows, columns, filters, values, layout, grandTotals: raw.grandTotals !== false
+    };
+  }
   return null;
 }
 
@@ -485,6 +530,12 @@ function describeAction(action) {
   if (action.op === 'sort') return `Sort ${action.sheet}!${action.range}`;
   if (action.op === 'chart') return `Chart ${action.sheet}!${action.range} (${action.type})`;
   if (action.op === 'table') return `Table ${action.name} on ${action.sheet}!${action.range}`;
+  if (action.op === 'pivot') {
+    const values = action.values.map(value => `${value.summarizeBy} of ${value.field}`).join(', ');
+    const rows = action.rows.join(', ') || 'none';
+    const columns = action.columns.join(', ') || 'none';
+    return `PivotTable ${action.name} at ${action.destinationSheet}!${action.destinationCell} from ${action.sheet}!${action.range} · rows ${rows} · columns ${columns} · ${values}`;
+  }
   if (action.op === 'replaceSelection') return 'Replace the Word selection';
   if (action.op === 'insertText') return `Insert text at the ${action.where} of the document`;
   if (action.op === 'formatSelection') return 'Format the Word selection';
@@ -630,6 +681,36 @@ async function applyExcelActions(actions) {
         const table = sheet.tables.add(sheet.getRange(action.range), true);
         table.name = action.name;
         undo.push({ host: 'excel', op: 'table', sheet: action.sheet, name: action.name });
+        continue;
+      }
+      if (action.op === 'pivot') {
+        let dest = wanted.get(action.destinationSheet);
+        if (!dest) {
+          dest = context.workbook.worksheets.getItemOrNullObject(action.destinationSheet);
+          dest.load('isNullObject');
+          await context.sync();
+        }
+        let createdSheet = false;
+        if (!dest || sheetMissing(dest)) {
+          dest = context.workbook.worksheets.add(action.destinationSheet);
+          wanted.set(action.destinationSheet, dest);
+          createdSheet = true;
+        }
+        const pivot = sheet.pivotTables.add(action.name, sheet.getRange(action.range), dest.getRange(action.destinationCell));
+        pivot.layout.layoutType = action.layout;
+        pivot.layout.showRowGrandTotals = action.grandTotals;
+        pivot.layout.showColumnGrandTotals = action.grandTotals;
+        await context.sync();
+        for (const field of action.rows) pivot.rowHierarchies.add(pivot.hierarchies.getItem(field));
+        for (const field of action.columns) pivot.columnHierarchies.add(pivot.hierarchies.getItem(field));
+        for (const field of action.filters) pivot.filterHierarchies.add(pivot.hierarchies.getItem(field));
+        for (const value of action.values) {
+          const data = pivot.dataHierarchies.add(pivot.hierarchies.getItem(value.field));
+          data.summarizeBy = value.summarizeBy;
+          data.name = value.name;
+        }
+        pivot.refresh();
+        undo.push({ host: 'excel', op: 'pivot', sheet: action.destinationSheet, name: action.name, createdSheet });
       }
     }
     await context.sync();
@@ -683,6 +764,9 @@ async function undoExcel(records) {
         sheet.charts.getItem(rec.name).delete();
       } else if (rec.op === 'table') {
         sheet.tables.getItem(rec.name).delete();
+      } else if (rec.op === 'pivot') {
+        if (rec.createdSheet) context.workbook.worksheets.getItem(rec.sheet).delete();
+        else sheet.pivotTables.getItem(rec.name).delete();
       }
     }
     await context.sync();
@@ -1110,6 +1194,83 @@ async function readGrid(sheet, range) {
   });
 }
 
+function plainRange(address) {
+  return normalizeRange(String(address || '').split('!').pop());
+}
+
+function clampRange(addr, maxRows, maxCols) {
+  const size = rangeSize(addr);
+  const rows = Math.min(size.rows, maxRows);
+  const cols = Math.min(size.cols, maxCols);
+  if (rows === size.rows && cols === size.cols) return addr;
+  const top = addr.split(':')[0].match(/^([A-Z]+)(\d+)$/);
+  return `${top[1]}${top[2]}:${indexToColumn(columnIndex(top[1]) + cols - 1)}${Number(top[2]) + rows - 1}`;
+}
+
+// Column statistics rather than raw cells, so a sheet far larger than the context
+// window can still be understood well enough to choose pivot fields.
+async function profileSheet(sheetName, requested) {
+  return Excel.run(async context => {
+    const worksheet = context.workbook.worksheets.getItem(sheetName);
+    const asked = normalizeRange(requested || '');
+    let addr = asked ? clampRange(asked, PROFILE_MAX_ROWS, PROFILE_MAX_COLS) : '';
+    let totalRows = 0;
+    if (!addr) {
+      const used = worksheet.getUsedRangeOrNullObject();
+      used.load(['isNullObject', 'address', 'rowCount', 'columnCount']);
+      await context.sync();
+      if (used.isNullObject) return null;
+      const full = plainRange(used.address);
+      if (!full) return null;
+      totalRows = rangeSize(full).rows;
+      addr = clampRange(full, PROFILE_MAX_ROWS, PROFILE_MAX_COLS);
+    }
+    const target = worksheet.getRange(addr);
+    target.load('values');
+    await context.sync();
+    const values = target.values || [];
+    if (!values.length) return null;
+    const header = (values[0] || []).map(value => String(value ?? '').trim());
+    const body = values.slice(1);
+    const columns = header.map((name, c) => {
+      const seen = new Map();
+      let numeric = 0, sum = 0, min = null, max = null, blank = 0;
+      for (const row of body) {
+        const value = row?.[c];
+        if (value == null || value === '') { blank += 1; continue; }
+        const key = String(value);
+        seen.set(key, (seen.get(key) || 0) + 1);
+        const n = typeof value === 'number' ? value : Number(key);
+        if (Number.isFinite(n) && key.trim() !== '') {
+          numeric += 1; sum += n;
+          min = min == null ? n : Math.min(min, n);
+          max = max == null ? n : Math.max(max, n);
+        }
+      }
+      const ranked = [...seen.entries()].sort((a, b) => b[1] - a[1]);
+      return {
+        letter: indexToColumn(c + 1), header: name || '(blank header)',
+        filled: body.length - blank, blank, distinct: seen.size, numeric,
+        sum: numeric ? Math.round(sum * 100) / 100 : null, min, max,
+        samples: ranked.slice(0, PROFILE_DISTINCT).map(([value, count]) => `${value} (${count})`)
+      };
+    });
+    return { address: addr, columns, sampledRows: body.length, totalRows: totalRows || body.length };
+  });
+}
+
+function formatProfile(sheetName, profile) {
+  const head = `[Excel profile ${sheetName}!${profile.address} — ${profile.sampledRows} data rows sampled${profile.totalRows > profile.sampledRows ? ` of ${profile.totalRows}` : ''}, ${profile.columns.length} columns]`;
+  const lines = profile.columns.map(column => {
+    const parts = [`${column.letter} | ${column.header}`, `filled ${column.filled}`, `distinct ${column.distinct}`];
+    if (column.blank) parts.push(`blank ${column.blank}`);
+    if (column.numeric) parts.push(`numeric ${column.numeric}`, `sum ${column.sum}`, `min ${column.min}`, `max ${column.max}`);
+    if (column.samples.length) parts.push(`e.g. ${column.samples.join(', ')}`);
+    return parts.join(' | ');
+  });
+  return `${head}\n${lines.join('\n')}`;
+}
+
 async function gridsForChecks(checks) {
   const grids = {};
   for (const check of checks) {
@@ -1320,6 +1481,27 @@ async function sendAgentPrompt(prompt) {
       if (mode === 'plan' || envelope.decision === 'NEEDS_USER' || (mode === 'agent' && !$('directRevise').checked && normalized.actions.length)) {
         renderModePlan(envelope.plan, normalized.actions, normalized.skipped);
         break;
+      }
+      if (envelope.profileRequest && !normalized.actions.length && guard < AgentCore.MAX_LOOPS - 1) {
+        const sheet = normalizeSheet(envelope.profileRequest.sheet);
+        let profile = null;
+        let failure = '';
+        if (!sheet) failure = `sheet "${envelope.profileRequest.sheet}" is not a usable sheet name`;
+        else {
+          try { profile = await profileSheet(sheet, envelope.profileRequest.range); }
+          catch (error) { failure = error.message; }
+          if (!profile && !failure) failure = 'the sheet or range is empty';
+        }
+        if (profile) {
+          const text = formatProfile(sheet, profile).slice(0, 8000);
+          state.messages.push({ role: 'user', content: `Requested profile.\n\n${text}` });
+          state.audit.push(AgentCore.audit({ kind: 'context', address: `${sheet}!${profile.address} (profile)`, chars: text.length }));
+        } else {
+          state.messages.push({ role: 'user', content: `No profile was produced for "${envelope.profileRequest.sheet}": ${failure}. Nothing was read, so this is not a successful read.` });
+          state.audit.push(AgentCore.audit({ kind: 'blocked', reason: `profile rejected: ${failure}` }));
+        }
+        guard += 1;
+        continue;
       }
       if (envelope.contextRequest && !normalized.actions.length && guard < AgentCore.MAX_LOOPS - 1) {
         const sheet = normalizeSheet(envelope.contextRequest.sheet);
