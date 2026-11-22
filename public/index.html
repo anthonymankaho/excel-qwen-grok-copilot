@@ -7,6 +7,7 @@
   <title>Qwen + Grok for Excel and Word</title>
   <link rel="stylesheet" href="taskpane.css">
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <script defer src="agent-core.js"></script>
   <script defer src="taskpane.js"></script>
 </head>
 <body>
@@ -50,9 +51,9 @@
       <div class="insert-row"><button id="newChat" class="text-button" type="button">New chat</button><button id="insertAnswer" class="text-button" disabled>↳ Insert last answer into selection</button><span id="lastAnswerState"></span></div>
     <form id="composer" class="composer">
       <textarea id="prompt" rows="2" placeholder="Ask, or tell me what to change..." aria-label="Message"></textarea>
-      <div class="composer-footer"><div class="provider-pill"><span id="statusDot" class="status-dot" title="Relay status"></span><select id="activeProvider" aria-label="Active provider"><option value="qwen">Qwen</option><option value="grok">Grok</option></select></div><label class="context-toggle" title="Skip deep thinking for a quicker reply"><input type="checkbox" id="fastMode"> Fast</label><label class="context-toggle" title="Write safe changes into Excel or Word immediately. Formulas that call the network still wait for a click."><input type="checkbox" id="directRevise" checked> Direct</label><button id="send" class="send-button" type="submit" aria-label="Send message">↑</button></div>
+      <div class="composer-footer"><div class="provider-pill"><span id="statusDot" class="status-dot" title="Relay status"></span><select id="workMode" aria-label="Mode"><option value="chat">Chat</option><option value="plan">Plan</option><option value="agent" selected>Agent</option></select><select id="activeProvider" aria-label="Active provider"><option value="auto">Auto</option><option value="qwen" selected>Qwen</option><option value="grok">Grok</option></select></div><label class="context-toggle" title="Skip deep thinking for a quicker reply"><input type="checkbox" id="fastMode"> Fast</label><label class="context-toggle" title="In Agent mode, write safe changes immediately. Deletes, clears, renames, and network formulas still wait for a click."><input type="checkbox" id="directRevise" checked> Direct</label><button id="send" class="send-button" type="submit" aria-label="Send message">↑</button></div>
     </form>
-    <div class="footnote">Direct revise writes safe changes immediately. Undo is on the card. Risky formulas still wait for a click.</div>
+    <div class="footnote">Chat never writes. Plan waits for Approve. Agent writes safe changes when Direct is on. Deletes, clears, renames, and network formulas wait for a click.</div>
     <div id="toast" role="status" class="toast hidden"></div>
   </main>
 </body>

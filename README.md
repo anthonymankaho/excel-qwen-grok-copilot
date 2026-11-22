@@ -1,6 +1,6 @@
 # Qwen + Grok for Excel and Word
 
-A local task pane for desktop Excel and Word. It reads the selection, chats with Qwen or Grok, and revises the open file. **Direct** is on by default: safe changes are written immediately, and the card has **Undo last apply**. Formulas that can reach the network stay on the card until you click.
+A local task pane for desktop Excel and Word. It reads the file, plans the work, and revises it with Qwen or Grok. Three modes sit in the composer: **Chat** never writes, **Plan** shows the steps and waits for **Approve**, and **Agent** runs a short loop. **Direct** applies safe Agent actions immediately. Deletes, clears, renames, and formulas that can reach the network wait for a click. **Undo last apply** is on the card.
 
 The pane and the relay both live on this computer at `http://127.0.0.1:3000`. Excel for the web, Word for the web, and company-wide deployment need an HTTPS host and an admin install. This copy does not.
 
@@ -47,7 +47,7 @@ After a code change, restart the relay (`npm run relay-stop`, then `npm run rela
 
 The context card shows what the next question will send.
 
-- In Excel, a multi-cell selection is sent. A single cell falls back to the used range of the active sheet. Formulas appear as `value [=formula]`. The read stops at the first 150 rows and 30 columns, then at 45,000 characters. A truncation note says so.
+- In Chat, a multi-cell Excel selection is sent. A single cell falls back to the used range of the active sheet. Formulas appear as `value [=formula]`. The read stops at the first 150 rows and 30 columns, then at 45,000 characters. A truncation note says so. Plan and Agent send sheet names and the selection address first.
 - In Word, the selection is sent. An empty selection sends the document body, with the same character cap.
 - The card refreshes when the selection changes. **↻ Refresh** reads it again.
 - Untick **Send context** to ask with no file data.
@@ -55,11 +55,23 @@ The context card shows what the next question will send.
 
 Ask in the box and press Enter. Shift+Enter adds a line. **Summarize**, **Explain**, **Write formula**, and **Revise** fill a starting prompt. Replies stream. The send button becomes **Stop** while a reply is running. **New chat** clears the conversation. **Fast** skips deep thinking: Qwen turns thinking off, and Grok uses low reasoning effort.
 
-The footer pill switches Qwen and Grok. Each provider needs its own key. The dot is green when that key is loaded, amber when the relay is up and the key is not, and red when the relay is down.
+The footer pill sets Chat, Plan, or Agent, and Qwen, Grok, or Auto. Each provider needs its own key. The dot is green when that key is loaded, amber when the relay is up and the key is not, and red when the relay is down.
 
 **↳ Insert last answer into selection** writes the last reply into the top-left cell of the Excel selection. One line that starts with `=` is written as a formula. Anything else is written as text.
 
 History stays in memory. Reloading the pane clears it. Each request sends at most 24 messages, and only the latest question includes the file context.
+
+## Modes
+
+**Chat** sends the selection and answers. Any action list in the reply is ignored.
+
+**Plan** sends workbook metadata first: sheet names, the selection address, and used-range size. It does not send the cell grid unless you tick **＋ Whole sheet**. The reply is a plan with the goal, steps, assumptions, inputs, risks, and the checks it wants. Nothing is written until you press **Approve**.
+
+**Agent** uses the same metadata first. It can ask for one range, run that step, read the cells back, and calculate checks from the sheet. The loop stops at 4 rounds, when you press **Stop**, or when a check fails. A failed debit-and-credit check, a formula error, a blank required field, a duplicate key, or a total that moved is reported as issue, evidence, possible cause, and what to do next. The model does not get to mark those checks as passed.
+
+**Auto**, next to the mode, picks Qwen or Grok only from keys already loaded in the relay. A finance or Agent request prefers Grok when that key is present and **Fast** is off. Otherwise it prefers Qwen. It will not send the workbook to a provider that has no key. If the chosen provider errors and the other key is loaded, the pane tries that provider once.
+
+The audit card at the end of a Chat, Plan, or Agent turn lists the request, the provider, the context that was sent, the actions, and the check results. It does not include API keys.
 
 ## Direct revise
 
@@ -123,7 +135,7 @@ Auto-start is Windows-only. It uses `%APPDATA%`.
 
 ## Tests
 
-`npm run check` and `npm test` need no API key. The pane tests stub the page, Excel, Word, and the stream. They cover context, the click-gated edit card, Direct revise, Undo, risky formulas, and Word replace. The relay tests cover the loopback lock, the Qwen URL allowlist, Fast mode, and stream errors.
+`npm run check` and `npm test` need no API key. The pane tests stub the page, Excel, Word, and the stream. They cover context, the click-gated edit card, Direct revise, Undo, risky formulas, Word replace, Chat, Plan, Agent, and a debit-and-credit stop. The relay tests cover the loopback lock, the Qwen URL allowlist, Fast mode, and stream errors.
 
 Before trusting a change in the real app, start the relay, load a key, ask one question, and confirm the answer. For a revise, confirm the card and use Undo once.
 

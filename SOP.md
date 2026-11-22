@@ -42,7 +42,13 @@ The sideload stays until `npm run stop`. Auto-start stays until `npm run autosta
 
 ## 4. Revising the file
 
-**Direct** is on by default.
+Use the composer mode before you send.
+
+- **Chat** reads context and does not write.
+- **Plan** shows the goal, steps, assumptions, risks, and checks. **Approve** is required before any write.
+- **Agent** may write safe actions when **Direct** is on. It reads metadata first, then only the range it asks for. After a write it reads the cells back. Finance checks are computed in the pane from those cells. A failed check stops the loop. The limit is 4 rounds. **Stop** cancels the current round.
+
+**Direct** is on by default. Deletes, clears, renames, and network formulas still wait for a click in Agent mode.
 
 1. Read the card before you move on. It lists every action that was written, or every action waiting for a click.
 2. Safe actions write immediately: values, formulas, formatting, borders, conditional formatting, filters, freeze, rows, columns, sheets, autofit, sort, charts, tables, pivots, and in Word the selection, highlight, style, and find-and-replace.

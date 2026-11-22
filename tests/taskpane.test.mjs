@@ -6,7 +6,10 @@ import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const source = fs.readFileSync(path.join(root, 'public', 'taskpane.js'), 'utf8');
+const source = [
+  fs.readFileSync(path.join(root, 'public', 'agent-core.js'), 'utf8'),
+  fs.readFileSync(path.join(root, 'public', 'taskpane.js'), 'utf8')
+].join('\n');
 
 function makeElement(id) {
   const el = {
@@ -40,6 +43,7 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets })
   const store = seedKeys ? { 'eqgc.keys.v1': JSON.stringify(seedKeys) } : {};
   const writes = [];
   const calls = [];
+  let streamTurn = 0;
   const cellStore = {};
   for (const [k, v] of Object.entries(cells || {})) cellStore[k] = { value: v.value ?? '', formula: v.formula ?? '' };
   const missing = new Set(missingSheets || []);
@@ -159,7 +163,11 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets })
       run: fn => fn({
         workbook: {
           getSelectedRange: () => range(selection),
+          name: 'Book1',
+          load() {},
           worksheets: {
+            load() {},
+            items: [{ name: 'Sheet1', load() {} }],
             getActiveWorksheet: () => ({ getUsedRangeOrNullObject: () => range(used) }),
             add(sheetName) { writes.push({ kind: 'addSheet', name: sheetName }); return makeSheet(sheetName); },
             getItem: sheet => makeSheet(sheet),
@@ -194,8 +202,10 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets })
       const body = opts?.body ? JSON.parse(opts.body) : null;
       calls.push({ url, body });
       if (url.endsWith('/api/health')) return { ok: true, status: 200, json: async () => ({ ok: true, configured: { qwen: true, grok: false } }) };
-      const data = reply || { text: 'mock answer', model: 'test-model' };
+      const turnText = Array.isArray(reply?.turns) ? reply.turns[Math.min(streamTurn, reply.turns.length - 1)] : null;
+      const data = turnText != null ? { text: turnText, model: reply.model || 'test-model' } : (reply || { text: 'mock answer', model: 'test-model' });
       if (url.endsWith('/api/chat-stream')) {
+        streamTurn += 1;
         const frames = `data: ${JSON.stringify({ model: data.model || 'test-model', choices: [{ delta: { content: data.text } }] })}\n\ndata: [DONE]\n\n`;
         let sent = false;
         return {
@@ -217,6 +227,7 @@ const usedSmall = { address: "'Sheet1'!A1:B2", text: [['1', '2'], ['3', '4']], f
 const selMulti = { address: "'Sheet1'!A1:B2", text: [['1', '2'], ['3', '4']], formulas: [['=1+0', '=A1*2'], ['=3', '=4']], rowCount: 2, columnCount: 2 };
 const chatCalls = sb => sb.calls.filter(c => c.url.endsWith('/api/chat-stream') || c.url.endsWith('/api/chat'));
 const lastContent = sb => chatCalls(sb).at(-1).body.messages.at(-1).content;
+const visible = el => el ? [el.textContent || '', ...(el.children || []).map(visible)].join('\n') : '';
 async function boot(sb) { sb.officeCb({ host: 'Excel' }); await flush(); await flush(); }
 async function ask(sb, text) { sb.els('prompt').value = text; await fire(sb.els('composer'), 'submit'); await flush(); await flush(); }
 
@@ -545,4 +556,94 @@ test('Direct revise replaces and styles the Word selection', async () => {
   assert.ok(sb.writes.some(w => w.kind === 'wordFont' && w.key === 'bold' && w.value === true));
   assert.ok(sb.writes.some(w => w.kind === 'wordStyle' && w.style === 'Heading 1'));
   assert.ok(sb.writes.some(w => w.kind === 'wordBody' && w.where === 'End'));
+});
+
+test('Chat mode answers and does not write, even when Direct is on', async () => {
+  const reply = { text: 'Here is the total.\n```json\n{"actions":[{"op":"set","sheet":"Sheet1","range":"B2","value":5}]}\n```', model: 'm' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+  await boot(sb);
+  sb.els('workMode').value = 'chat';
+  sb.els('directRevise').checked = true;
+  await ask(sb, 'what is the total');
+  assert.equal(sb.writes.length, 0);
+  assert.equal(sb.els('conversation').children.some(c => String(c.className).includes('edits-card')), false);
+  assert.match(`${sb.els('toast').textContent}\n${visible(sb.els('conversation'))}`, /Chat mode does not change the file|AUDIT/);
+});
+
+test('Plan mode shows the plan and writes only after Approve', async () => {
+  const reply = { text: 'Proposal.\n```json\n{"plan":{"goal":"Fill total","mode":"plan","steps":[{"id":1,"objective":"Write the total","actionType":"edit","requiresApproval":true,"validation":"value is 99"}],"assumptions":["Header is row 1"],"requiredInputs":[],"risks":[],"finalValidation":[]},"actions":[{"op":"set","sheet":"Sheet1","range":"B2","value":99}]}\n```', model: 'm' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+  await boot(sb);
+  sb.els('workMode').value = 'plan';
+  sb.els('directRevise').checked = true;
+  await ask(sb, 'fill the total');
+  assert.equal(sb.writes.length, 0);
+  const card = sb.els('conversation').children.find(c => String(c.className).includes('edits-card'));
+  assert.match(visible(card), /Fill total/);
+  const approve = card.children.find(c => c.className === 'button-row').children.find(c => c.textContent === 'Approve');
+  await fire(approve, 'click'); await flush(); await flush();
+  assert.ok(sb.writes.some(w => w.cell === 'B2' && w.kind === 'value' && w.value === 99));
+});
+
+test('Agent mode sends workbook metadata and holds a delete for approval', async () => {
+  const reply = { text: 'I would remove that row.\n```json\n{"plan":{"goal":"Remove a blank row","mode":"agent","steps":[{"id":1,"objective":"Delete row 5","actionType":"edit","requiresApproval":true,"validation":"row count"}],"assumptions":[],"requiredInputs":[],"risks":["Deletes data"],"finalValidation":[]},"actions":[{"op":"deleteRows","sheet":"Sheet1","row":5,"count":1}],"decision":"COMPLETE"}\n```', model: 'm' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  sb.els('directRevise').checked = true;
+  await ask(sb, 'delete the blank row');
+  assert.match(lastContent(sb), /\[Excel workbook metadata\]/);
+  assert.equal(lastContent(sb).includes('[=A1*2]'), false);
+  assert.equal(sb.writes.some(w => w.kind === 'delete'), false);
+  assert.match(visible(sb.els('conversation')), /Delete 1 row/);
+});
+
+test('Agent mode stops when debit does not equal credit and does not continue', async () => {
+  const reply = {
+    model: 'm',
+    turns: [
+      'Draft.\n```json\n{"plan":{"goal":"Draft the journal","mode":"agent","steps":[{"id":1,"objective":"Check the balance","actionType":"validate","requiresApproval":false,"validation":"debit equals credit"}],"assumptions":["This is a draft"],"requiredInputs":[],"risks":["Do not post"],"finalValidation":[{"check":"debitEqualsCredit","sheet":"Sheet1","range":"C2:D2"}]},"actions":[{"op":"set","sheet":"Sheet1","range":"E1","value":1}],"decision":"CONTINUE"}\n```',
+      'Again.\n```json\n{"actions":[{"op":"set","sheet":"Sheet1","range":"F1","value":2}],"decision":"COMPLETE"}\n```'
+    ]
+  };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, cells: { 'Sheet1!C2': { value: 100 }, 'Sheet1!D2': { value: 40 } } });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  sb.els('directRevise').checked = true;
+  await ask(sb, 'draft the accrual journal');
+  assert.equal(chatCalls(sb).length, 1);
+  assert.ok(sb.writes.some(w => w.cell === 'E1' && w.value === 1));
+  assert.equal(sb.writes.some(w => w.cell === 'F1'), false);
+  assert.match(visible(sb.els('conversation')), /FAIL debitEqualsCredit/);
+  assert.match(visible(sb.els('conversation')), /draft/i);
+});
+
+test('Agent mode with Direct off waits for Approve before writing', async () => {
+  const reply = { text: 'Ready.\n```json\n{"plan":{"goal":"Write the total","mode":"agent","steps":[{"id":1,"objective":"Set the total","actionType":"edit","requiresApproval":true,"validation":"value is 7"}],"assumptions":[],"requiredInputs":[],"risks":[],"finalValidation":[]},"actions":[{"op":"set","sheet":"Sheet1","range":"B2","value":7}],"decision":"COMPLETE"}\n```', model: 'm' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  sb.els('directRevise').checked = false;
+  await ask(sb, 'write the total');
+  assert.equal(sb.writes.length, 0);
+  const card = sb.els('conversation').children.find(c => String(c.className).includes('edits-card'));
+  assert.match(visible(card), /Write the total/);
+  const approve = card.children.find(c => c.className === 'button-row').children.find(c => c.textContent === 'Approve');
+  await fire(approve, 'click'); await flush();
+  assert.equal(sb.writes.length, 0);
+  const applyCard = sb.els('conversation').children.filter(c => String(c.className).includes('edits-card')).at(-1);
+  const apply = applyCard.children.find(c => c.className === 'button-row').children.find(c => c.textContent === 'Apply edits');
+  await fire(apply, 'click'); await flush();
+  assert.ok(sb.writes.some(w => w.cell === 'B2' && w.value === 7));
+});
+
+test('Auto stays on Qwen when Grok has no key', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Noted.', model: 'qwen4-max' } });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  sb.els('activeProvider').value = 'auto';
+  await ask(sb, 'Reconcile the ledger');
+  assert.equal(chatCalls(sb).at(-1).body.provider, 'qwen');
+  assert.equal(chatCalls(sb).at(-1).body.mode, 'agent');
+  assert.match(visible(sb.els('conversation')), /via qwen/);
 });
