@@ -108,6 +108,7 @@ Borders, conditional formatting, filters, freeze panes, pivots, and replacing ev
 | Port 3000 in use | `npm run relay-stop`, then start the relay again |
 | Pane shows an old screen | Restart the relay and reopen the pane. On another computer, `git pull` first. This update is manifest 1.2.0.0 |
 | Provider HTTP 401 | Key and URL do not match. Token Plan keys use the Token Plan URL. Regular Qwen keys use the pay-as-you-go URL |
+| Model not exist (HTTP 400) | The model is not on that key's list. A Token Plan key does not serve `qwen-max`, `qwen-turbo`, or `qwen-plus`. Change the model in Settings |
 | Qwen endpoint rejected | Use the Token Plan URL or `https://<region>.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` |
 | Invalid conversation message | Message plus context is over 50,000 characters. Shorten the message or untick **Send context** |
 | Context says truncated | Ask about a smaller range |
@@ -122,7 +123,7 @@ Use this when the pane should open from an `https://` address, including Excel o
 
 1. In Excel, use **Home → Add-ins → Upload My Add-in** and choose `manifest.cloudflare.xml`.
 2. Open Settings in the hosted pane, paste the relay token, and press **Use key**. Remember keeps it in that pane only. The matching `RELAY_TOKEN` secret is already on the Worker.
-3. From the project folder, run `npx wrangler login`, then `npx wrangler secret put QWEN_API_KEY` and `npx wrangler secret put GROK_API_KEY`. Do not put those keys in the repository or in chat.
+3. `QWEN_API_KEY` is already set on the Worker (2026-11-22). `GROK_API_KEY` is not, so the hosted pane runs Qwen only and **Auto** stays on Qwen. To set or replace either one, from the project folder run `npx wrangler login`, then `npx wrangler secret put QWEN_API_KEY` or `npx wrangler secret put GROK_API_KEY`. Do not put those keys in the repository or in chat. `npx wrangler secret list --name excel-qwen-grok` confirms which exist; it prints names only, never values.
 4. After a later code change, run `npm run deploy:cloudflare`. To replace the relay token, run `npx wrangler secret put RELAY_TOKEN` with a passphrase of at least 16 characters and paste the new value in Settings.
 
 The local `127.0.0.1` relay is unchanged. The hosted route rejects a missing token, a token that does not match, a call from another site, and a pasted provider key.
@@ -136,3 +137,16 @@ A key is not written into the repository, and it is not written into the audit c
 A question sends the prompt and the attached context to the provider you picked, or to the provider Auto selected from keys already loaded. Chat context includes cell values and formulas, or the Word selection or document text. Plan and Agent start with metadata and add a range only when a step asks for it. Nothing is sent before you ask. From the hosted pane, that same question also passes through Cloudflare.
 
 Keep the Token Plan key out of chat, files, and commits. Other people use their own keys.
+
+## 11. Processing status · 處理狀態
+
+**2026-11-22 — Qwen Token Plan key rotated.**
+
+- The Cloudflare Worker `excel-qwen-grok` now has `QWEN_API_KEY` set. Section 9, step 3 was rewritten to match: Qwen needs no key entry in the hosted pane.
+- `GROK_API_KEY` is still not set. The hosted pane therefore runs Qwen only, and **Auto** stays on Qwen. Setting it needs an xAI key from the owner.
+- `RELAY_TOKEN` was not changed, so the token already pasted into any hosted pane still works.
+- The rotated key was verified as returning HTTP 200 on both Token Plan endpoints. Its model list excludes `qwen-max`, `qwen-turbo`, and `qwen-plus`, which now fail with `400 Model not exist`; that row was added to section 8. The pane's Qwen default `qwen4-max` is on the list, so no default changed.
+- No key value was written into this repository, onto a command line, or into chat. The push went from an environment variable into wrangler's stdin.
+- The local add-in is not installed on the Surface Book, so nothing was restarted there. Whichever PC runs the relay should reopen the pane and, if it had remembered an older key, press **Clear key** and enter the current one.
+
+處理狀態（2026-11-22）：Qwen Token Plan key 已輪換。Worker `excel-qwen-grok` 的 `QWEN_API_KEY` 已設定，第 9 節步驟 3 已相應改寫，hosted pane 使用 Qwen 無需輸入 key。`GROK_API_KEY` 仍未設定，故 hosted pane 只能用 Qwen，**Auto** 亦只會選 Qwen；設定它需要擁有人的 xAI key。`RELAY_TOKEN` 未更改，已貼入 hosted pane 的 token 仍然有效。新 key 已驗證在兩個 Token Plan endpoint 回 HTTP 200；其模型清單不含 `qwen-max`／`qwen-turbo`／`qwen-plus`，這些現會回 `400 Model not exist`，第 8 節已加入該列。pane 的 Qwen 預設模型 `qwen4-max` 在清單內，故預設值未變。任何 key 值均無寫入 repo、指令列或對話 — 推送是由環境變數進入 wrangler 的 stdin。Surface Book 上未安裝本地 add-in，故該處無需重啟；實際執行 relay 的電腦應重新開啟 pane，若曾記住舊 key，請按 **Clear key** 再輸入現行 key。
