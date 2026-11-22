@@ -42,6 +42,8 @@
   }
 
   function normalizePlan(raw) {
+    // Models often send plan as prose rather than an object; keep it instead of dropping it.
+    if (typeof raw === 'string' && raw.trim()) raw = { goal: raw };
     if (!raw || typeof raw !== 'object' || typeof raw.goal !== 'string' || !raw.goal.trim()) return null;
     const steps = Array.isArray(raw.steps) ? raw.steps.map(normalizeStep).filter(Boolean).slice(0, 12) : [];
     return {

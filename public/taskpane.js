@@ -2,6 +2,7 @@ const API = '';
 const CONTEXT_CAP = 45_000; // Relay rejects messages over 50,000 chars; leave room for the prompt itself.
 const MAX_CONTEXT_ROWS = 150;
 const MAX_CONTEXT_COLS = 30;
+const READ_MAX_CELLS = 2000; // One read-back batch. Full column width is kept; rows are trimmed to fit.
 const CELL_CHAR_LIMIT = 32767;
 const KEY_STORE = 'eqgc.keys.v1';
 const RELAY_STORE = 'eqgc.relay.v1';
@@ -1085,8 +1086,10 @@ async function contextForMode(mode) {
 
 async function readGrid(sheet, range) {
   const size = rangeSize(range);
-  const rows = Math.min(size.rows, 20);
-  const cols = Math.min(size.cols, 8);
+  // Keep the full column width. Trimming to 8 columns hid the bucket and amount
+  // columns of wide sheets, so the model never saw the fields it was asked about.
+  const cols = Math.min(size.cols, READ_MAX_CELLS);
+  const rows = Math.max(1, Math.min(size.rows, Math.floor(READ_MAX_CELLS / cols)));
   return Excel.run(async context => {
     const worksheet = context.workbook.worksheets.getItem(sheet);
     const cells = [];
@@ -1320,16 +1323,31 @@ async function sendAgentPrompt(prompt) {
       }
       if (envelope.contextRequest && !normalized.actions.length && guard < AgentCore.MAX_LOOPS - 1) {
         const sheet = normalizeSheet(envelope.contextRequest.sheet);
-        const range = boundedRange(envelope.contextRequest.range, 160);
+        const asked = normalizeRange(envelope.contextRequest.range);
+        const range = boundedRange(envelope.contextRequest.range, READ_MAX_CELLS);
         if (sheet && range) {
           const grid = await readGrid(sheet, range);
-          const text = annotateRows(grid.values, grid.formulas).slice(0, 8000);
-          const note = `Requested context.\n\n[Excel range ${sheet}!${range}]\n${text}`;
+          const full = annotateRows(grid.values, grid.formulas);
+          const text = full.slice(0, 8000);
+          const cut = full.length > text.length ? '\n[truncated: the read exceeded the context budget]' : '';
+          const note = `Requested context.\n\n[Excel range ${sheet}!${range}]\n${text}${cut}`;
           state.messages.push({ role: 'user', content: note });
           state.audit.push(AgentCore.audit({ kind: 'context', address: `${sheet}!${range}`, chars: text.length }));
           guard += 1;
           continue;
         }
+        // State why nothing was read. Falling through used to report "Observed: SUCCESS",
+        // which the model took as a successful but empty read, then refused to guess columns.
+        const size = asked ? rangeSize(asked) : null;
+        const reason = !sheet
+          ? `sheet "${envelope.contextRequest.sheet}" is not a usable sheet name`
+          : !asked
+            ? `range "${envelope.contextRequest.range}" is not a valid A1 range`
+            : `${sheet}!${asked} is ${size.rows * size.cols} cells, over the ${READ_MAX_CELLS}-cell read limit`;
+        state.messages.push({ role: 'user', content: `No range was read: ${reason}. Nothing was returned, so this is not a successful read. Request a smaller range and ask again.` });
+        state.audit.push(AgentCore.audit({ kind: 'blocked', reason: `context request rejected: ${reason}` }));
+        guard += 1;
+        continue;
       }
       const checks = usableChecks(envelope.plan);
       const profile = readFinanceProfile();

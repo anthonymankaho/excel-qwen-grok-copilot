@@ -680,3 +680,48 @@ test('A hosted pane sends the relay token and does not upload a provider key', a
   await ask(sb, 'hello from cloud');
   assert.equal(chatCalls(sb).at(-1).headers.Authorization, 'Bearer relay-token-0123456789');
 });
+
+test('Agent read-back delivers every column of a wide sheet, not just A to H', async () => {
+  const names = ['Entity', 'Customer', 'Invoice', 'Currency', 'Rate', 'Current', '31-60', '61-90', '91-120', '121-150', '151-180', '181-270', '271-365', 'Over 365', 'Total Local', 'FX Adj', 'Total USD'];
+  const cells = {};
+  names.forEach((name, i) => { cells[`Aging!${String.fromCharCode(65 + i)}1`] = { value: name }; });
+  const reply = {
+    model: 'm',
+    turns: [
+      'Need the layout.\n```json\n{"plan":"Read the header row first.","actions":[],"contextRequest":{"sheet":"Aging","range":"A1:Q2"},"decision":"CONTINUE"}\n```',
+      'Got it.\n```json\n{"actions":[],"decision":"COMPLETE"}\n```'
+    ]
+  };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, cells });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  sb.els('directRevise').checked = true;
+  await ask(sb, 'draft a pivot style summary for Aging');
+  assert.equal(chatCalls(sb).length, 2);
+  const fed = lastContent(sb);
+  assert.match(fed, /\[Excel range Aging!A1:Q2\]/);
+  assert.match(fed, /Over 365/);
+  assert.match(fed, /Total USD/);
+  assert.match(visible(sb.els('conversation')), /Context Aging!A1:Q2/);
+});
+
+test('An over-limit read request is reported as not read, never as Observed SUCCESS', async () => {
+  const reply = {
+    model: 'm',
+    turns: [
+      'Reading.\n```json\n{"actions":[],"contextRequest":{"sheet":"Aging","range":"A1:Z200"},"decision":"CONTINUE"}\n```',
+      'Understood.\n```json\n{"actions":[],"decision":"COMPLETE"}\n```'
+    ]
+  };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  sb.els('directRevise').checked = true;
+  await ask(sb, 'review the whole ageing sheet');
+  assert.equal(chatCalls(sb).length, 2);
+  const fed = lastContent(sb);
+  assert.match(fed, /No range was read/);
+  assert.match(fed, /5200 cells, over the 2000-cell read limit/);
+  assert.equal(/Observed: SUCCESS/.test(fed), false);
+  assert.equal(sb.writes.length, 0);
+});

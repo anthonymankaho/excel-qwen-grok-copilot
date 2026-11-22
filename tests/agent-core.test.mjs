@@ -103,3 +103,13 @@ test('the audit summary keeps the trail and drops secrets', () => {
   assert.match(summary, /FAIL debitEqualsCredit/);
   assert.equal(summary.includes('sk-secret'), false);
 });
+
+test('a prose plan string is kept and a wide context request survives parsing', () => {
+  const envelope = AgentCore.parseEnvelope('Reading first.\n```json\n{"plan":"1) Read the header row of Combined Aging (USD). 2) Add a Pivot - Aging tab. 3) Build a SUMIFS cross-tab.","actions":[],"contextRequest":{"sheet":"Combined Aging (USD)","range":"A1:Q6"},"decision":"CONTINUE"}\n```');
+  assert.equal(envelope.plan.goal.startsWith('1) Read the header row'), true);
+  assert.equal(envelope.contextRequest.sheet, 'Combined Aging (USD)');
+  assert.equal(envelope.contextRequest.range, 'A1:Q6');
+  assert.equal(envelope.actions.length, 0);
+  assert.equal(envelope.decision, 'CONTINUE');
+  assert.equal(AgentCore.normalizePlan('   '), null);
+});

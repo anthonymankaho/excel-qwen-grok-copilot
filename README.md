@@ -17,9 +17,32 @@ The value was pushed from an environment variable through wrangler's stdin. It w
 
 Verified on the same key, for context: it returns HTTP 200 on both Token Plan endpoints (`token-plan.maas.qwencloudapi.com` and `token-plan.ap-southeast-1.maas.aliyuncs.com`), and its model list does **not** include `qwen-max`, `qwen-turbo`, or `qwen-plus` — those return `400 Model not exist`. `qwen4-max`, this pane's Qwen default, is on the list, so no default-model change was needed.
 
-**Pending owner action 待辦:** set `GROK_API_KEY` if Grok is wanted in the hosted pane. The local add-in is not installed on the Surface Book (no Startup item, no `ExcelQwenGrokRelayEnsure` task, nothing on `:3000`, repository not cloned there), so the remembered-key storage in `eqgc.keys.v1` belongs to whichever PC actually runs the relay.
+**Pending owner action 待辦:** set `GROK_API_KEY` if Grok is wanted in the hosted pane.
 
-處理狀態（2026-11-22）：Qwen Token Plan key 已輪換。此 repo 的 Cloudflare Worker `excel-qwen-grok` 上，`QWEN_API_KEY` **已設定**，hosted pane 可直接使用 Qwen；`RELAY_TOKEN` 未動；`GROK_API_KEY` **仍未設定**，需要一把 xAI key，在此之前 **Auto** 只會用 Qwen。key 由環境變數經 wrangler stdin 推送，從未寫入 repo、指令列或對話。同一把 key 已驗證在兩個 Token Plan endpoint 回 HTTP 200，但其模型清單**不含** `qwen-max`／`qwen-turbo`／`qwen-plus`（回 `400 Model not exist`）；本 pane 的 Qwen 預設模型 `qwen4-max` 在清單內，故無需更改。待辦：如需 hosted pane 使用 Grok，請設定 `GROK_API_KEY`。Surface Book 上並未安裝本地 add-in，因此 `eqgc.keys.v1` 的已記住 key 屬於實際執行 relay 的那部電腦。
+處理狀態（2026-11-22）：Qwen Token Plan key 已輪換。此 repo 的 Cloudflare Worker `excel-qwen-grok` 上，`QWEN_API_KEY` **已設定**，hosted pane 可直接使用 Qwen；`RELAY_TOKEN` 未動；`GROK_API_KEY` **仍未設定**，需要一把 xAI key，在此之前 **Auto** 只會用 Qwen。key 由環境變數經 wrangler stdin 推送，從未寫入 repo、指令列或對話。同一把 key 已驗證在兩個 Token Plan endpoint 回 HTTP 200，但其模型清單**不含** `qwen-max`／`qwen-turbo`／`qwen-plus`（回 `400 Model not exist`）；本 pane 的 Qwen 預設模型 `qwen4-max` 在清單內，故無需更改。待辦：如需 hosted pane 使用 Grok，請設定 `GROK_API_KEY`。
+
+### 2026-11-22 (later) — local install, and the agent read-back fix
+
+**Installed on the Surface Book.** The note above originally said the add-in was absent there. It is now installed: clone at `C:\Users\Anthony Man\excel-qwen-grok-copilot` (outside OneDrive), sideloaded into desktop Excel under `HKCU\Software\Microsoft\Office\16.0\WEF\Developer` (manifest 1.2.0.0), relay on `127.0.0.1:3000`. Auto-start was deliberately **not** installed. Verified live: the pane loaded the key through Settings, and `POST /api/chat` returned a real `qwen4-max` answer.
+
+**Four defects fixed in the agent read-back.** Agent could not review a workbook or draft a pivot: it asked for a range, the pane logged `Execute SUCCESS · 0 actions`, and the model was told `Observed: SUCCESS` while receiving no cells at all. It then correctly refused to guess columns.
+
+| Defect | Was | Now |
+|---|---|---|
+| `readGrid` width | 20 rows × **8 columns** — a 17-column ageing sheet lost I:Q, so bucket and amount fields were invisible | full requested width, bounded by `READ_MAX_CELLS` |
+| Agent read cap | **160 cells** — `Summary!A1:S40` (760) and `Combined Aging (USD)!A1:Q25` (425) were silently dropped | `READ_MAX_CELLS` = 2000 |
+| Rejected-range feedback | fell through to `Observed: SUCCESS`, misleading the model | explicit `No range was read: <reason>` plus a `blocked` audit row |
+| `normalizePlan` | dropped a prose-string `plan`, leaving empty plan cards | accepts a string as the goal |
+
+A read that exceeds the context budget now carries an explicit `[truncated: ...]` marker instead of cutting silently.
+
+`npm run check` passes. `npm test` → **52 pass / 2 fail**; both failures are the pre-existing `spawn unzip ENOENT` packaging tests (Windows ships no `unzip` binary) and are unrelated to this change. Three new tests cover the wide read, the honest rejection, and the prose plan.
+
+**Still out of scope:** native PivotTable creation. The agent offers a formula-driven SUMIFS cross-tab instead.
+
+處理狀態（2026-11-22，較後）：**已安裝於 Surface Book** — 上文原本說本機未安裝，現已更正。clone 位於 `C:\Users\Anthony Man\excel-qwen-grok-copilot`（OneDrive 以外），已 sideload 進桌面 Excel，relay 在 `127.0.0.1:3000`；刻意**未**安裝 auto-start。已實測：pane 經 Settings 載入 key，`POST /api/chat` 回傳真實 `qwen4-max` 答案。
+
+**已修正 agent 讀回的四個缺陷。** 原本 Agent 無法審閱活頁簿或起草 pivot：它要求讀取範圍，pane 記錄 `Execute SUCCESS · 0 actions`，並告訴模型 `Observed: SUCCESS`，但模型完全收不到儲存格。它其後正確地拒絕猜測欄位。四個缺陷為：`readGrid` 只讀 8 欄（17 欄的 ageing 表丟失 I:Q，桶與金額欄位看不見）；agent 讀取上限只有 160 格（`Summary!A1:S40` 共 760 格、`Combined Aging (USD)!A1:Q25` 共 425 格被靜默丟棄）；範圍被拒時回饋誤導的 `Observed: SUCCESS`；`normalizePlan` 丟棄字串形式的 plan 令計劃卡片空白。現已分別改為：保留完整欄寬、上限 `READ_MAX_CELLS` = 2000、明確回報「No range was read: 原因」並記入 audit、接受字串 plan。超出 context 預算的讀取現會附上明確的 `[truncated: ...]` 標記。`npm run check` 通過；`npm test` 為 **52 通過／2 失敗**，兩個失敗是既有的 `spawn unzip ENOENT` 打包測試（Windows 沒有 `unzip`），與是次改動無關。新增三個測試覆蓋寬表讀取、誠實拒絕與字串 plan。**仍超出範圍：** 原生 PivotTable 建立，agent 會改提 SUMIFS 交叉匯總。
 
 ## What this update revises
 
