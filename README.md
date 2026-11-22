@@ -156,7 +156,7 @@ A later code change is published with `npm run deploy:cloudflare` after `npx wra
 
 Each computer runs its own relay and stores its own keys.
 
-1. Get the project from the private repository, or from a zip that does not contain keys.
+1. Download `download/Qwen-Grok-for-Excel-and-Word.zip` and unzip it. Open the folder inside. It has no API keys. `npm run package` rebuilds that zip after a code change.
 2. Install Node.js 20 or newer, close Excel, and double-click `Setup and Start.bat`.
 3. Enter your own key. Do not use someone else’s Token Plan key. The plan and its quota belong to that person.
 
@@ -175,6 +175,7 @@ Each computer runs its own relay and stores its own keys.
 | `npm run check` | Syntax-check the relay, the Worker, the agent core, and the task pane |
 | `npm test` | Run the offline pane, agent, relay, and Worker tests |
 | `npm run deploy:cloudflare` | Publish the pane and relay to Cloudflare |
+| `npm run package` | Rebuild `download/Qwen-Grok-for-Excel-and-Word.zip` |
 
 Auto-start is Windows-only. It uses `%APPDATA%`.
 
