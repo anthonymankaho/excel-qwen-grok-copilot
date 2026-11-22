@@ -73,6 +73,19 @@ Copilot-parity work, stage 1 of 3. Two capabilities added, both verified against
 
 處理狀態（2026-11-22，Tier 1）：Copilot 看齊工程第 1 階段（共 3 階段）。新增兩項能力，均已對真實 `qwen4-max` 模型與官方 Office.js typings 核實。**`pivot` action — 真正的原生 PivotTable**：`pivotTables.add(name, source, destination)` 加上 row／column／filter／data hierarchies、layout、總計與 `refresh()`；目的地工作表不存在時自動建立；Undo 會刪除 pivot，若工作表是由本 action 建立則一併刪除。這取代了先前「pivots 超出範圍」的限制 — 那是產品選擇，非平台限制。**`profileRequest` — 以欄位統計代替原始儲存格**：pane 一次批次讀取整個範圍（上限 2,000 列 × 60 欄），回傳每欄的表頭、已填／空白數、相異值數、樣本值與次數，以及數值 sum／min／max。這令模型能在遠超 context 視窗的工作表上正確挑選 pivot 欄位。**已用真實模型端到端驗證：** 要求為 `Combined Aging (USD)` 起草 pivot 時，`qwen4-max` 回覆會建立*原生 PivotTable*，並發出 `profileRequest {sheet:"Combined Aging (USD)", range:"A1:Q753"}` — 即先前 160 格上限會靜默丟棄的 12,801 格；其字串 `plan` 現已保留而非丟棄。`npm run check` 通過；`npm test` 為 **55 通過／2 失敗**，仍是那兩個既有的 Windows `spawn unzip ENOENT` 打包失敗。**已核實無法達到：** Python in Excel（沒有 API，「Python」只出現在錯誤子類型列舉）與原生 Copilot 功能區／行內介面（任務窗格無法變成該介面）。
 
+### 2026-11-22 (first real Excel run) — failures were invisible, and an ageing pivot was silently dropped
+
+The first run against a real workbook (753-row AR ageing) proved profiling and range reads work, but the pivot still failed and **the pane never said why**. Four defects fixed:
+
+- **Execution errors were swallowed.** `executeClassified` only raised a toast; the audit showed `Execute FAILED · 1 actions` with no reason, and the model received a bare `Observed: FAILED`. The real Office.js message is now recorded in the audit **and** fed back to the model so it can correct itself.
+- **A pivot value-field cap of 8 silently rejected an ageing pivot.** This workbook legitimately needs 11 value fields (USD O/S + nine buckets + Credits). The cap is now 16, and rejected actions are reported to the model and shown in the audit as `N rejected as unusable` instead of vanishing.
+- **"Stopped · validation failed" was misleading.** `decide()` also returns FAILED at the loop limit, so a run that simply ran out of rounds was labelled a validation failure. The two cases are now distinguished.
+- **Pivot field names are validated against the real headers.** A mismatch now names the offending field and lists the available headers, and removes the partial pivot and any sheet it created, instead of failing opaquely later. The destination sheet is also synced before use.
+
+`npm run check` passes. `npm test` → **64 pass / 2 fail**, still only the Windows `spawn unzip ENOENT` packaging failures. Two new tests: an 11-value-field ageing pivot is accepted, and an unknown field produces a named error with no partial pivot left behind.
+
+處理狀態（2026-11-22，首次真實 Excel 執行）：對真實活頁簿（753 列 AR ageing）的首次執行證明剖析與範圍讀取正常，但 pivot 仍失敗，而**pane 從未說明原因**。已修四個缺陷：**執行錯誤被吞掉** — `executeClassified` 只彈 toast，audit 顯示 `Execute FAILED · 1 actions` 而無原因，模型只收到 `Observed: FAILED`；現已把真實 Office.js 訊息記入 audit **並**回饋給模型讓其自行修正。**pivot 值欄上限 8 會靜默拒絕 ageing pivot** — 此活頁簿合理需要 11 個值欄（USD O/S + 九個桶 + Credits），上限現為 16，被拒 action 會告知模型並在 audit 顯示 `N rejected as unusable`。**「Stopped · validation failed」誤導** — `decide()` 在迴圈上限亦回 FAILED，令只是用完輪數的執行被標為驗證失敗；現已區分兩者。**pivot 欄位名稱會對真實表頭驗證** — 不符時會指出問題欄位並列出可用表頭，並移除已建立的部分 pivot 與工作表；目的地工作表亦會先 sync。`npm run check` 通過；`npm test` 為 **64 通過／2 失敗**。新增兩個測試。
+
 ## What this update revises
 
 This is the Copilot-style revise. The earlier pane sent one prompt, attached a large dump of the active sheet, and applied one batch of actions. This update adds a mode, a plan, a short agent loop, checks calculated from the workbook, and an audit card.

@@ -502,7 +502,7 @@ function normalizeAction(raw) {
     const columns = fieldList(raw.columns || []);
     const filters = fieldList(raw.filters || []);
     if (!rows || !columns || !filters || rows.length + columns.length < 1) return null;
-    if (!Array.isArray(raw.values) || raw.values.length < 1 || raw.values.length > 8) return null;
+    if (!Array.isArray(raw.values) || raw.values.length < 1 || raw.values.length > 16) return null;
     const values = [];
     for (const item of raw.values) {
       const field = typeof item?.field === 'string' ? item.field.trim() : '';
@@ -924,12 +924,24 @@ async function applyExcelActions(actions) {
           dest = context.workbook.worksheets.add(action.destinationSheet);
           wanted.set(action.destinationSheet, dest);
           createdSheet = true;
+          await context.sync();
         }
         const pivot = sheet.pivotTables.add(action.name, sheet.getRange(action.range), dest.getRange(action.destinationCell));
         pivot.layout.layoutType = action.layout;
         pivot.layout.showRowGrandTotals = action.grandTotals;
         pivot.layout.showColumnGrandTotals = action.grandTotals;
+        pivot.hierarchies.load('items/name');
         await context.sync();
+        // Name the offending field instead of letting Office.js fail opaquely later.
+        const available = (pivot.hierarchies.items || []).map(item => item.name);
+        const requested = [...action.rows, ...action.columns, ...action.filters, ...action.values.map(value => value.field)];
+        const missing = requested.filter(field => !available.includes(field));
+        if (missing.length) {
+          pivot.delete();
+          if (createdSheet) dest.delete();
+          await context.sync();
+          throw new Error(`Pivot field(s) not in ${action.sheet}!${action.range}: ${missing.join(', ')}. Headers are: ${available.join(', ')}`);
+        }
         for (const field of action.rows) pivot.rowHierarchies.add(pivot.hierarchies.getItem(field));
         for (const field of action.columns) pivot.columnHierarchies.add(pivot.hierarchies.getItem(field));
         for (const field of action.filters) pivot.filterHierarchies.add(pivot.hierarchies.getItem(field));
@@ -1717,6 +1729,7 @@ async function executeClassified(actions, { direct }) {
     else safe.push(action);
   }
   let status = blocked.length ? 'BLOCKED' : 'SUCCESS';
+  let failure = '';
   if (safe.length) {
     try {
       const records = await applyPlan(safe);
@@ -1725,11 +1738,12 @@ async function executeClassified(actions, { direct }) {
       renderAppliedCard(safe, records, blocked.length);
     } catch (error) {
       status = 'FAILED';
-      toast(`Could not revise: ${error.message}`);
+      failure = String(error?.message || error);
+      toast(`Could not revise: ${failure}`);
     }
   }
   if (blocked.length) await renderPlanCard(blocked, 0, { manualOnly: true });
-  return { status, blocked: blocked.length, applied: safe.length };
+  return { status, blocked: blocked.length, applied: safe.length, failure };
 }
 
 function renderAppliedCard(actions, records, blockedCount) {
@@ -1924,17 +1938,29 @@ async function sendAgentPrompt(prompt) {
       const checks = usableChecks(envelope.plan);
       const profile = readFinanceProfile();
       const beforeGrids = await gridsForChecks(checks);
-      let exec = { status: 'SUCCESS', blocked: 0, applied: 0 };
+      let exec = { status: 'SUCCESS', blocked: 0, applied: 0, failure: '' };
       if (normalized.actions.length) exec = await executeClassified(normalized.actions, { direct: Boolean($('directRevise').checked) });
-      state.audit.push(AgentCore.audit({ kind: 'execute', status: exec.status, count: normalized.actions.length, blocked: exec.blocked }));
+      state.audit.push(AgentCore.audit({ kind: 'execute', status: exec.status, count: normalized.actions.length, blocked: exec.blocked, skipped: normalized.skipped, reason: exec.failure }));
+      if (normalized.skipped) {
+        state.messages.push({ role: 'user', content: `${normalized.skipped} proposed action(s) were rejected by the pane as unusable and were NOT applied. Re-check field names, counts and ranges: a pivot accepts at most 16 value fields and 8 fields each for rows, columns and filters.` });
+      }
+      if (exec.failure) {
+        // The model must see the real Office.js error, not a bare "Observed: FAILED".
+        state.messages.push({ role: 'user', content: `The pane failed to apply that batch: ${exec.failure}. Nothing in that batch was written. Diagnose the cause and propose a corrected action; do not repeat the same action unchanged.` });
+        guard += 1;
+        continue;
+      }
       const afterGrids = await gridsForChecks(checks);
       const validations = checks.map(check => AgentCore.evaluateGridCheck({ ...check, profile }, afterGrids[check.id], beforeGrids[check.id]));
       validations.forEach(result => state.audit.push(AgentCore.audit({ kind: 'validation', status: result.status, check: result.check, before: result.before, after: result.after, difference: result.difference })));
       if (validations.length) renderValidation(validations);
       const next = AgentCore.decide({ decision: envelope.decision, validations, iteration: guard, maxLoops: AgentCore.MAX_LOOPS });
       if (next === 'FAILED') {
-        state.audit.push(AgentCore.audit({ kind: 'stopped', reason: 'validation failed' }));
-        toast('Stopped. A validation failed. Nothing further will run.');
+        const reason = validations.some(result => result.status === 'FAIL')
+          ? 'validation failed'
+          : 'loop limit reached while the model still asked to continue';
+        state.audit.push(AgentCore.audit({ kind: 'stopped', reason }));
+        toast(`Stopped: ${reason}. Nothing further will run.`);
         break;
       }
       if (next === 'NEEDS_USER') {

@@ -247,13 +247,17 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
           };
           writes.push(rec);
           const hierarchy = field => ({ field });
+          const srcMatch = String(source.address || '').match(/^(.*)!([A-Z]+\d+:[A-Z]+\d+)$/);
+          const headerNames = srcMatch
+            ? (gridFor(srcMatch[1], srcMatch[2])?.values[0] || []).map(v => String(v ?? '').trim()).filter(Boolean)
+            : [];
           return {
             layout: {
               set layoutType(v) { rec.layout = v; },
               set showRowGrandTotals(v) { rec.grandTotals = v; },
               set showColumnGrandTotals(v) { rec.grandTotals = v; }
             },
-            hierarchies: { getItem: hierarchy },
+            hierarchies: { load() {}, items: headerNames.map(name => ({ name })), getItem: hierarchy },
             rowHierarchies: { add(h) { rec.rows.push(h.field); } },
             columnHierarchies: { add(h) { rec.columns.push(h.field); } },
             filterHierarchies: { add(h) { rec.filters.push(h.field); } },
@@ -909,7 +913,8 @@ test('A pivot action creates a real native PivotTable with fields and aggregatio
     values: [{ field: 'Total USD', summarizeBy: 'Sum' }], layout: 'Tabular', grandTotals: true
   };
   const reply = { model: 'm', text: 'Building it.\n```json\n{"plan":"Add the pivot.","actions":[' + JSON.stringify(action) + '],"decision":"COMPLETE"}\n```' };
-  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, missingSheets: ['Pivot - Aging'] });
+  const cells = { 'Aging!A1': { value: 'Entity' }, 'Aging!B1': { value: 'Bucket' }, 'Aging!C1': { value: 'Total USD' } };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, cells, missingSheets: ['Pivot - Aging'] });
   await boot(sb);
   sb.els('workMode').value = 'agent';
   sb.els('directRevise').checked = true;
@@ -1097,4 +1102,57 @@ test('Word replace-all is click-gated and then replaces every match', async () =
   assert.match(visible(sb.els('conversation')), /not reversible by Undo/);
   const risky = sb.els('conversation').children.flatMap(card => card.children || []).find(el => el.className === 'button-row');
   assert.ok(risky, 'an approval card was rendered');
+});
+
+test('An ageing pivot with 11 value fields is accepted, not silently dropped', async () => {
+  const headers = ['Entity', 'Customer', 'Currency', 'Lines', 'FX to USD', 'Local O/S', 'USD O/S', 'Current', '1-30 Days', '31-60 Days', '61-90 Days', '91-180 Days', '181-365 Days', '1-1.5 Years', '1.5-2 Years', 'Over 2 Years', 'Credits (USD)'];
+  const cells = {};
+  headers.forEach((name, i) => { cells[`Aging!${String.fromCharCode(65 + i)}5`] = { value: name }; });
+  const valueFields = ['USD O/S', 'Current', '1-30 Days', '31-60 Days', '61-90 Days', '91-180 Days', '181-365 Days', '1-1.5 Years', '1.5-2 Years', 'Over 2 Years', 'Credits (USD)'];
+  const action = {
+    op: 'pivot', sheet: 'Aging', range: 'A5:Q752', name: 'Pivot - Combined Aging',
+    destinationSheet: 'Pivot - Combined Aging', destinationCell: 'A3',
+    rows: ['Entity'], columns: [], filters: ['Currency'],
+    values: valueFields.map(field => ({ field, summarizeBy: 'Sum' })), layout: 'Tabular', grandTotals: true
+  };
+  const reply = { model: 'm', text: 'Building.\n```json\n{"actions":[' + JSON.stringify(action) + '],"decision":"COMPLETE"}\n```' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, cells, missingSheets: ['Pivot - Combined Aging'] });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  sb.els('directRevise').checked = true;
+  await ask(sb, 'draft a pivot for Combined Aging (USD)');
+  const pivot = sb.writes.find(w => w.kind === 'pivot');
+  assert.ok(pivot, 'the pivot was created rather than rejected');
+  assert.equal(pivot.values.length, 11);
+  assert.equal(pivot.source, 'Aging!A5:Q752');
+  assert.equal(pivot.filters.join(','), 'Currency');
+});
+
+test('An unknown pivot field names the offending header and leaves no partial pivot', async () => {
+  const cells = { 'Aging!A1': { value: 'Entity' }, 'Aging!B1': { value: 'Bucket' }, 'Aging!C1': { value: 'Total USD' } };
+  const action = {
+    op: 'pivot', sheet: 'Aging', range: 'A1:C4', name: 'P',
+    destinationSheet: 'Pivot - X', destinationCell: 'A3',
+    rows: ['Entity'], columns: [], filters: [],
+    values: [{ field: 'USD O/S', summarizeBy: 'Sum' }], layout: 'Tabular'
+  };
+  const reply = {
+    model: 'm',
+    turns: [
+      'Try.\n```json\n{"actions":[' + JSON.stringify(action) + '],"decision":"COMPLETE"}\n```',
+      'Understood.\n```json\n{"actions":[],"decision":"COMPLETE"}\n```'
+    ]
+  };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, cells, missingSheets: ['Pivot - X'] });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  sb.els('directRevise').checked = true;
+  await ask(sb, 'build it');
+  assert.ok(sb.writes.some(w => w.kind === 'deletePivot'), 'the partial pivot was removed');
+  assert.ok(sb.writes.some(w => w.kind === 'deleteSheet'), 'the sheet it created was removed');
+  const fed = lastContent(sb);
+  assert.match(fed, /Pivot field\(s\) not in Aging!A1:C4: USD O\/S/);
+  assert.match(fed, /Headers are: Entity, Bucket, Total USD/);
+  assert.match(visible(sb.els('conversation')), /Execute FAILED/);
+  assert.match(visible(sb.els('conversation')), /USD O\/S/);
 });

@@ -382,7 +382,11 @@
       if (entry.kind === 'request') return `Request (${entry.mode}) via ${entry.provider} · ${entry.reason}`;
       if (entry.kind === 'context') return `Context ${entry.address || 'none'} · ${entry.chars || 0} chars`;
       if (entry.kind === 'model') return `Model ${entry.model || entry.provider || ''} · ${entry.decision || 'no decision'}${entry.plan ? ` · ${entry.plan}` : ''}`;
-      if (entry.kind === 'execute') return `Execute ${entry.status} · ${entry.count || 0} actions · blocked ${entry.blocked || 0}`;
+      if (entry.kind === 'execute') {
+        const skipped = entry.skipped ? ` · ${entry.skipped} rejected as unusable` : '';
+        const reason = entry.reason ? ` · ${entry.reason}` : '';
+        return `Execute ${entry.status} · ${entry.count || 0} actions · blocked ${entry.blocked || 0}${skipped}${reason}`;
+      }
       if (entry.kind === 'validation') return `${entry.status} ${entry.check} · before ${entry.before} after ${entry.after} diff ${entry.difference}`;
       if (entry.kind === 'blocked') return `Blocked · ${entry.reason}`;
       if (entry.kind === 'stopped') return `Stopped · ${entry.reason}`;
