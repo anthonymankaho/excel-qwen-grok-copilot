@@ -256,7 +256,12 @@ export class LocalSourceMcp {
         signal: AbortSignal.timeout(20_000)
       });
       const tokenData = await response.json().catch(() => ({}));
-      if (!response.ok || !tokenData.access_token) throw new Error('Google did not accept this OAuth client or sign-in.');
+      if (!response.ok || !tokenData.access_token) {
+        const errorCode = typeof tokenData.error === 'string' && /^[a-z0-9_]{1,80}$/i.test(tokenData.error)
+          ? tokenData.error
+          : 'unknown_error';
+        throw new Error(`Google token exchange failed: ${errorCode} (HTTP ${response.status}).`);
+      }
       this.googleToken = {
         accessToken: tokenData.access_token,
         expiresAt: Date.now() + Math.max(60, Number(tokenData.expires_in) || 3600) * 1000,
