@@ -1,5 +1,5 @@
 (function (root) {
-  const MAX_LOOPS = 4;
+  const MAX_LOOPS = 10;
   const DECISIONS = ['COMPLETE', 'CONTINUE', 'REPLAN', 'NEEDS_USER', 'FAILED'];
   const CHECKS = ['debitEqualsCredit', 'formulaErrors', 'blankRequired', 'duplicateKeys', 'rowCount', 'totalDelta'];
   const DESTRUCTIVE = new Set(['clear', 'deleteRows', 'deleteColumns', 'renameSheet']);

@@ -1,5 +1,9 @@
 const API = '';
 const CONTEXT_CAP = 45_000; // Relay rejects messages over 50,000 chars; leave room for the prompt itself.
+const ATTACHMENT_CAP = 26_000;
+const ATTACHMENT_FILE_CAP = 18_000;
+const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
+const ATTACHMENT_MAX_FILES = 3;
 const MAX_CONTEXT_ROWS = 150;
 const MAX_CONTEXT_COLS = 30;
 const READ_MAX_CELLS = 2000; // One read-back batch. Full column width is kept; rows are trimmed to fit.
@@ -9,10 +13,13 @@ const PROFILE_DISTINCT = 12; // Sample values shown per column; enough to identi
 const CELL_CHAR_LIMIT = 32767;
 const KEY_STORE = 'eqgc.keys.v1';
 const RELAY_STORE = 'eqgc.relay.v1';
+const CONNECTOR_STORE = 'eqgc.cloud-sources.v1';
 const RISKY_FORMULA = /^=.*\b(?:WEBSERVICE|FILTERXML|RTD|REGISTER\.ID|CALL|DDE|INFO|HYPERLINK)\s*\(/i;
-const state = { messages: [], lastAnswer: '', busy: false, officeReady: false, forceSheet: false, turn: 0, host: '', audit: [] };
+const state = { messages: [], lastAnswer: '', busy: false, officeReady: false, forceSheet: false, turn: 0, host: '', audit: [], attachments: [], googleAuthUrl: '', oneDriveVerificationUri: '' };
 const $ = id => document.getElementById(id);
 let abortChat = null;
+let connectorConfigReady = null;
+let sourcePollTimer = null;
 
 function storedKeys() {
   try { return JSON.parse(localStorage.getItem(KEY_STORE) || '{}'); } catch { return {}; }
@@ -63,9 +70,140 @@ async function api(path, body) {
   return data;
 }
 
+function storedConnectorConfig() {
+  try { return JSON.parse(localStorage.getItem(CONNECTOR_STORE) || 'null'); } catch { return null; }
+}
+
+function rememberConnectorConfig(config) {
+  try {
+    if (config) localStorage.setItem(CONNECTOR_STORE, JSON.stringify(config));
+    else localStorage.removeItem(CONNECTOR_STORE);
+  } catch { /* storage unavailable: relay-only settings */ }
+}
+
+async function restoreConnectorConfig() {
+  if (hostedRelay()) return;
+  if (!connectorConfigReady) {
+    connectorConfigReady = (async () => {
+      const config = storedConnectorConfig();
+      if (config && (config.googleClientId || config.microsoftClientId)) await api('connectors/configure', config);
+    })().catch(error => { connectorConfigReady = null; throw error; });
+  }
+  return connectorConfigReady;
+}
+
 function toast(message) {
   const el = $('toast'); el.textContent = message; el.classList.remove('hidden');
   clearTimeout(toast.timer); toast.timer = setTimeout(() => el.classList.add('hidden'), 3200);
+}
+
+function setSourceStatus(id, value, connected = false) {
+  const el = $(id);
+  if (!el) return;
+  el.textContent = value;
+  el.style.color = connected ? '#168251' : '#777d89';
+}
+
+async function refreshCloudSources() {
+  if (hostedRelay()) return;
+  try {
+    await restoreConnectorConfig();
+    const status = await api('connectors/status');
+    const google = status.google || {};
+    const onedrive = status.onedrive || {};
+    setSourceStatus('googleSourceStatus', google.connected ? 'Connected · sign-in stays on this PC' : google.connecting ? 'Waiting for your sign-in' : google.configured ? 'Not connected · sign in with your account' : 'Add Google OAuth app settings in Settings', google.connected);
+    setSourceStatus('onedriveSourceStatus', onedrive.connected ? 'Connected · sign-in stays on this PC' : onedrive.connecting ? 'Waiting for your sign-in' : onedrive.error ? onedrive.error : onedrive.configured ? 'Not connected · sign in with your account' : 'Add Microsoft app ID in Settings', onedrive.connected);
+    $('connectGoogle').disabled = !google.configured || google.connected;
+    $('connectGoogle').textContent = google.connected ? 'Connected' : google.connecting ? 'Signing in…' : 'Connect';
+    $('disconnectGoogle').classList.toggle('hidden', !google.connected);
+    $('connectOneDrive').disabled = !onedrive.configured || onedrive.connected || onedrive.connecting;
+    $('connectOneDrive').textContent = onedrive.connected ? 'Connected' : onedrive.connecting ? 'Signing in…' : 'Connect';
+    $('disconnectOneDrive').classList.toggle('hidden', !onedrive.connected);
+    $('oneDriveDevice').classList.toggle('hidden', !onedrive.device?.userCode);
+    if (onedrive.device?.userCode) {
+      $('oneDriveUserCode').textContent = onedrive.device.userCode;
+      $('openOneDriveSignIn').href = onedrive.device.verificationUri;
+      state.oneDriveVerificationUri = onedrive.device.verificationUri;
+    }
+    if (google.connected) {
+      state.googleAuthUrl = '';
+      $('googleSignInLink').classList.add('hidden');
+    } else if (!google.connecting) {
+      state.googleAuthUrl = '';
+      $('googleSignInLink').classList.add('hidden');
+    }
+    if (google.connecting || onedrive.connecting) startSourcePolling();
+    else stopSourcePolling();
+  } catch (error) {
+    setSourceStatus('googleSourceStatus', error.message || 'Local relay unavailable');
+    setSourceStatus('onedriveSourceStatus', error.message || 'Local relay unavailable');
+  }
+}
+
+function startSourcePolling() {
+  if (sourcePollTimer) return;
+  sourcePollTimer = setInterval(refreshCloudSources, 2500);
+}
+
+function stopSourcePolling() {
+  if (sourcePollTimer) clearInterval(sourcePollTimer);
+  sourcePollTimer = null;
+}
+
+function renderCloudResults(items) {
+  const host = $('sourceResults');
+  host.replaceChildren();
+  if (!items.length) {
+    const empty = document.createElement('p'); empty.className = 'hint'; empty.textContent = 'No matching results.'; host.append(empty); return;
+  }
+  items.forEach(item => {
+    const row = document.createElement('article'); row.className = 'source-result';
+    const title = document.createElement('strong'); title.textContent = item.name || 'Untitled'; row.append(title);
+    if (item.detail) { const detail = document.createElement('small'); detail.textContent = item.detail; row.append(detail); }
+    if (item.snippet) { const snippet = document.createElement('p'); snippet.textContent = item.snippet; row.append(snippet); }
+    const add = document.createElement('button'); add.type = 'button'; add.className = 'primary'; add.textContent = 'Review and add to chat';
+    add.addEventListener('click', async () => {
+      add.disabled = true; add.textContent = 'Reading…';
+      try {
+        const source = $('sourceType').value;
+        const result = await api('connectors/read', { source, item: { id: item.id, name: item.name } });
+        addSourceAttachment(result.name || item.name, result.kind || item.kind || source, result.text || '');
+        add.textContent = 'Added';
+      } catch (error) { add.disabled = false; add.textContent = 'Review and add to chat'; toast(error.message); }
+    });
+    row.append(add); host.append(row);
+  });
+}
+
+async function searchCloudSource() {
+  const source = $('sourceType').value;
+  const query = $('sourceQuery').value.trim();
+  if (!query) { toast('Enter a search query first.'); return; }
+  $('searchSources').disabled = true;
+  $('searchSources').textContent = 'Searching…';
+  $('sourceResults').replaceChildren();
+  try {
+    await restoreConnectorConfig();
+    const result = await api('connectors/search', { source, query });
+    renderCloudResults(Array.isArray(result.items) ? result.items : []);
+  } catch (error) {
+    const message = document.createElement('p'); message.className = 'hint'; message.textContent = error.message;
+    $('sourceResults').replaceChildren(message);
+  } finally {
+    $('searchSources').disabled = false;
+    $('searchSources').textContent = 'Search';
+  }
+}
+
+function addSourceAttachment(name, kind, sourceText) {
+  if (state.attachments.length >= ATTACHMENT_MAX_FILES) { toast(`Attach up to ${ATTACHMENT_MAX_FILES} files per chat.`); return; }
+  const text = String(sourceText || '').trim();
+  if (!text) { toast('The selected source returned no readable text.'); return; }
+  const clipped = trimContext(text, ATTACHMENT_FILE_CAP);
+  state.attachments.push({ name: String(name || 'Cloud source').slice(0, 240), kind: String(kind || 'Cloud source').slice(0, 60), size: 0, text: clipped.text, chars: clipped.text.length, truncated: clipped.truncated });
+  renderAttachments();
+  refreshContextCard();
+  toast('Selected source text is ready; it will be sent with your next question.');
 }
 
 function setRelayDot(mode) {
@@ -119,7 +257,14 @@ function annotateRows(rows, formulas) {
   }).join('\t')).join('\n');
 }
 
-async function buildWordContext() {
+function trimContext(text, limit) {
+  if (text.length <= limit) return { text, truncated: false };
+  const marker = `\n[...truncated: ${text.length - limit} characters omitted; select a smaller range or attach fewer files]`;
+  if (limit <= marker.length) return { text: text.slice(0, Math.max(0, limit)), truncated: true };
+  return { text: text.slice(0, Math.max(0, limit - marker.length)) + marker, truncated: true };
+}
+
+async function buildWordContext(limit = CONTEXT_CAP) {
   const source = await Word.run(async context => {
     const selection = context.document.getSelection();
     const body = context.document.body;
@@ -131,19 +276,13 @@ async function buildWordContext() {
     return null;
   });
   if (!source) return null;
-  let text = source.text;
-  let truncated = false;
-  if (text.length > CONTEXT_CAP) {
-    const marker = `\n[...truncated: ${text.length - CONTEXT_CAP} chars omitted — ask about a smaller range for full detail]`;
-    text = text.slice(0, Math.max(0, CONTEXT_CAP - marker.length)) + marker;
-    truncated = true;
-  }
-  return { header: `[Word ${source.kind}]`, text, address: source.kind === 'selection' ? 'Selection' : 'Document', kind: source.kind, truncated, chars: text.length };
+  const clipped = trimContext(source.text, limit);
+  return { header: `[Word ${source.kind}]`, text: clipped.text, address: source.kind === 'selection' ? 'Selection' : 'Document', kind: source.kind, truncated: clipped.truncated, chars: clipped.text.length };
 }
 
-async function buildContext() {
+async function buildContext(limit = CONTEXT_CAP) {
   if (!state.officeReady || !$('includeContext').checked) return null;
-  if (state.host === 'Word') return buildWordContext();
+  if (state.host === 'Word') return buildWordContext(limit);
   let source = null, kind = 'selection';
   if (!state.forceSheet) {
     const selection = await readSelection();
@@ -160,33 +299,137 @@ async function buildContext() {
     text += `\n[...truncated: read ${rows} of ${source.fullRows} rows and ${cols} of ${source.fullCols} columns — select a smaller range for the rest]`;
     truncated = true;
   }
-  if (text.length > CONTEXT_CAP) {
-    const marker = `\n[...truncated: ${text.length - CONTEXT_CAP} chars omitted — ask about a smaller range for full detail]`;
-    text = text.slice(0, Math.max(0, CONTEXT_CAP - marker.length)) + marker;
-    truncated = true;
-  }
+  const clipped = trimContext(text, limit);
+  text = clipped.text;
+  truncated ||= clipped.truncated;
   return { header: `[Excel ${kind} ${source.address}]`, text, address: source.address, kind, truncated, chars: text.length };
 }
 
+function attachmentContext() {
+  let out = '';
+  for (const file of state.attachments) {
+    const label = file.name.replace(/[\[\]\r\n]/g, '_');
+    const header = `\n\n[Attached file START: ${label} · ${file.kind}]\n`;
+    const footer = '\n[Attached file END]';
+    const reserve = state.attachments.length > 1 ? 110 : 0;
+    const room = ATTACHMENT_CAP - reserve - out.length - header.length - footer.length;
+    if (room <= 0) break;
+    let text = file.text;
+    if (text.length > room) {
+      const marker = `\n[truncated: ${text.length - room} characters omitted from this file]`;
+      text = room > marker.length ? text.slice(0, room - marker.length) + marker : marker.slice(0, room);
+    }
+    out += header + text + footer;
+  }
+  if (state.attachments.length && state.attachments.some(file => !out.includes(`[Attached file START: ${file.name.replace(/[\[\]\r\n]/g, '_')} · ${file.kind}]`))) out = out.slice(0, ATTACHMENT_CAP - 110) + '\n[Other selected files omitted at the attachment context limit.]';
+  return out;
+}
+
+function renderAttachments() {
+  const host = $('attachmentList');
+  host.replaceChildren();
+  state.attachments.forEach((file, index) => {
+    const row = document.createElement('div'); row.className = 'attachment-item';
+    const name = document.createElement('span'); name.textContent = `${file.name} · ${file.chars.toLocaleString()} chars${file.truncated ? ' · truncated' : ''}`;
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'text-button'; remove.textContent = 'Remove'; remove.setAttribute('aria-label', `Remove ${file.name}`);
+    remove.addEventListener('click', () => { state.attachments.splice(index, 1); renderAttachments(); refreshContextCard(); });
+    row.append(name, remove); host.append(row);
+  });
+  const preview = $('attachmentPreview');
+  preview.classList.toggle('hidden', !state.attachments.length);
+  $('attachmentTextPreview').textContent = attachmentContext().trim();
+}
+
+function decodeAttachment(bytes, extension) {
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return new TextDecoder('utf-8').decode(bytes.subarray(3));
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder('utf-16le').decode(bytes.subarray(2));
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder('utf-16be').decode(bytes.subarray(2));
+  const ascii = new TextDecoder('latin1').decode(bytes.subarray(0, Math.min(bytes.length, 8192)));
+  const charset = extension === 'html' || extension === 'htm' ? ascii.match(/<meta\b[^>]*charset\s*=\s*["']?([\w-]+)/i)?.[1] : null;
+  if (charset) { try { return new TextDecoder(charset).decode(bytes); } catch { /* fall through to UTF-8 */ } }
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+  catch { try { return new TextDecoder('big5').decode(bytes); } catch { return new TextDecoder('windows-1252').decode(bytes); } }
+}
+
+function htmlAttachmentText(source) {
+  // Strip executable and resource-bearing content before parsing. Never insert the uploaded HTML into the live pane.
+  const safe = source
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<script\b[^>]*>[\s\S]*?(?:<\/script\s*>|$)/gi, ' ')
+    .replace(/<(script|style|iframe|object|embed|template|svg|canvas|noscript)\b[^>]*>[\s\S]*?<\/\s*\1\s*>/gi, ' ')
+    .replace(/<(?:iframe|object|embed|link|img|source|video|audio|meta|base|form|input)\b[^>]*>/gi, ' ')
+    .replace(/\s+(?:src|srcset|href|action|formaction|poster|srcdoc|style|on[\w:-]+)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, ' ');
+  if (typeof DOMParser === 'undefined') return safe.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;/gi, "'").replace(/\s+/g, ' ').trim();
+  const doc = new DOMParser().parseFromString(safe, 'text/html');
+  doc.querySelectorAll('script,style,iframe,object,embed,template,svg,canvas,noscript,link,meta,base,form,input,button').forEach(node => node.remove());
+  doc.querySelectorAll('[hidden],[aria-hidden="true"],[style*="display:none" i],[style*="visibility:hidden" i]').forEach(node => node.remove());
+  const tables = [...doc.querySelectorAll('table')].filter(table => !table.parentElement?.closest('table'));
+  for (const table of tables) {
+    const lines = [...table.querySelectorAll('tr')].map(row => [...row.querySelectorAll('th,td')].filter(cell => cell.closest('table') === table).map(cell => cell.textContent.replace(/\s+/g, ' ').trim()).join(' | ')).filter(Boolean);
+    const caption = table.querySelector('caption')?.textContent.replace(/\s+/g, ' ').trim();
+    if (caption) lines.unshift(caption);
+    table.replaceWith(doc.createTextNode(`\n${lines.join('\n')}\n`));
+  }
+  doc.querySelectorAll('br').forEach(node => node.replaceWith(doc.createTextNode('\n')));
+  doc.querySelectorAll('h1,h2,h3,h4,h5,h6,p,div,section,article,main,header,footer,li,tr').forEach(node => { node.before(doc.createTextNode('\n')); node.after(doc.createTextNode('\n')); });
+  const title = (doc.querySelector('title')?.textContent || '').replace(/\s+/g, ' ').trim();
+  const body = (doc.body?.textContent || doc.documentElement?.textContent || '').replace(/[\t\u00a0 ]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return `${title ? `Title: ${title}\n\n` : ''}${body}`.trim();
+}
+
+async function readAttachment(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  const supported = new Set(['html', 'htm', 'txt', 'md', 'csv', 'tsv', 'json', 'xml']);
+  if (!supported.has(ext)) throw new Error(`${file.name}: supported files are HTML, TXT, MD, CSV, TSV, JSON and XML.`);
+  if (file.size > ATTACHMENT_MAX_BYTES) throw new Error(`${file.name}: file is over the 5 MB limit.`);
+  const text = decodeAttachment(new Uint8Array(await file.arrayBuffer()), ext);
+  const extracted = ext === 'html' || ext === 'htm' ? htmlAttachmentText(text) : text.replace(/\u0000/g, '');
+  if (!extracted.trim()) throw new Error(`${file.name}: no readable text was found.`);
+  const clipped = trimContext(extracted, ATTACHMENT_FILE_CAP);
+  return { name: file.name, kind: ext.toUpperCase(), size: file.size, text: clipped.text, chars: clipped.text.length, truncated: clipped.truncated };
+}
+
+async function addAttachments(files) {
+  const incoming = [...files];
+  if (state.attachments.length + incoming.length > ATTACHMENT_MAX_FILES) { toast(`Attach up to ${ATTACHMENT_MAX_FILES} files per chat.`); return; }
+  const added = [];
+  for (const file of incoming) {
+    try { added.push(await readAttachment(file)); }
+    catch (error) { toast(error.message); }
+  }
+  state.attachments.push(...added);
+  renderAttachments();
+  refreshContextCard();
+  if (added.length) toast(`${added.length} file(s) ready. They will be sent with your next question.`);
+}
+
 async function refreshContextCard() {
-  if (!state.officeReady) { $('selectionName').textContent = 'Open Excel or Word to read context'; return; }
+  renderAttachments();
   try {
-    const ctx = await buildContext();
+    const ctx = state.officeReady && $('includeContext').checked ? await buildContext(Math.min(CONTEXT_CAP, Math.max(1, CONTEXT_CAP - attachmentContext().length))) : null;
+    const fileNames = state.attachments.map(file => file.name);
+    const fileNote = fileNames.length ? ` · ${fileNames.length} file(s): ${fileNames.join(', ')}` : '';
+    if (!state.officeReady) {
+      $('selectionName').textContent = fileNames.length ? `${fileNames.length} attached file(s) ready` : 'Open Excel or Word to read context';
+      $('selectionPreview').textContent = fileNames.length ? 'Selected file or cloud source text will be sent with your next question.' : 'Choose a local HTML/text file or review a cloud source.';
+      $('contextHint').textContent = `Up to ${ATTACHMENT_CAP.toLocaleString()} attachment characters per question${fileNote}`;
+      return;
+    }
     if (!$('includeContext').checked) {
-      $('selectionName').textContent = 'Context off';
-      $('selectionPreview').textContent = 'Questions are sent without workbook data.';
-      $('contextHint').textContent = 'Nothing will be sent';
+      $('selectionName').textContent = fileNames.length ? `${fileNames.length} attached file(s) ready` : 'Workbook context off';
+      $('selectionPreview').textContent = fileNames.length ? 'Workbook data is off; selected file text is still included.' : 'Questions are sent without workbook data.';
+      $('contextHint').textContent = `Workbook context off${fileNote}`;
       return;
     }
     if (!ctx) {
-      $('selectionName').textContent = 'No workbook data';
-      $('selectionPreview').textContent = '(The active sheet and selection are empty)';
-      $('contextHint').textContent = 'Nothing will be sent';
+      $('selectionName').textContent = fileNames.length ? `${fileNames.length} attached file(s) ready` : 'No workbook data';
+      $('selectionPreview').textContent = fileNames.length ? 'Selected file text will be sent with your next question.' : '(The active sheet and selection are empty)';
+      $('contextHint').textContent = fileNames.length ? `No workbook data${fileNote}` : 'Nothing will be sent';
       return;
     }
     $('selectionName').textContent = ctx.address;
     $('selectionPreview').textContent = ctx.text;
-    $('contextHint').textContent = `Next question sends ${ctx.kind} · ${ctx.chars.toLocaleString()} chars${ctx.truncated ? ' · truncated' : ''} · formulas included`;
+    $('contextHint').textContent = `Next question sends ${ctx.kind} · ${ctx.chars.toLocaleString()} chars${ctx.truncated ? ' · truncated' : ''} · formulas included${fileNote}`;
   } catch (error) { toast(`Could not read workbook context: ${error.message}`); }
 }
 
@@ -1403,9 +1646,9 @@ async function renderEditsCard(edits, skipped) {
 }
 
 function dedupContext(messages) {
-  // Older turns keep their prose only; re-sending every past 45k context block would multiply input tokens each turn.
+  // Older turns keep their prose only; re-sending past workbook/file context multiplies input tokens each turn.
   return messages.map((m, i) => (m.role === 'user' && i < messages.length - 1)
-    ? { ...m, content: m.content.replace(/\n\n\[(?:Excel (?:selection|used range|workbook metadata|range)|Word (?:selection|document|document outline))[^\]]*\]\n[\s\S]*$/, '') }
+    ? { ...m, content: m.content.replace(/\n\n\[Attached file START:[^\]]+\][\s\S]*?\n\[Attached file END\]/g, '').replace(/\n\n\[(?:Excel (?:selection|used range|workbook metadata|range)|Word (?:selection|document|document outline))[^\]]*\]\n[\s\S]*$/, '') }
     : m);
 }
 
@@ -1536,11 +1779,17 @@ async function readWorkbookMeta() {
   });
 }
 
-async function contextForMode(mode) {
+async function contextForMode(mode, limit = CONTEXT_CAP) {
   if (!state.officeReady || !$('includeContext').checked) return null;
-  if (mode === 'chat' || state.forceSheet) return buildContext();
-  try { return await readWorkbookMeta(); }
-  catch { return buildContext(); }
+  if (mode === 'chat' || state.forceSheet) return buildContext(limit);
+  let ctx;
+  try { ctx = await readWorkbookMeta(); }
+  catch { ctx = await buildContext(limit); }
+  if (ctx && ctx.text.length > limit) {
+    const clipped = trimContext(ctx.text, limit);
+    return { ...ctx, text: clipped.text, chars: clipped.text.length, truncated: Boolean(ctx.truncated || clipped.truncated) };
+  }
+  return ctx;
 }
 
 async function readGrid(sheet, range) {
@@ -1842,15 +2091,20 @@ async function sendAgentPrompt(prompt) {
     let routed = await routeForPrompt(clean, mode);
     if (routed.error) { toast(routed.error); return; }
     state.audit.push(AgentCore.audit({ kind: 'request', mode, provider: routed.provider, reason: routed.reason, text: clean.slice(0, 500) }));
+    const files = attachmentContext();
+    const contextLimit = Math.max(0, Math.min(CONTEXT_CAP, 49_000 - clean.length - files.length - 300));
+    if (contextLimit < 300 && $('includeContext').checked) { toast('The prompt and attachments leave too little room for workbook context. Remove a file or shorten the prompt.'); return; }
     let ctx = null;
-    try { ctx = await contextForMode(mode); } catch (error) { if (turn === state.turn) toast(`Could not read workbook context: ${error.message}`); }
+    try { ctx = await contextForMode(mode, contextLimit); } catch (error) { if (turn === state.turn) toast(`Could not read workbook context: ${error.message}`); }
     if (turn !== state.turn) return;
-    const content = `${clean}${ctx ? `\n\n${ctx.header}\n${ctx.text}` : ''}\n\n[Mode: ${mode}]`;
+    const content = `${clean}${files}${ctx ? `\n\n${ctx.header}\n${ctx.text}` : ''}\n\n[Mode: ${mode}]`;
     if (content.length > 49_500) { toast('Message plus workbook context is too large — shorten the message or turn context off.'); return; }
     state.forceSheet = false;
     state.messages.push({ role: 'user', content });
-    renderMessage('user', clean + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
+    const fileNames = state.attachments.map(file => file.name);
+    renderMessage('user', clean + (fileNames.length ? `\n\nAttachments: ${fileNames.join(', ')}` : '') + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
     state.audit.push(AgentCore.audit({ kind: 'context', address: ctx?.address || 'none', chars: ctx?.chars || 0 }));
+    if (state.attachments.length) state.audit.push(AgentCore.audit({ kind: 'context', address: fileNames.join(', '), chars: files.length }));
     let guard = 0;
     let retried = false;
     while (guard < AgentCore.MAX_LOOPS) {
@@ -1956,11 +2210,18 @@ async function sendAgentPrompt(prompt) {
       if (validations.length) renderValidation(validations);
       const next = AgentCore.decide({ decision: envelope.decision, validations, iteration: guard, maxLoops: AgentCore.MAX_LOOPS });
       if (next === 'FAILED') {
-        const reason = validations.some(result => result.status === 'FAIL')
+        const validationFailed = validations.some(result => result.status === 'FAIL');
+        const limitReached = ['CONTINUE', 'REPLAN'].includes(envelope.decision)
+          && guard + 1 >= AgentCore.MAX_LOOPS;
+        const reason = validationFailed
           ? 'validation failed'
-          : 'loop limit reached while the model still asked to continue';
+          : limitReached
+            ? `${AgentCore.MAX_LOOPS}-round limit reached; the model requested another step`
+            : 'the model reported that it could not complete this step';
         state.audit.push(AgentCore.audit({ kind: 'stopped', reason }));
-        toast(`Stopped: ${reason}. Nothing further will run.`);
+        toast(limitReached
+          ? `Agent reached its ${AgentCore.MAX_LOOPS}-round limit. The model requested another step; review the audit card and send a follow-up to continue.`
+          : `Stopped: ${reason}. Nothing further will run.`);
         break;
       }
       if (next === 'NEEDS_USER') {
@@ -1977,8 +2238,8 @@ async function sendAgentPrompt(prompt) {
       break;
     }
     if (guard >= AgentCore.MAX_LOOPS) {
-      state.audit.push(AgentCore.audit({ kind: 'stopped', reason: 'loop limit' }));
-      toast('Stopped at the loop limit.');
+      state.audit.push(AgentCore.audit({ kind: 'stopped', reason: `${AgentCore.MAX_LOOPS}-round limit reached` }));
+      toast(`Agent reached its ${AgentCore.MAX_LOOPS}-round limit. Review the audit card and send a follow-up to continue.`);
     }
     renderAuditCard();
     refreshContextCard();
@@ -2015,13 +2276,18 @@ async function sendPrompt(prompt) {
     await ensureKeys();
     if (turn !== state.turn) return;
     const provider = $('activeProvider').value;
+    const files = attachmentContext();
+    const contextLimit = Math.max(0, Math.min(CONTEXT_CAP, 49_000 - clean.length - files.length - 100));
+    if (contextLimit < 300 && $('includeContext').checked) { toast('The prompt and attachments leave too little room for workbook context. Remove a file or shorten the prompt.'); return; }
     let ctx = null;
-    try { ctx = await buildContext(); } catch (error) { if (turn === state.turn) toast(`Could not read workbook context: ${error.message}`); }
+    try { ctx = await buildContext(contextLimit); } catch (error) { if (turn === state.turn) toast(`Could not read workbook context: ${error.message}`); }
     if (turn !== state.turn) return;
-    const content = clean + (ctx ? `\n\n${ctx.header}\n${ctx.text}` : '');
+    const content = `${clean}${files}${ctx ? `\n\n${ctx.header}\n${ctx.text}` : ''}`;
     if (content.length > 49_500) { toast('Message plus workbook context is too large — shorten the message or turn context off.'); return; }
     state.forceSheet = false;
-    state.messages.push({ role: 'user', content }); renderMessage('user', clean + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
+    state.messages.push({ role: 'user', content });
+    const fileNames = state.attachments.map(file => file.name);
+    renderMessage('user', clean + (fileNames.length ? `\n\nAttachments: ${fileNames.join(', ')}` : '') + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
     const result = await streamChat({ provider, model: provider === 'qwen' ? $('qwenModel').value.trim() : $('grokModel').value.trim(), endpoint: $('qwenEndpoint').value.trim(), messages: dedupContext(state.messages.slice(-24)), fast: $('fastMode').checked, host: state.host === 'Word' ? 'word' : 'excel' });
     if (turn !== state.turn) return;
     const revision = parseRevision(result.text);
@@ -2066,6 +2332,10 @@ function clearConversation() {
 function newChat() {
   stopGeneration();
   state.messages = [];
+  state.attachments = [];
+  $('attachmentPicker').value = '';
+  renderAttachments();
+  refreshContextCard();
   state.lastAnswer = '';
   state.forceSheet = false;
   state.audit = [];
@@ -2129,6 +2399,8 @@ function saveFinanceProfile() {
 function applyHostedChrome() {
   showExecutionPath();
   if (!hostedRelay()) return;
+  $('cloudConnectorConfig')?.classList.add('hidden');
+  $('cloudSources')?.classList.add('hidden');
   $('relayFields')?.classList.remove('hidden');
   $('localKeyFields')?.classList.add('hidden');
   const hint = $('keyHint');
@@ -2171,6 +2443,69 @@ function toggleProviderFields() {
   $('qwenFields').classList.toggle('hidden', !isQwen); $('grokFields').classList.toggle('hidden', isQwen);
   $('activeProvider').value = $('provider').value;
   refreshSettings();
+}
+
+function loadConnectorConfigForm() {
+  const config = storedConnectorConfig();
+  if (!config || hostedRelay()) return;
+  $('googleOAuthClientId').value = config.googleClientId || '';
+  $('googleOAuthClientSecret').value = config.googleClientSecret || '';
+  $('microsoftAppClientId').value = config.microsoftClientId || '';
+  $('rememberConnectorConfig').checked = true;
+}
+
+async function saveConnectorSettings() {
+  const config = {
+    googleClientId: $('googleOAuthClientId').value.trim(),
+    googleClientSecret: $('googleOAuthClientSecret').value.trim(),
+    microsoftClientId: $('microsoftAppClientId').value.trim()
+  };
+  try {
+    await api('connectors/configure', config);
+    rememberConnectorConfig($('rememberConnectorConfig').checked ? config : null);
+    connectorConfigReady = null;
+    state.googleAuthUrl = '';
+    $('googleSignInLink').classList.add('hidden');
+    toast($('rememberConnectorConfig').checked ? 'Cloud source settings saved on this PC.' : 'Cloud source settings saved in local relay memory.');
+    await refreshCloudSources();
+  } catch (error) { toast(error.message); }
+}
+
+async function connectGoogleSources() {
+  try {
+    await restoreConnectorConfig();
+    const result = await api('connectors/google/authorize', {});
+    const authUrl = new URL(result.authorizationUrl);
+    if (authUrl.origin !== 'https://accounts.google.com') throw new Error('The relay returned an invalid Google sign-in link.');
+    state.googleAuthUrl = authUrl.href;
+    $('googleSignInLink').href = authUrl.href;
+    $('googleSignInLink').classList.remove('hidden');
+    toast('Use Continue sign-in to choose your Google account.');
+    startSourcePolling();
+    await refreshCloudSources();
+  } catch (error) { toast(error.message); }
+}
+
+async function connectOneDrive() {
+  try {
+    await restoreConnectorConfig();
+    await api('connectors/onedrive/authorize', {});
+    await refreshCloudSources();
+    if (state.oneDriveVerificationUri) toast('Open the Microsoft sign-in page and enter the displayed code.');
+  } catch (error) { toast(error.message); }
+}
+
+async function disconnectSource(source) {
+  try {
+    await api('connectors/disconnect', { source });
+    if (source === 'google') {
+      state.googleAuthUrl = '';
+      $('googleSignInLink').classList.add('hidden');
+    }
+    $('sourceResults').replaceChildren();
+    await refreshCloudSources();
+    toast(`${source === 'google' ? 'Google' : 'OneDrive'} disconnected from this relay.`);
+  } catch (error) { toast(error.message); }
 }
 
 async function insertAnswer() {
@@ -2235,7 +2570,24 @@ $('clearKey').addEventListener('click', async () => {
   try { await api('clear-key', { provider }); rememberKey(provider, ''); keysReady = null; await refreshSettings(); toast('Key cleared.'); }
   catch (error) { toast(error.message); }
 });
+$('saveConnectorConfig').addEventListener('click', saveConnectorSettings);
+$('connectGoogle').addEventListener('click', connectGoogleSources);
+$('connectOneDrive').addEventListener('click', connectOneDrive);
+$('disconnectGoogle').addEventListener('click', () => disconnectSource('google'));
+$('disconnectOneDrive').addEventListener('click', () => disconnectSource('onedrive'));
+$('googleSignInLink').addEventListener('click', () => { if (state.googleAuthUrl) startSourcePolling(); });
+$('openOneDriveSignIn').addEventListener('click', () => startSourcePolling());
+$('searchSources').addEventListener('click', searchCloudSource);
+$('sourceQuery').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); searchCloudSource(); } });
+$('sourceType').addEventListener('change', () => {
+  $('sourceQuery').placeholder = $('sourceType').value === 'gmail' ? 'Gmail search syntax (e.g. subject:invoice newer_than:30d)' : 'Search files or words in the source';
+});
 $('newChat').addEventListener('click', newChat);
+$('attachFiles').addEventListener('click', () => $('attachmentPicker').click());
+$('attachmentPicker').addEventListener('change', async event => {
+  await addAttachments(event.target.files || []);
+  event.target.value = '';
+});
 $('composer').addEventListener('submit', async event => {
   event.preventDefault();
   if (state.busy) { stopGeneration(); return; }
@@ -2248,6 +2600,7 @@ $('prompt').addEventListener('keydown', event => { if (event.key === 'Enter' && 
 $('insertAnswer').addEventListener('click', insertAnswer);
 document.querySelectorAll('.action').forEach(button => button.addEventListener('click', () => { $('prompt').value = button.dataset.prompt; $('prompt').focus(); }));
 loadFinanceProfile();
+loadConnectorConfigForm();
 ['debitColumn', 'creditColumn', 'amountColumn', 'keyColumns', 'requiredColumns', 'entityColumn', 'currencyColumn', 'dateColumn', 'checkTolerance'].forEach(id => {
   $(id).addEventListener('change', saveFinanceProfile);
 });
@@ -2265,6 +2618,7 @@ Office.onReady(info => {
   }
   applyHostedChrome();
   refreshSettings();
+  refreshCloudSources();
   ensureKeys().then(refreshSettings);
 });
 applyHostedChrome();

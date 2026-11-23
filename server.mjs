@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extractGrokText, originAllowed, prepareChat, providerDelta, providerErrorMessage, requestHostAllowed, takeSseDataLines } from './relay-core.mjs';
+import { LocalSourceMcp } from './mcp-connectors.mjs';
 
 export { extractGrokText, originAllowed, prepareChat, providerDelta, providerErrorMessage, qwenEndpointAllowed, requestHostAllowed, takeSseDataLines } from './relay-core.mjs';
 
@@ -70,6 +71,7 @@ async function readProviderStream(response, provider, res) {
 
 export function createRelay() {
   const secrets = { qwen: '', grok: '' };
+  const sources = new LocalSourceMcp();
   const server = http.createServer(async (req, res) => {
     const addr = server.address();
     const boundPort = addr && typeof addr === 'object' ? addr.port : port;
@@ -81,6 +83,70 @@ export function createRelay() {
     catch { return send(res, 400, { error: 'Bad request.' }); }
 
     if (req.method === 'GET' && url.pathname === '/api/health') return send(res, 200, { ok: true, configured: { qwen: Boolean(secrets.qwen), grok: Boolean(secrets.grok) } });
+
+    if (req.method === 'GET' && url.pathname === '/api/connectors/status') return send(res, 200, sources.status());
+
+    if (req.method === 'GET' && url.pathname === '/api/connectors/google/callback') {
+      const result = await sources.completeGoogleOAuth(url);
+      return send(res, result.status, result.html, 'text/html; charset=utf-8');
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/connectors/configure') {
+      try {
+        const body = await readBody(req);
+        return send(res, 200, await sources.configure(body));
+      } catch (error) {
+        return send(res, 400, { error: error.message });
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/connectors/google/authorize') {
+      try {
+        await readBody(req);
+        return send(res, 200, await sources.startGoogleOAuth(boundPort));
+      } catch (error) {
+        return send(res, 400, { error: error.message });
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/connectors/onedrive/authorize') {
+      try {
+        await readBody(req);
+        return send(res, 200, { device: await sources.startOneDriveDeviceFlow() });
+      } catch (error) {
+        return send(res, 400, { error: error.message });
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/connectors/search') {
+      try {
+        const body = await readBody(req);
+        return send(res, 200, await sources.search(body.source, body.query));
+      } catch (error) {
+        const clientError = /query|choose|valid search result/i.test(error.message);
+        return send(res, clientError ? 400 : 502, { error: error.message });
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/connectors/read') {
+      try {
+        const body = await readBody(req);
+        return send(res, 200, await sources.read(body.source, body.item));
+      } catch (error) {
+        const clientError = /choose|valid|file name/i.test(error.message);
+        return send(res, clientError ? 400 : 502, { error: error.message });
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/connectors/disconnect') {
+      try {
+        const body = await readBody(req);
+        await sources.disconnect(body.source);
+        return send(res, 200, sources.status());
+      } catch (error) {
+        return send(res, 400, { error: error.message });
+      }
+    }
 
     if (req.method === 'POST' && url.pathname === '/api/configure') {
       try {

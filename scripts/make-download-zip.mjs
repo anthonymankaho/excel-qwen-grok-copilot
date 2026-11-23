@@ -38,6 +38,11 @@ FIRST USE
 5. Settings > pick Qwen or Grok > paste YOUR OWN key > leave Remember
    ticked > Use key. The dot turns green.
 
+OPTIONAL CLOUD SOURCES
+   See README.md and SOP-INSTALL.md. Each colleague connects their own
+   Google and Microsoft accounts; no account address is built into the app.
+   OAuth app values are configured locally and are not included in this zip.
+
 WORD
    Close Word, then in this folder run:  npm run start:word
 

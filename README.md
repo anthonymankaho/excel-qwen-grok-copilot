@@ -43,6 +43,34 @@ The zip is a build artifact: rebuild it with `npm run package` after any code or
 - **Word:** close Word, then `npm run start:word`.
 - **Excel on the web:** **Home → Add-ins → Upload My Add-in** → `manifest.cloudflare.xml`, then paste the **relay token** in Settings. No provider key needed — `QWEN_API_KEY` is already a Worker secret.
 
+### Read-only cloud source review (desktop local relay only)
+
+The desktop pane can search and review the signed-in user's Google Drive, Gmail, and personal OneDrive. Search results stay in the pane until the user chooses **Review and add to chat**; that selected text is included with the next question. The connector tools are read-only: they do not edit Drive files, change OneDrive files, or send/modify Gmail.
+
+Each colleague signs in with their own account on their own PC. No account email is hardcoded or requested by this add-in. OAuth access tokens are held in that PC's local relay memory, used in HTTPS requests to the selected Google/Microsoft source, and cleared when the relay stops. The Google OAuth client secret is entered in the local **Settings** pane and used by the relay only for Google's OAuth token exchange; it is not sent to Qwen/Grok or Cloudflare. The optional **Remember on this PC** choice stores the app configuration in that Office user's browser storage. The hosted Excel-on-the-web pane does not use these local connectors.
+
+Before colleagues connect:
+
+1. In the Google Cloud project, enable the Drive and Gmail MCP services; use an OAuth client marked **Use this client for an AI-powered agent** and authorize the redirect URI `http://localhost:3000/api/connectors/google/callback`. Add only `https://www.googleapis.com/auth/drive.readonly` and `https://www.googleapis.com/auth/gmail.readonly`. Every Google account must be eligible for the Workspace Developer Preview; if the OAuth app is in testing mode, add each colleague as a test user.
+2. Register a Microsoft app that supports personal Microsoft accounts and public-client/device-code flow, with delegated `Files.Read`. The app ID is not a secret; do not put a Microsoft secret in the add-in.
+3. On each desktop, open **Settings**, enter the Google OAuth client ID and secret plus the Microsoft public app client ID, and press **Save source settings**. Then open **Cloud sources** and connect each account. The Google client secret must be shared through an approved private channel or each colleague can use their own OAuth client.
+
+OneDrive text review supports XLSX/XLSM, DOCX, HTML, TXT, MD, CSV, TSV, JSON, and XML. Google Drive MCP supports supported documents, spreadsheets, presentations, and PDF. See Google's [Workspace MCP setup](https://developers.google.com/workspace/guides/configure-mcp-servers), [Drive tool reference](https://developers.google.com/workspace/drive/api/reference/mcp/tools_list/read_file_content), and [Gmail tool reference](https://developers.google.com/workspace/gmail/api/reference/mcp/tools_list/get_thread); OneDrive uses Microsoft Graph's [personal-account file permissions](https://learn.microsoft.com/en-us/graph/permissions-reference).
+
+#### 雲端來源唯讀檢視（只支援桌面本機 Relay）
+
+桌面版可搜尋及檢視登入者自己的 Google Drive、Gmail 和個人 OneDrive。搜尋結果只會留在增益集窗格；使用者按下 **Review and add to chat** 後，所選文字才會加入下一個問題。連接工具只有讀取權限，不會修改雲端檔案或寄送／更改 Gmail。
+
+每位同事都在自己的電腦登入自己的帳戶。本增益集不會在程式碼寫入或索取帳戶電郵地址。OAuth 存取權杖會保留在該電腦本機 Relay 記憶體，僅用於對所選 Google/Microsoft 來源發出 HTTPS 請求，Relay 停止後即清除。Google OAuth 用戶端密碼需在本機 **Settings** 輸入，由 Relay 僅用於 Google OAuth 權杖交換；不會傳給 Qwen/Grok 或 Cloudflare。勾選 **Remember on this PC** 才會把應用程式設定存於該 Office 使用者的瀏覽器儲存空間。Excel 網頁版不使用這些本機連接器。
+
+同事連接前，管理者需：
+
+1. 在 Google Cloud 專案啟用 Drive 和 Gmail MCP 服務；使用已勾選 **Use this client for an AI-powered agent** 的 OAuth 用戶端，並登記重新導向 URI `http://localhost:3000/api/connectors/google/callback`，只加入 `https://www.googleapis.com/auth/drive.readonly` 和 `https://www.googleapis.com/auth/gmail.readonly`。每位 Google 使用者都須符合 Workspace Developer Preview 資格；若 OAuth 應用程式仍在測試模式，須把每位同事加入測試使用者。
+2. 註冊支援個人 Microsoft 帳戶及 public-client/device-code 流程的 Microsoft 應用程式，並授予委派的 `Files.Read`。Microsoft 應用程式 ID 不是密碼；不可把 Microsoft secret 放進增益集。
+3. 每位同事在桌面增益集 **Settings** 輸入 Google OAuth 用戶端 ID 和密碼，以及 Microsoft public app client ID，按 **Save source settings**，再開啟 **Cloud sources** 登入。Google 用戶端密碼須經核准的私人渠道分享；同事也可各自使用自己的 OAuth 用戶端。
+
+OneDrive 文字檢視支援 XLSX/XLSM、DOCX、HTML、TXT、MD、CSV、TSV、JSON 和 XML。Google Drive MCP 可檢視其支援的文件、試算表、簡報和 PDF。設定及權限細節請參閱上方 Google 和 Microsoft 官方文件。
+
 ### Documentation 文件
 
 | File | Purpose |
@@ -132,7 +160,7 @@ The first run against a real workbook (753-row AR ageing) proved profiling and r
 
 - **Execution errors were swallowed.** `executeClassified` only raised a toast; the audit showed `Execute FAILED · 1 actions` with no reason, and the model received a bare `Observed: FAILED`. The real Office.js message is now recorded in the audit **and** fed back to the model so it can correct itself.
 - **A pivot value-field cap of 8 silently rejected an ageing pivot.** This workbook legitimately needs 11 value fields (USD O/S + nine buckets + Credits). The cap is now 16, and rejected actions are reported to the model and shown in the audit as `N rejected as unusable` instead of vanishing.
-- **"Stopped · validation failed" was misleading.** `decide()` also returns FAILED at the loop limit, so a run that simply ran out of rounds was labelled a validation failure. The two cases are now distinguished.
+- **Agent stops cleanly at its round limit.** The limit is now 10 rounds. Reaching it is reported as a round-limit warning, separately from a failed finance check or a model-reported failure.
 - **Pivot field names are validated against the real headers.** A mismatch now names the offending field and lists the available headers, and removes the partial pivot and any sheet it created, instead of failing opaquely later. The destination sheet is also synced before use.
 
 `npm run check` passes. `npm test` → **64 pass / 2 fail**, still only the Windows `spawn unzip ENOENT` packaging failures. Two new tests: an 11-value-field ageing pivot is accepted, and an unknown field produces a named error with no partial pivot left behind.
@@ -151,7 +179,7 @@ This is the Copilot-style revise. The earlier pane sent one prompt, attached a l
 - **A failed check is a workpaper, not a silent fix.** The card states the issue, the evidence, a possible cause, the check, and the recommended action. A journal entry is a draft. The pane does not clear a reconciliation difference on its own.
 - **Auto** chooses Qwen or Grok only when that key is already loaded. A finance, Plan, or Agent request prefers Grok when that key is present and **Fast** is off. Otherwise it prefers Qwen. If the chosen provider errors, the pane tries the other loaded key once.
 - **An audit card** closes each Chat, Plan, and Agent turn: request, mode, provider, plan, context sent, actions, blocked actions, and check results. API keys are left out. **New chat** clears the trail.
-- **Direct, Apply, and Undo stay.** With Direct on, Agent writes safe actions immediately. Deletes, clears, renames, and formulas that can reach the network wait for a click. With Direct off, you approve the plan and then press **Apply edits**. **Undo last apply** is on the card. **Stop** cancels the current round. The loop ends after 4 rounds.
+- **Direct, Apply, and Undo stay.** With Direct on, Agent writes safe actions immediately. Deletes, clears, renames, and formulas that can reach the network wait for a click. With Direct off, you approve the plan and then press **Apply edits**. **Undo last apply** is on the card. **Stop** cancels the current round. The loop ends after 10 rounds.
 
 Restart the relay and reopen the pane after you install this update. The manifest is 1.2.0.0. Word still needs `npm run start:word` once.
 
@@ -181,7 +209,7 @@ In Word:
 - The styles Heading 1, Heading 2, Heading 3, Title, and Normal
 - **Replace every match** of a phrase in the whole document
 
-**Two things are genuinely out of reach, not merely unbuilt.** It cannot run **Python in Excel** — Office.js exposes no API for it; "Python" appears in the typings only inside error-subtype enums. And it cannot become the **native Copilot surface** — the ribbon-integrated pane, inline ghost suggestions and the built-in Analyze Data experience are not something a sideloaded task pane can turn into. Everything else on the Copilot action list is now implemented.
+**Two things are genuinely out of reach, not merely unbuilt.** It cannot run **Python in Excel** — Office.js exposes no API for it; "Python" appears in the typings only inside error-subtype enums. And it cannot become the **native Copilot surface** — the ribbon-integrated pane, inline ghost suggestions and the built-in Analyze Data experience are not something a sideloaded task pane can turn into. The attachment picker currently supports HTML and text-based files only; it does not parse PDF, DOCX, or XLSX.
 
 ## First time on a computer
 
@@ -214,7 +242,8 @@ The context card shows what the next question will send.
 - In Plan and Agent, the next question sends workbook metadata: the workbook name, up to 30 sheet names, each used range’s address and size, table names when Excel exposes them, and the selection address. Tick **＋ Whole sheet** when that question should include the active sheet’s grid.
 - In Word Chat, the selection is sent. An empty selection sends the document body, with the same character cap. Plan and Agent send a short document outline and wait to be asked for the selection.
 - The card refreshes when the selection changes. **↻ Refresh** reads it again.
-- Untick **Send context** to ask with no file data.
+- Untick **Send workbook context** to ask without the open workbook/document data. Attached files are controlled separately.
+- Use **📎 Attach** to choose up to three HTML/HTM, TXT, MD, CSV, TSV, JSON, or XML files (5 MB each). HTML tables and readable text are extracted locally; scripts, CSS, chart images, and links are not run or interpreted. The pane shows a preview of extracted text before sending. It sends at most 18,000 characters per file and 26,000 characters from attachments per question. **New chat** clears attachments and conversation history.
 
 Ask in the box and press Enter. Shift+Enter adds a line. **Summarize**, **Explain**, **Write formula**, and **Revise** fill a starting prompt. Replies stream. The send button becomes **Stop** while a reply is running. **New chat** clears the conversation and the audit trail. **Fast** skips deep thinking: Qwen turns thinking off, and Grok uses low reasoning effort.
 
@@ -222,7 +251,7 @@ The footer pill sets Chat, Plan, or Agent, and Qwen, Grok, or Auto. Each provide
 
 **↳ Insert last answer into selection** writes the last reply into the top-left cell of the Excel selection. One line that starts with `=` is written as a formula. Anything else is written as text.
 
-History stays in memory. Reloading the pane clears it. Each request sends at most 24 messages, and only the latest question includes the file context.
+History stays in memory. Reloading the pane clears it. Each request sends at most 24 messages. Only the latest question includes workbook context and selected attachments, so old context is not repeatedly sent.
 
 ## Modes
 
@@ -230,7 +259,7 @@ History stays in memory. Reloading the pane clears it. Each request sends at mos
 
 **Plan** inspects metadata, then returns one plan: goal, steps, assumptions, required inputs, risks, and the checks it wants. Proposed actions sit on the same card. Nothing is written until you press **Approve**. If Direct is off, **Approve** is followed by **Apply edits**.
 
-**Agent** uses the same metadata. It can ask for one range, run the safe actions for that step, read those cells back, and calculate the checks. The loop stops at 4 rounds, when you press **Stop**, when the plan needs you, or when a check fails. With Direct off, a step that would write waits for **Approve**, then **Apply edits**.
+**Agent** uses the same metadata. It can ask for one range, run the safe actions for that step, read those cells back, and calculate the checks. The loop stops at 10 rounds, when you press **Stop**, when the plan needs you, or when a check fails. If the model still requests another step at the cap, the pane shows a round-limit warning; send a follow-up to continue. With Direct off, a step that would write waits for **Approve**, then **Apply edits**.
 
 **Auto**, next to the mode, picks Qwen or Grok only from keys already loaded in the relay. It will not send the workbook to a provider that has no key.
 
@@ -352,7 +381,7 @@ Before trusting a change in the real app, start the relay, load a key, ask one q
 | Port 3000 is in use | Another relay is running. `npm run relay-stop`, then start it again |
 | The pane looks old | Restart the relay, then close and reopen the pane. On another computer, `git pull` first |
 | Context says truncated | Select a smaller range, or ask about one section at a time |
-| Invalid conversation message | The message plus context is over 50,000 characters. Shorten it, or untick **Send context** |
+| Invalid conversation message | The message plus context is over 50,000 characters. Shorten it, remove an attachment, or untick **Send workbook context** |
 | Provider HTTP 401 | The key and the URL do not match. `sk-sp-…` needs the Token Plan URL. A regular Qwen key needs the pay-as-you-go URL |
 | Model not exist (HTTP 400) | The model is not on that key's list. A Token Plan key does not serve `qwen-max`, `qwen-turbo`, or `qwen-plus`. Pick one it does, in Settings |
 | Qwen endpoint rejected | Use the Token Plan URL, or `https://<region>.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` |

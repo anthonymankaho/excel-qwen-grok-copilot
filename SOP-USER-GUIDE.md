@@ -21,7 +21,7 @@ Pick the mode **before** you send. The pane defaults to **Agent**.
 - **Direct on** — safe actions are written immediately; deletes, clears, renames, network formulas and irreversible changes still wait for your click.
 - **Direct off** — you approve the plan, then every action waits for **Apply edits**.
 
-The Agent loop stops at **4 rounds**, on **Stop**, when a check fails, or when it needs you.
+The Agent loop stops at **10 rounds**, on **Stop**, when a check fails, or when it needs you. If it reaches the round cap while the model requests another step, the pane shows a **round-limit warning**; review the audit card and send a follow-up to continue.
 
 ---
 
@@ -32,14 +32,18 @@ The Agent loop stops at **4 rounds**, on **Stop**, when a check fails, or when i
 - **Profile a big sheet.** On a sheet with hundreds of rows the model can request a *profile* instead of raw cells: each column's header, filled/blank counts, distinct count, sample values with counts, and numeric sum/min/max. This is how it chooses pivot fields correctly on a 753-row sheet.
 - **Word Chat** sends the selection; an empty selection sends the document body.
 - The **context card** shows the exact text being sent. **↻ Refresh** re-reads it.
-- **Untick Send context** when the sheet or document must not leave the computer.
+- **Untick Send workbook context** when the open sheet or document must not leave the computer. Attached files are controlled separately.
+- **Attach HTML reports or text files** with **📎 Attach**. Supported types: HTML/HTM, TXT, MD, CSV, TSV, JSON, and XML. Choose up to 3 files, each at most 5 MB. The pane extracts up to 18,000 characters per file and includes at most 26,000 attachment characters in a question.
+- HTML is parsed as text and tables. Scripts, CSS, embedded charts/images, and links are not executed or interpreted. The extracted text and selected workbook context are sent to the chosen Qwen/Grok provider when you send a question. Review the context card before sending. Remove files to omit them from the next question; **New chat** clears the conversation and attachments.
+- **Cloud sources** (desktop/local relay only): open **Cloud sources**, choose Google Drive, Gmail, or OneDrive, then search. Gmail searches use Gmail syntax (for example `subject:invoice newer_than:30d`). Search results and snippets stay in the pane. **Review and add to chat** fetches the selected item as text and adds it to the attachment list; it is sent to Qwen/Grok only with your next question. The tools have read-only access. Each colleague connects their own account; no account email address is hardcoded or saved by the add-in. OneDrive text review supports XLSX/XLSM, DOCX, HTML, TXT, MD, CSV, TSV, JSON, and XML. Google Drive MCP supports its documented file types, including PDF. The hosted Excel-on-the-web pane does not support these connectors.
+- The Google OAuth app secret can optionally be remembered in this Office user's browser storage. The local relay uses it for Google's OAuth token exchange; it is not sent to Qwen/Grok or Cloudflare. OAuth access tokens are held in relay memory, used in HTTPS requests to the selected source, and cleared when the relay stops; reconnect after a restart.
 - **＋ Whole sheet** forces the active Excel sheet for the next question only.
 - A truncation note means the read stopped at 150 rows × 30 columns, or 45,000 characters. Ask about a smaller range.
 - **Enter** sends; **Shift+Enter** adds a line. Quick actions: **Summarize**, **Explain**, **Write formula**, **Revise**.
 - The send button becomes **Stop** while streaming. **New chat** clears history and the audit trail.
 - **Fast** turns Qwen thinking off and sets Grok reasoning to low. Leave it off for a formula audit or a finance plan.
 - **Auto** only uses a provider whose key is already loaded, and tries the other loaded provider once if the first call fails.
-- Only the latest question carries file context; older turns keep their prose. A request sends at most 24 messages.
+- Only the latest question carries workbook and attachment context; older turns keep their prose. A request sends at most 24 messages.
 
 ---
 
@@ -154,18 +158,25 @@ Two limits are properties of the platform, not unfinished work:
 
 - **Python in Excel.** Office.js exposes no API for it — it is a native cloud feature.
 - **The native Copilot surface.** A sideloaded task pane cannot become the ribbon-integrated Copilot pane, inline ghost suggestions, or the built-in Analyze Data experience.
+- **Attachment formats.** The picker currently reads HTML/HTM, TXT, MD, CSV, TSV, JSON, and XML. It does not parse PDF, DOCX, or XLSX attachments. HTML scripts and CSS are ignored; charts and images are not analyzed.
 
-Also: message plus context over 50,000 characters is rejected; the Agent loop is capped at 4 rounds; and there is no audit export button yet.
+Also: message plus context over 50,000 characters is rejected; the Agent loop is capped at 10 rounds; and there is no audit export button yet.
 
 ---
 
 ## 10. What leaves this computer 什麼會離開這部電腦
 
-The local relay binds to **127.0.0.1** and rejects any other Host or Origin. Nothing is sent before you ask.
+The local relay binds to **127.0.0.1** and rejects any other Host or Origin. Workbook context and source contents are not sent to Qwen/Grok until you submit a question. Searching a cloud source sends the query to the chosen Google or Microsoft service; previewing a result fetches its text to the local pane. The local connector tools only search/read and never change cloud files or Gmail.
 
-A question sends your prompt and the attached context to the provider you picked (or the one Auto selected from loaded keys). Chat context includes cell values and formulas, or the Word selection/document text. Plan and Agent start with metadata and add a range only when a step asks. **From the hosted pane, the same question also passes through Cloudflare.**
+A question sends your prompt, the extracted text from selected attachments and reviewed cloud results, and (when enabled) workbook/document context to the provider you picked (or the one Auto selected from loaded keys). Original cloud files are not uploaded to Qwen/Grok; only the text you selected is included. Chat context includes cell values and formulas, or the Word selection/document text. Plan and Agent start with metadata and add a range only when a step asks. **From the hosted pane, the same question also passes through Cloudflare.**
 
-A key is never written into the repository or the audit card. Keep the owner's Token Plan key out of chat, files and commits — other people use their own keys.
+A provider key or signed-in account email is never written into the repository or the audit card. Provider API keys are sent to the local relay. Cloud OAuth tokens are held in local relay memory and used in HTTPS requests to the selected source; the optional saved Google app secret is kept in this Office user's browser storage and used by the relay for Google's OAuth token exchange. These credentials are not sent to Qwen/Grok. Keep provider keys and OAuth client secrets out of chat, files and commits.
+
+本機 Relay 綁定 **127.0.0.1**，並拒絕其他 Host 或 Origin。工作簿內容和來源檔案文字不會在提交問題前傳給 Qwen/Grok。搜尋雲端來源會把搜尋字詞傳給所選 Google 或 Microsoft 服務；預覽結果會把文字讀取到本機窗格。本機連接器只會搜尋／讀取，不會修改雲端檔案或 Gmail。
+
+提交問題後，提示、已選附件及雲端來源文字，以及（如已啟用）工作簿／文件上下文會傳給所選 Qwen/Grok provider。原始雲端檔案不會上傳到 Qwen/Grok；只有使用者選取的文字會加入問題。Excel Chat 上下文包括儲存格值及公式；Word 上下文包括選取文字或文件文字。Plan 和 Agent 先讀取中繼資料，只在步驟需要時再讀取範圍。**使用網頁版增益集時，同一問題也會經 Cloudflare。**
+
+Provider key 或登入帳戶電郵地址不會寫入 repository 或 audit card。Provider API key 會傳至本機 Relay。Cloud OAuth 權杖會保留於本機 Relay 記憶體，並透過 HTTPS 用於所選來源請求；選用儲存的 Google 應用程式密碼會留在此 Office 使用者的瀏覽器儲存空間，再由 Relay 用於 Google OAuth 權杖交換。這些憑證不會傳給 Qwen/Grok。不要把 provider key 或 OAuth client secret 放入聊天、檔案或 commit。
 
 ---
 
@@ -176,12 +187,12 @@ A key is never written into the repository or the audit card. Keep the owner's T
 | Provider HTTP 401 | Key and URL do not match — §7 |
 | `Model not exist` (HTTP 400) | That model is not on your plan. Change it in Settings — §7 |
 | Qwen endpoint rejected | Use the Token Plan URL or a regional `…/compatible-mode/v1/chat/completions` |
-| Invalid conversation message | Over 50,000 characters. Shorten the message or untick **Send context** |
+| Invalid conversation message | Over 50,000 characters. Shorten the message, remove an attachment, or untick **Send workbook context** |
 | Context says truncated | Ask about a smaller range, or let the model profile the sheet |
 | `Execute FAILED · …` | Read the reason on the audit line; it now names the actual cause |
 | `N rejected as unusable` | The action broke a limit — e.g. a pivot allows 16 value fields and 8 each for rows/columns/filters |
 | Stopped: validation failed | Leave the difference. Read the audit card. Do not force the totals |
-| Stopped: loop limit reached | The model still wanted to continue after 4 rounds. Ask a narrower question |
+| Agent reached its 10-round limit | The model requested another step. Review the audit card, then send a follow-up to continue |
 | A reply will not finish | Press **Stop**; tick **Fast** if it is slow |
 | A change is wrong | **Undo last apply**, or Excel `Ctrl+Z` |
 | Auto will not use Grok | No Grok key is loaded. Auto never routes data to a provider without a key |

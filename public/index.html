@@ -37,6 +37,15 @@
       </div>
       <div class="button-row"><button id="saveKey" class="primary">Use key</button><button id="clearKey" class="secondary">Clear key</button><label class="context-toggle"><input type="checkbox" id="rememberKey" checked> Remember key on this PC</label></div>
       <p id="keyHint" class="hint">Keys go only to the relay at 127.0.0.1 on this computer. With Remember ticked they persist in this pane’s local browser storage (this PC, this Windows user only); untick for memory-only sessions. Clear key removes both. Use your own key — never someone else’s personal Token Plan key.</p>
+      <div id="cloudConnectorConfig">
+        <h2>Read-only cloud sources</h2>
+        <p class="hint">OAuth app settings are shared setup values; each person signs in to their own accounts. Account email addresses are not saved by this add-in.</p>
+        <label for="googleOAuthClientId">Google OAuth client ID</label><input id="googleOAuthClientId" autocomplete="off" placeholder="Google AI-agent OAuth client ID">
+        <label for="googleOAuthClientSecret">Google OAuth client secret</label><input id="googleOAuthClientSecret" type="password" autocomplete="new-password" placeholder="Keep private; do not commit to Git">
+        <label for="microsoftAppClientId">Microsoft public app client ID</label><input id="microsoftAppClientId" autocomplete="off" placeholder="Application (client) ID">
+        <div class="button-row"><button id="saveConnectorConfig" class="secondary" type="button">Save source settings</button><label class="context-toggle"><input type="checkbox" id="rememberConnectorConfig"> Remember on this PC</label></div>
+        <p class="hint">Remember stores the Google app secret in this Windows user's local browser storage. Otherwise it stays only in relay memory and must be entered again after a restart.</p>
+      </div>
       <h2>Finance checks</h2>
       <p class="hint">Leave these blank when the sheet has headers such as Debit and Credit. A check that cannot name its columns asks you. It does not mark pass or fail.</p>
       <label for="debitColumn">Debit column</label><input id="debitColumn" placeholder="Debit or 1" autocomplete="off">
@@ -54,9 +63,27 @@
       <div class="context-top"><span id="contextEyebrow" class="eyebrow">WORKBOOK CONTEXT · AUTO</span><button id="refreshSelection" class="text-button">↻ Refresh</button></div>
       <div id="selectionName" class="selection-name">Open Excel to read context</div>
       <div id="selectionPreview" class="selection-preview">Your selection (or the active sheet) is sent with each question, formulas included.</div>
+      <div id="attachmentList" class="attachment-list" aria-live="polite"></div>
+      <details id="attachmentPreview" class="attachment-preview hidden"><summary>Preview extracted attachment text</summary><pre id="attachmentTextPreview"></pre></details>
       <div id="executionPath" class="hint">Local · the relay stays on this PC</div>
-      <div class="context-actions"><label class="context-toggle"><input type="checkbox" id="includeContext" checked> Send context</label><button id="addUsedRange" class="chip">＋ Whole sheet</button><span id="contextHint">Nothing sent yet</span></div>
+      <div class="context-actions"><label class="context-toggle"><input type="checkbox" id="includeContext" checked> Send workbook context</label><button id="addUsedRange" class="chip">＋ Whole sheet</button><span id="contextHint">Nothing sent yet</span></div>
     </section>
+
+    <details id="cloudSources" class="card cloud-sources">
+      <summary><strong>Cloud sources</strong><span>OneDrive · Google Drive · Gmail</span></summary>
+      <p class="hint">Read-only search and preview. A result is added to your next question only after you choose Add to chat.</p>
+      <div class="source-connect-grid">
+        <div class="source-connect"><div><strong>Google Drive + Gmail</strong><small id="googleSourceStatus">Not connected</small></div><button id="connectGoogle" class="secondary" type="button">Connect</button><a id="googleSignInLink" class="source-link hidden" target="_blank" rel="noopener noreferrer">Continue sign-in</a><button id="disconnectGoogle" class="text-button hidden" type="button">Disconnect</button></div>
+        <div class="source-connect"><div><strong>Personal OneDrive</strong><small id="onedriveSourceStatus">Not connected</small></div><button id="connectOneDrive" class="secondary" type="button">Connect</button><button id="disconnectOneDrive" class="text-button hidden" type="button">Disconnect</button></div>
+      </div>
+      <div id="oneDriveDevice" class="source-device hidden"><span>Microsoft sign-in code</span><strong id="oneDriveUserCode"></strong><a id="openOneDriveSignIn" class="source-link" target="_blank" rel="noopener noreferrer" href="https://microsoft.com/devicelogin">Open sign-in page</a></div>
+      <div class="source-search">
+        <select id="sourceType" aria-label="Cloud source"><option value="google_drive">Google Drive</option><option value="gmail">Gmail</option><option value="onedrive">OneDrive</option></select>
+        <input id="sourceQuery" type="search" placeholder="Search files or Gmail syntax (e.g. subject:invoice)" aria-label="Search cloud source">
+        <button id="searchSources" class="primary" type="button">Search</button>
+      </div>
+      <div id="sourceResults" class="source-results" aria-live="polite"></div>
+    </details>
 
     <section class="quick-actions" aria-label="Quick actions">
       <button class="action" data-prompt="Summarize the selected spreadsheet data. Highlight key totals, patterns, and any caveats."><span>▤</span>Summarize</button>
@@ -69,9 +96,10 @@
       <div class="insert-row"><button id="newChat" class="text-button" type="button">New chat</button><button id="insertAnswer" class="text-button" disabled>↳ Insert last answer into selection</button><span id="lastAnswerState"></span></div>
     <form id="composer" class="composer">
       <textarea id="prompt" rows="2" placeholder="Ask, or tell me what to change..." aria-label="Message"></textarea>
-      <div class="composer-footer"><div class="provider-pill"><span id="statusDot" class="status-dot" title="Relay status"></span><select id="workMode" aria-label="Mode"><option value="chat">Chat</option><option value="plan">Plan</option><option value="agent" selected>Agent</option></select><select id="activeProvider" aria-label="Active provider"><option value="auto">Auto</option><option value="qwen" selected>Qwen</option><option value="grok">Grok</option></select></div><label class="context-toggle" title="Skip deep thinking for a quicker reply"><input type="checkbox" id="fastMode"> Fast</label><label class="context-toggle" title="In Agent mode, write safe changes immediately. Deletes, clears, renames, and network formulas still wait for a click."><input type="checkbox" id="directRevise" checked> Direct</label><button id="send" class="send-button" type="submit" aria-label="Send message">↑</button></div>
+      <input id="attachmentPicker" class="hidden" type="file" multiple accept=".html,.htm,.txt,.md,.csv,.tsv,.json,.xml,text/html,text/plain,text/csv,application/json,application/xml">
+      <div class="composer-footer"><div class="provider-pill"><span id="statusDot" class="status-dot" title="Relay status"></span><select id="workMode" aria-label="Mode"><option value="chat">Chat</option><option value="plan">Plan</option><option value="agent" selected>Agent</option></select><select id="activeProvider" aria-label="Active provider"><option value="auto">Auto</option><option value="qwen" selected>Qwen</option><option value="grok">Grok</option></select></div><button id="attachFiles" class="secondary attach-button" type="button" aria-label="Attach files" title="Attach HTML reports or text files">📎 Attach</button><label class="context-toggle" title="Skip deep thinking for a quicker reply"><input type="checkbox" id="fastMode"> Fast</label><label class="context-toggle" title="In Agent mode, write safe changes immediately. Deletes, clears, renames, and network formulas still wait for a click."><input type="checkbox" id="directRevise" checked> Direct</label><button id="send" class="send-button" type="submit" aria-label="Send message">↑</button></div>
     </form>
-    <div class="footnote">Chat never writes. Plan waits for Approve. Agent writes safe changes when Direct is on. Deletes, clears, renames, and network formulas wait for a click.</div>
+    <div class="footnote">Selected HTML/text files and reviewed cloud source text are sent with your next question. Cloud access is read-only. HTML scripts and styling are not executed or sent; chart images are not interpreted. Chat never writes. Plan waits for Approve. Agent writes safe changes when Direct is on. Deletes, clears, renames, and network formulas wait for a click.</div>
     <div id="toast" role="status" class="toast hidden"></div>
   </main>
 </body>

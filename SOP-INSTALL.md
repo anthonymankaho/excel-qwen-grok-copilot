@@ -71,6 +71,28 @@ Then in Excel: **Home → Add-ins → Qwen + Grok for Excel and Word**.
 
 Pair the key with the right URL — see `SOP-USER-GUIDE.md` §7. A `sk-sp-…` Token Plan key uses the Token Plan URL, which is already the default.
 
+### Optional cloud sources（選用雲端來源）
+
+Cloud source search is desktop/local-relay only. Each colleague must sign in to their own accounts; do not add personal email addresses to the source code or shared settings. The owner can distribute the same OAuth app configuration, but user access and tokens remain separate per PC.
+
+1. **Google:** enable Drive MCP and Gmail MCP in the Google Cloud project. Use an OAuth client marked **Use this client for an AI-powered agent**, with `http://localhost:3000/api/connectors/google/callback` registered as its redirect URI and only the scopes `https://www.googleapis.com/auth/drive.readonly` and `https://www.googleapis.com/auth/gmail.readonly`. All users need Workspace Developer Preview access; add colleagues as test users if the OAuth consent app is still in testing.
+2. **Microsoft:** create an app registration that supports personal Microsoft accounts and public-client/device-code flow. Add delegated `Files.Read`; no client secret is used for OneDrive.
+3. In the add-in **Settings**, enter the Google OAuth client ID and secret and the Microsoft application client ID, then press **Save source settings**. The Google secret is sent from the pane to the local relay and used by the relay for Google's OAuth token exchange; it is not sent to Qwen/Grok or Cloudflare. **Remember on this PC** is optional and stores the app setup in this Office user's browser profile; leave it unticked for memory-only setup. Never commit a client secret.
+4. Open **Cloud sources → Connect** and follow each sign-in. Search results are read-only. A selected result reaches Qwen/Grok only after **Review and add to chat** and sending a question.
+
+Google OAuth values must be delivered to colleagues through an approved private channel, or each colleague can create their own Google OAuth client. No colleague email address is required by the add-in. These connectors are unavailable in the hosted Excel-on-the-web pane. See the full details in `README.md` and `SOP-USER-GUIDE.md`.
+
+#### 選用雲端來源
+
+雲端搜尋只支援桌面版／本機 Relay。每位同事須登入自己的帳戶；不可把個人電郵地址寫入程式碼或共用設定。管理者可分發同一 OAuth 應用程式設定，但每台電腦的使用者授權及權杖均獨立。
+
+1. **Google：** 在 Google Cloud 專案啟用 Drive MCP 和 Gmail MCP。OAuth 用戶端須勾選 **Use this client for an AI-powered agent**，登記重新導向 URI `http://localhost:3000/api/connectors/google/callback`，並只加入 `https://www.googleapis.com/auth/drive.readonly` 和 `https://www.googleapis.com/auth/gmail.readonly`。所有使用者須有 Workspace Developer Preview 資格；若 OAuth 應用程式仍在測試模式，須加入同事作測試使用者。
+2. **Microsoft：** 建立支援個人 Microsoft 帳戶及 public-client/device-code 流程的應用程式註冊，加入委派的 `Files.Read`；OneDrive 不使用 client secret。
+3. 在增益集 **Settings** 輸入 Google OAuth 用戶端 ID 和密碼，以及 Microsoft 應用程式 ID，然後按 **Save source settings**。Google 密碼會由窗格傳至本機 Relay，再由 Relay 用於 Google OAuth 權杖交換；不會傳給 Qwen/Grok 或 Cloudflare。**Remember on this PC** 是選用項目，會把應用程式設定存於此 Office 使用者的瀏覽器設定檔；如要只保留在記憶體，請不要勾選。不可提交 client secret 至 Git。
+4. 開啟 **Cloud sources → Connect** 並完成登入。搜尋結果只讀；只有按 **Review and add to chat** 並傳送問題後，所選結果才會傳給 Qwen/Grok。
+
+Google OAuth 設定須透過核准的私人渠道提供給同事；或由每位同事建立自己的 Google OAuth 用戶端。增益集不需要同事的電郵地址。Excel 網頁版不支援這些連接器。詳情見 `README.md` 和 `SOP-USER-GUIDE.md`。
+
 ---
 
 ## 4. Double-click alternative 雙擊替代方案
@@ -109,7 +131,7 @@ npm run check
 npm test
 ```
 
-Both must pass and neither needs an API key. `check` syntax-checks the five JavaScript files; `test` runs the offline suite covering the pane, the relay, Agent behaviour, Undo, finance checks and the download zip.
+Both must pass and neither needs an API key. `check` syntax-checks the six JavaScript files; `test` runs the offline suite covering the pane, the relay, Agent behaviour, Undo, finance checks and the download zip.
 
 Then confirm the relay is alive:
 
