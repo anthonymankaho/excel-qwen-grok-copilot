@@ -85,20 +85,14 @@ async function refreshCloudSources() {
   if (hostedRelay()) return;
   try {
     const status = await api('connectors/status');
-    const google = status.google || {};
     const onedrive = status.onedrive || {};
-    setSourceStatus('googleSourceStatus', google.connected ? 'Connected · this PC' : google.connecting ? 'Finish sign-in in your browser' : google.configured ? 'Not connected · sign in with your account' : 'Not set up by app owner', google.connected);
     setSourceStatus('onedriveSourceStatus', onedrive.connected ? 'Connected · this PC' : onedrive.connecting ? 'Finish sign-in in your browser' : onedrive.error ? onedrive.error : onedrive.configured ? 'Not connected · sign in with your account' : 'Not set up by app owner', onedrive.connected);
-    $('connectGoogle').disabled = !google.configured || google.connected;
-    $('connectGoogle').textContent = google.connected ? 'Connected' : google.connecting ? 'Signing in…' : 'Connect';
-    $('disconnectGoogle').classList.toggle('hidden', !google.connected);
     $('connectOneDrive').disabled = !onedrive.configured || onedrive.connected || onedrive.connecting;
     $('connectOneDrive').textContent = onedrive.connected ? 'Connected' : onedrive.connecting ? 'Signing in…' : 'Connect';
     $('disconnectOneDrive').classList.toggle('hidden', !onedrive.connected);
-    if (google.connecting || onedrive.connecting) startSourcePolling();
+    if (onedrive.connecting) startSourcePolling();
     else stopSourcePolling();
   } catch (error) {
-    setSourceStatus('googleSourceStatus', error.message || 'Local relay unavailable');
     setSourceStatus('onedriveSourceStatus', error.message || 'Local relay unavailable');
   }
 }
@@ -128,9 +122,8 @@ function renderCloudResults(items) {
     add.addEventListener('click', async () => {
       add.disabled = true; add.textContent = 'Reading…';
       try {
-        const source = $('sourceType').value;
-        const result = await api('connectors/read', { source, item: { id: item.id, name: item.name } });
-        addSourceAttachment(result.name || item.name, result.kind || item.kind || source, result.text || '');
+        const result = await api('connectors/read', { source: 'onedrive', item: { id: item.id, name: item.name } });
+        addSourceAttachment(result.name || item.name, result.kind || item.kind || 'OneDrive', result.text || '');
         add.textContent = 'Added';
       } catch (error) { add.disabled = false; add.textContent = 'Review and add to chat'; toast(error.message); }
     });
@@ -139,14 +132,13 @@ function renderCloudResults(items) {
 }
 
 async function searchCloudSource() {
-  const source = $('sourceType').value;
   const query = $('sourceQuery').value.trim();
   if (!query) { toast('Enter a search query first.'); return; }
   $('searchSources').disabled = true;
   $('searchSources').textContent = 'Searching…';
   $('sourceResults').replaceChildren();
   try {
-    const result = await api('connectors/search', { source, query });
+    const result = await api('connectors/search', { source: 'onedrive', query });
     renderCloudResults(Array.isArray(result.items) ? result.items : []);
   } catch (error) {
     const message = document.createElement('p'); message.className = 'hint'; message.textContent = error.message;
@@ -2406,15 +2398,6 @@ function toggleProviderFields() {
   refreshSettings();
 }
 
-async function connectGoogleSources() {
-  try {
-    await api('connectors/google/authorize', {});
-    toast('Complete Google sign-in in the browser window.');
-    startSourcePolling();
-    await refreshCloudSources();
-  } catch (error) { toast(error.message); }
-}
-
 async function connectOneDrive() {
   try {
     await api('connectors/onedrive/authorize', {});
@@ -2429,7 +2412,7 @@ async function disconnectSource(source) {
     await api('connectors/disconnect', { source });
     $('sourceResults').replaceChildren();
     await refreshCloudSources();
-    toast(`${source === 'google' ? 'Google' : 'OneDrive'} disconnected from this relay.`);
+    toast('OneDrive disconnected from this relay.');
   } catch (error) { toast(error.message); }
 }
 
@@ -2495,15 +2478,10 @@ $('clearKey').addEventListener('click', async () => {
   try { await api('clear-key', { provider }); rememberKey(provider, ''); keysReady = null; await refreshSettings(); toast('Key cleared.'); }
   catch (error) { toast(error.message); }
 });
-$('connectGoogle').addEventListener('click', connectGoogleSources);
 $('connectOneDrive').addEventListener('click', connectOneDrive);
-$('disconnectGoogle').addEventListener('click', () => disconnectSource('google'));
 $('disconnectOneDrive').addEventListener('click', () => disconnectSource('onedrive'));
 $('searchSources').addEventListener('click', searchCloudSource);
 $('sourceQuery').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); searchCloudSource(); } });
-$('sourceType').addEventListener('change', () => {
-  $('sourceQuery').placeholder = $('sourceType').value === 'gmail' ? 'Gmail search syntax (e.g. subject:invoice newer_than:30d)' : 'Search files or words in the source';
-});
 $('newChat').addEventListener('click', newChat);
 $('attachFiles').addEventListener('click', () => $('attachmentPicker').click());
 $('attachmentPicker').addEventListener('change', async event => {

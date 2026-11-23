@@ -61,15 +61,13 @@
     </section>
 
     <details id="cloudSources" class="card cloud-sources">
-      <summary><strong>Cloud sources</strong><span>OneDrive · Google Drive · Gmail</span></summary>
-      <p class="hint">Read-only search and preview. Press Connect to sign in in your browser; each person uses their own account. The app owner sets shared IDs once in cloud-oauth.json. A result is added to your next question only after you choose Add to chat.</p>
+      <summary><strong>Cloud sources</strong><span>OneDrive</span></summary>
+      <p class="hint">Read-only OneDrive search and preview. Press Connect to sign in with your personal Microsoft account in your browser. Each person uses their own account. A result is added to your next question only after you choose Review and add to chat.</p>
       <div class="source-connect-grid">
-        <div class="source-connect"><div><strong>Google Drive + Gmail</strong><small id="googleSourceStatus">Not connected</small></div><button id="connectGoogle" class="secondary" type="button">Connect</button><button id="disconnectGoogle" class="text-button hidden" type="button">Disconnect</button></div>
         <div class="source-connect"><div><strong>Personal OneDrive</strong><small id="onedriveSourceStatus">Not connected</small></div><button id="connectOneDrive" class="secondary" type="button">Connect</button><button id="disconnectOneDrive" class="text-button hidden" type="button">Disconnect</button></div>
       </div>
       <div class="source-search">
-        <select id="sourceType" aria-label="Cloud source"><option value="google_drive">Google Drive</option><option value="gmail">Gmail</option><option value="onedrive">OneDrive</option></select>
-        <input id="sourceQuery" type="search" placeholder="Search files or Gmail syntax (e.g. subject:invoice)" aria-label="Search cloud source">
+        <input id="sourceQuery" type="search" placeholder="Search OneDrive files" aria-label="Search OneDrive files">
         <button id="searchSources" class="primary" type="button">Search</button>
       </div>
       <div id="sourceResults" class="source-results" aria-live="polite"></div>

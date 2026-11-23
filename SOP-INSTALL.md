@@ -73,23 +73,21 @@ Pair the key with the right URL — see `SOP-USER-GUIDE.md` §7. A `sk-sp-…` T
 
 ### Optional cloud sources（選用雲端來源）
 
-Cloud source search is desktop/local-relay only. Each colleague signs in to their own accounts; no personal email address or user token is shared. The app owner configures the public OAuth app IDs once in `cloud-oauth.json` before packaging or sharing the add-in.
+OneDrive search is desktop/local-relay only. Each colleague signs in to their own personal Microsoft account; no personal email address or user token is shared. The app owner configures the public Microsoft OAuth app ID once in `cloud-oauth.json` before packaging or sharing the add-in.
 
-1. **Google:** enable Drive MCP and Gmail MCP in Google Cloud. Create a **Desktop app** OAuth client marked **Use this client for an AI-powered agent**. The add-in uses PKCE and a temporary loopback callback, so no fixed redirect URI or client secret is needed. Request only `https://www.googleapis.com/auth/drive.readonly` and `https://www.googleapis.com/auth/gmail.readonly`. Every user needs Workspace Developer Preview access; allow intended users in the OAuth consent app (for example, add test users during testing).
-2. **Microsoft:** create a public app registration that supports personal Microsoft accounts. Add the **Mobile and desktop applications** platform with `http://localhost` redirect support and delegated `Files.Read`. Sign-in uses the system browser and PKCE; no Microsoft client secret is used.
-3. Fill `googleClientId` and `microsoftClientId` once in the root `cloud-oauth.json`, then include the file in the shared package. Restart the local relay after changing it. These are public application IDs, not user credentials. Do not put account emails, access tokens, or client secrets in the file.
-4. Each colleague opens **Cloud sources → Connect** and signs in through the system browser. Search results are read-only. A selected result reaches Qwen/Grok only after **Review and add to chat** and sending a question.
+1. Create a Microsoft public app registration that supports personal Microsoft accounts. Add the **Mobile and desktop applications** platform with `http://localhost` redirect support and delegated `Files.Read`. Sign-in uses the system browser and PKCE; no Microsoft client secret is used.
+2. Fill `microsoftClientId` once in the root `cloud-oauth.json`, then include the file in the shared package. Restart the local relay after changing it. This is a public application ID, not a user credential. Do not put account emails, access tokens, or client secrets in the file.
+3. Each colleague opens **Cloud sources → Connect** and signs in through the system browser. Search results are read-only. A selected result reaches Qwen/Grok only after **Review and add to chat** and sending a question.
 
 Each person uses their own account and grants consent separately; the pane no longer asks colleagues to enter OAuth app settings. These connectors are unavailable in the hosted Excel-on-the-web pane. See `README.md` and `SOP-USER-GUIDE.md` for details.
 
 #### 選用雲端來源
 
-雲端搜尋只支援桌面版／本機 Relay。每位同事登入自己的帳戶；不會共用個人電郵地址或使用者權杖。管理者在分享或打包增益集前，只需在 `cloud-oauth.json` 設定一次公開 OAuth 應用程式 ID。
+OneDrive 搜尋只支援桌面版／本機 Relay。每位同事登入自己的個人 Microsoft 帳戶；不會共用個人電郵地址或使用者權杖。管理者在分享或打包增益集前，只需在 `cloud-oauth.json` 設定一次公開 Microsoft OAuth 應用程式 ID。
 
-1. **Google：** 在 Google Cloud 啟用 Drive MCP 和 Gmail MCP。建立已勾選 **Use this client for an AI-powered agent** 的 **Desktop app** OAuth 用戶端。增益集使用 PKCE 和暫時 loopback callback，不需要固定 redirect URI 或 client secret。只要求 `https://www.googleapis.com/auth/drive.readonly` 和 `https://www.googleapis.com/auth/gmail.readonly`。每位使用者須有 Workspace Developer Preview 資格；OAuth 同意頁亦須允許目標使用者（例如測試期間加入測試使用者）。
-2. **Microsoft：** 建立支援個人 Microsoft 帳戶的 public app registration，加入 **Mobile and desktop applications** 平台、`http://localhost` redirect 支援和委派 `Files.Read` 權限。登入使用系統瀏覽器和 PKCE；不使用 Microsoft client secret。
-3. 在根目錄 `cloud-oauth.json` 一次填入 `googleClientId` 和 `microsoftClientId`，並在分享套件時附上此檔案；更改後要重新啟動本機 Relay。這些是公開應用程式 ID，不是使用者憑證。不可在檔案放入帳戶電郵、存取權杖或 client secret。
-4. 每位同事開啟 **Cloud sources → Connect**，在系統瀏覽器登入。搜尋結果只讀；只有按 **Review and add to chat** 並傳送問題後，所選結果才會傳給 Qwen/Grok。
+1. **Microsoft：** 建立支援個人 Microsoft 帳戶的 public app registration，加入 **Mobile and desktop applications** 平台、`http://localhost` redirect 支援和委派 `Files.Read` 權限。登入使用系統瀏覽器和 PKCE；不使用 Microsoft client secret。
+2. 在根目錄 `cloud-oauth.json` 一次填入 `microsoftClientId`，並在分享套件時附上此檔案；更改後要重新啟動本機 Relay。這是公開應用程式 ID，不是使用者憑證。不可在檔案放入帳戶電郵、存取權杖或 client secret。
+3. 每位同事開啟 **Cloud sources → Connect**，在系統瀏覽器登入。搜尋結果只讀；只有按 **Review and add to chat** 並傳送問題後，所選結果才會傳給 Qwen/Grok。
 
 每位使用者各自登入及授權；窗格不再要求同事輸入 OAuth 應用程式設定。Excel 網頁版不支援這些連接器。詳情見 `README.md` 和 `SOP-USER-GUIDE.md`。
 

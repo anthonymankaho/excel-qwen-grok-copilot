@@ -45,31 +45,29 @@ The zip is a build artifact: rebuild it with `npm run package` after any code or
 
 ### Read-only cloud source review (desktop local relay only)
 
-The desktop pane can search and review the signed-in user's Google Drive, Gmail, and personal OneDrive. Search results stay in the pane until the user chooses **Review and add to chat**; that selected text is included with the next question. The connector tools are read-only: they do not edit Drive files, change OneDrive files, or send/modify Gmail.
+The desktop pane can search and review the signed-in user's personal OneDrive. Search results stay in the pane until the user chooses **Review and add to chat**; that selected text is included with the next question. The connector is read-only and does not change OneDrive files.
 
-Each colleague clicks **Connect**, signs in through the system browser, and approves access to their own account. Account email addresses and OAuth tokens are not shared between colleagues; tokens stay in that PC's local relay memory and are cleared when the relay stops. The app's public OAuth client IDs are set once by the owner in the root `cloud-oauth.json` file. That file contains no client secret or user email. The hosted Excel-on-the-web pane does not use these local connectors.
+Each colleague clicks **Connect**, signs in through the system browser, and approves access to their own personal Microsoft account. Account email addresses and OAuth tokens are not shared between colleagues; tokens stay in that PC's local relay memory and are cleared when the relay stops. The app's public Microsoft OAuth client ID is set once by the owner in the root `cloud-oauth.json` file. That file contains no client secret or user email. The hosted Excel-on-the-web pane does not use this local connector.
 
 Before colleagues connect:
 
-1. In Google Cloud, enable Drive MCP and Gmail MCP. Create a **Desktop app** OAuth client and mark it **Use this client for an AI-powered agent**. The local sign-in uses PKCE and a temporary loopback callback; no fixed redirect URI or client secret is needed. Request only `https://www.googleapis.com/auth/drive.readonly` and `https://www.googleapis.com/auth/gmail.readonly`. Each Google user must be eligible for the Workspace Developer Preview, and the OAuth app must allow the intended users (for example, add them as test users while the app is in testing).
-2. Register a Microsoft public client that supports personal Microsoft accounts. Add the **Mobile and desktop applications** platform with `http://localhost` redirect support and delegated `Files.Read` permission. The sign-in uses the system browser and PKCE; no Microsoft client secret is used.
-3. The app owner fills `googleClientId` and `microsoftClientId` once in the root `cloud-oauth.json` before packaging or sharing the add-in. Restart the local relay after changing this file. These are public app IDs, not user credentials. Colleagues then open **Cloud sources → Connect** and approve their own account in the browser; no per-user Settings entry is needed.
+1. Register a Microsoft public client that supports personal Microsoft accounts. Add the **Mobile and desktop applications** platform with `http://localhost` redirect support and delegated `Files.Read` permission. The sign-in uses the system browser and PKCE; no Microsoft client secret is used.
+2. The app owner fills `microsoftClientId` once in the root `cloud-oauth.json` before packaging or sharing the add-in. Restart the local relay after changing this file. This is a public app ID, not a user credential. Colleagues then open **Cloud sources → Connect** and approve their own account in the browser; no per-user Settings entry is needed.
 
-OneDrive text review supports XLSX/XLSM, DOCX, HTML, TXT, MD, CSV, TSV, JSON, and XML. Google Drive MCP supports supported documents, spreadsheets, presentations, and PDF. See Google's [Workspace MCP setup](https://developers.google.com/workspace/guides/configure-mcp-servers), [Drive tool reference](https://developers.google.com/workspace/drive/api/reference/mcp/tools_list/read_file_content), and [Gmail tool reference](https://developers.google.com/workspace/gmail/api/reference/mcp/tools_list/get_thread); OneDrive uses Microsoft Graph's [personal-account file permissions](https://learn.microsoft.com/en-us/graph/permissions-reference).
+OneDrive text review supports XLSX/XLSM, DOCX, HTML, TXT, MD, CSV, TSV, JSON, and XML. OneDrive uses Microsoft Graph's [personal-account file permissions](https://learn.microsoft.com/en-us/graph/permissions-reference).
 
 #### 雲端來源唯讀檢視（只支援桌面本機 Relay）
 
-桌面版可搜尋及檢視登入者自己的 Google Drive、Gmail 和個人 OneDrive。搜尋結果只會留在增益集窗格；使用者按下 **Review and add to chat** 後，所選文字才會加入下一個問題。連接工具只有讀取權限，不會修改雲端檔案或寄送／更改 Gmail。
+桌面版可搜尋及檢視登入者自己的個人 OneDrive。搜尋結果只會留在增益集窗格；使用者按下 **Review and add to chat** 後，所選文字才會加入下一個問題。連接器只有讀取權限，不會修改 OneDrive 檔案。
 
-每位同事按 **Connect**，在系統瀏覽器登入並授權自己的帳戶。帳戶電郵地址及 OAuth 權杖不會在同事之間共用；權杖只保留在該電腦本機 Relay 記憶體，Relay 停止後即清除。應用程式的公開 OAuth 用戶端 ID 由管理者一次性填入根目錄 `cloud-oauth.json`；檔案不含 client secret 或使用者電郵。Excel 網頁版不使用這些本機連接器。
+每位同事按 **Connect**，在系統瀏覽器登入並授權自己的個人 Microsoft 帳戶。帳戶電郵地址及 OAuth 權杖不會在同事之間共用；權杖只保留在該電腦本機 Relay 記憶體，Relay 停止後即清除。應用程式的公開 Microsoft OAuth 用戶端 ID 由管理者一次性填入根目錄 `cloud-oauth.json`；檔案不含 client secret 或使用者電郵。Excel 網頁版不使用這個本機連接器。
 
 同事連接前，管理者需：
 
-1. 在 Google Cloud 啟用 Drive MCP 和 Gmail MCP。建立 **Desktop app** OAuth 用戶端並勾選 **Use this client for an AI-powered agent**。本機登入使用 PKCE 和暫時 loopback callback；不需要固定 redirect URI 或 client secret。只要求 `https://www.googleapis.com/auth/drive.readonly` 和 `https://www.googleapis.com/auth/gmail.readonly`。每位 Google 使用者均須符合 Workspace Developer Preview 資格；OAuth 應用程式亦須允許目標使用者（例如測試期間加入測試使用者）。
-2. 註冊支援個人 Microsoft 帳戶的 public client，加入 **Mobile and desktop applications** 平台、`http://localhost` redirect 支援及委派 `Files.Read` 權限。登入透過系統瀏覽器及 PKCE 完成；不使用 Microsoft client secret。
-3. 管理者在分享或打包增益集前，只需把 `googleClientId` 和 `microsoftClientId` 填入根目錄 `cloud-oauth.json` 一次；更改後要重新啟動本機 Relay。這些是公開應用程式 ID，不是使用者憑證。同事之後按 **Cloud sources → Connect**，在瀏覽器登入並授權自己的帳戶；無須逐人設定 Settings。
+1. 註冊支援個人 Microsoft 帳戶的 public client，加入 **Mobile and desktop applications** 平台、`http://localhost` redirect 支援及委派 `Files.Read` 權限。登入透過系統瀏覽器及 PKCE 完成；不使用 Microsoft client secret。
+2. 管理者在分享或打包增益集前，只需把 `microsoftClientId` 填入根目錄 `cloud-oauth.json` 一次；更改後要重新啟動本機 Relay。這是公開應用程式 ID，不是使用者憑證。同事之後按 **Cloud sources → Connect**，在瀏覽器登入並授權自己的帳戶；無須逐人設定 Settings。
 
-OneDrive 文字檢視支援 XLSX/XLSM、DOCX、HTML、TXT、MD、CSV、TSV、JSON 和 XML。Google Drive MCP 可檢視其支援的文件、試算表、簡報和 PDF。設定及權限細節請參閱上方 Google 和 Microsoft 官方文件。
+OneDrive 文字檢視支援 XLSX/XLSM、DOCX、HTML、TXT、MD、CSV、TSV、JSON 和 XML。OneDrive 使用 Microsoft Graph 的[個人帳戶檔案權限](https://learn.microsoft.com/en-us/graph/permissions-reference)。
 
 ### Documentation 文件
 

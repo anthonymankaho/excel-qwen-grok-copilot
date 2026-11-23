@@ -1,19 +1,11 @@
-import { randomBytes, createHash } from 'node:crypto';
-import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { Client, InMemoryTransport, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { McpServer } from '@modelcontextprotocol/server';
 import { PublicClientApplication } from '@azure/msal-node';
 import ExcelJS from 'exceljs';
 import mammoth from 'mammoth';
 import { z } from 'zod';
 
-const GOOGLE_DRIVE_URL = 'https://drivemcp.googleapis.com/mcp/v1';
-const GOOGLE_GMAIL_URL = 'https://gmailmcp.googleapis.com/mcp/v1';
-const GOOGLE_SCOPES = [
-  'https://www.googleapis.com/auth/drive.readonly',
-  'https://www.googleapis.com/auth/gmail.readonly'
-];
 const GRAPH_SCOPES = ['Files.Read'];
 const DRIVE_DOWNLOAD_HOSTS = ['.1drv.com', '.1drv.ms', '.sharepoint.com'];
 const MAX_SOURCE_BYTES = 12 * 1024 * 1024;
@@ -82,7 +74,7 @@ function safeError(error, fallback) {
 
 function openSystemBrowser(rawUrl) {
   const url = new URL(rawUrl);
-  if (url.protocol !== 'https:' || !['accounts.google.com', 'login.microsoftonline.com'].includes(url.hostname)) {
+  if (url.protocol !== 'https:' || url.hostname !== 'login.microsoftonline.com') {
     throw new Error('The sign-in provider returned an unsupported browser URL.');
   }
   const command = process.platform === 'win32' ? 'rundll32.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
@@ -94,17 +86,13 @@ function openSystemBrowser(rawUrl) {
   });
 }
 
-const GOOGLE_CLIENT_ID_RE = /^[A-Za-z0-9-]+\.apps\.googleusercontent\.com$/;
 const MICROSOFT_CLIENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class LocalSourceMcp {
   constructor(config = {}) {
     this.config = {
-      googleClientId: typeof config.googleClientId === 'string' ? config.googleClientId.trim().slice(0, 500) : '',
       microsoftClientId: typeof config.microsoftClientId === 'string' ? config.microsoftClientId.trim().slice(0, 100) : ''
     };
-    this.googleToken = null;
-    this.googleFlow = null;
     this.graphApp = null;
     this.graphClientId = '';
     this.graphAccount = null;
@@ -116,22 +104,6 @@ export class LocalSourceMcp {
     this.client = new Client({ name: 'excel-qwen-grok-local-source-client', version: '1.0.0' });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
-    this.server.registerTool('google_drive_search', {
-      description: 'Search the signed-in Google Drive account for matching files. Read only.',
-      inputSchema: { query: z.string().min(1).max(300) }
-    }, async ({ query }) => textResult(await this.searchGoogleDrive(query)));
-    this.server.registerTool('google_drive_read', {
-      description: 'Read text from one selected Google Drive file. Read only.',
-      inputSchema: { fileId: z.string().min(1).max(500), name: z.string().min(1).max(500) }
-    }, async ({ fileId, name }) => textResult(await this.readGoogleDrive(fileId, name)));
-    this.server.registerTool('gmail_search', {
-      description: 'Search the signed-in Gmail account with Gmail search syntax. Read only.',
-      inputSchema: { query: z.string().min(1).max(300) }
-    }, async ({ query }) => textResult(await this.searchGmail(query)));
-    this.server.registerTool('gmail_read_thread', {
-      description: 'Read the full text of one selected Gmail thread. Read only.',
-      inputSchema: { threadId: z.string().min(1).max(500) }
-    }, async ({ threadId }) => textResult(await this.readGmailThread(threadId)));
     this.server.registerTool('onedrive_search', {
       description: 'Search the signed-in personal OneDrive account. Read only.',
       inputSchema: { query: z.string().min(1).max(300) }
@@ -148,14 +120,8 @@ export class LocalSourceMcp {
   }
 
   status() {
-    if (this.googleFlow && Date.now() - this.googleFlow.createdAt > 10 * 60_000) this.clearGoogleFlow();
     const waiting = this.graphFlow && ['starting', 'waiting'].includes(this.graphFlow.status);
     return {
-      google: {
-        configured: GOOGLE_CLIENT_ID_RE.test(this.config.googleClientId),
-        connected: Boolean(this.googleToken?.refreshToken || (this.googleToken?.accessToken && this.googleToken.expiresAt > Date.now())),
-        connecting: Boolean(this.googleFlow)
-      },
       onedrive: {
         configured: MICROSOFT_CLIENT_ID_RE.test(this.config.microsoftClientId),
         connected: Boolean(this.graphAccount),
@@ -168,217 +134,6 @@ export class LocalSourceMcp {
   async invoke(name, args) {
     await this.ready;
     return parseToolResult(await this.client.callTool({ name, arguments: args }));
-  }
-
-  clearGoogleFlow() {
-    const flow = this.googleFlow;
-    this.googleFlow = null;
-    if (flow?.timer) clearTimeout(flow.timer);
-    if (flow?.callbackServer?.listening) flow.callbackServer.close();
-  }
-
-  async startGoogleOAuth() {
-    if (!GOOGLE_CLIENT_ID_RE.test(this.config.googleClientId)) throw new Error('Google cloud sign-in is not configured by the app owner yet.');
-    if (this.googleFlow) throw new Error('Google sign-in is already open. Finish it in your browser or wait for it to expire.');
-    const state = randomBytes(32).toString('base64url');
-    const verifier = randomBytes(48).toString('base64url');
-    const challenge = createHash('sha256').update(verifier).digest('base64url');
-    const callbackServer = http.createServer(async (req, res) => {
-      const callbackUrl = new URL(req.url || '/', 'http://127.0.0.1');
-      if (req.method !== 'GET' || callbackUrl.pathname !== '/') {
-        res.writeHead(callbackUrl.pathname === '/favicon.ico' ? 204 : 404, { 'Cache-Control': 'no-store' });
-        return res.end();
-      }
-      const result = await this.completeGoogleOAuth(callbackUrl);
-      res.writeHead(result.status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
-      res.end(result.html);
-    });
-    await new Promise((resolve, reject) => {
-      callbackServer.once('error', reject);
-      callbackServer.listen(0, '127.0.0.1', resolve);
-    });
-    const port = callbackServer.address().port;
-    const redirectUri = `http://127.0.0.1:${port}`;
-    const authorizationUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-    authorizationUrl.searchParams.set('client_id', this.config.googleClientId);
-    authorizationUrl.searchParams.set('redirect_uri', redirectUri);
-    authorizationUrl.searchParams.set('response_type', 'code');
-    authorizationUrl.searchParams.set('scope', GOOGLE_SCOPES.join(' '));
-    authorizationUrl.searchParams.set('access_type', 'offline');
-    authorizationUrl.searchParams.set('prompt', 'select_account consent');
-    authorizationUrl.searchParams.set('state', state);
-    authorizationUrl.searchParams.set('code_challenge', challenge);
-    authorizationUrl.searchParams.set('code_challenge_method', 'S256');
-    const flow = { state, verifier, redirectUri, createdAt: Date.now(), callbackServer };
-    this.googleFlow = flow;
-    flow.timer = setTimeout(() => { if (this.googleFlow === flow) this.clearGoogleFlow(); }, 10 * 60_000);
-    flow.timer.unref();
-    try {
-      await openSystemBrowser(authorizationUrl.href);
-      return { connecting: true };
-    } catch (error) {
-      this.clearGoogleFlow();
-      throw new Error(safeError(error, 'Could not open the system browser.'));
-    }
-  }
-
-  async completeGoogleOAuth(url) {
-    const flow = this.googleFlow;
-    if (!flow || Date.now() - flow.createdAt > 10 * 60_000) {
-      this.clearGoogleFlow();
-      return { status: 400, html: this.callbackPage(false, 'This sign-in request expired. Close this page and start again in the add-in.') };
-    }
-    if (url.searchParams.get('state') !== flow.state) {
-      this.clearGoogleFlow();
-      return { status: 400, html: this.callbackPage(false, 'The sign-in response could not be verified. Start again in the add-in.') };
-    }
-    if (url.searchParams.has('error')) {
-      this.clearGoogleFlow();
-      return { status: 400, html: this.callbackPage(false, 'Google sign-in was cancelled or declined.') };
-    }
-    const code = url.searchParams.get('code');
-    if (!code) {
-      this.clearGoogleFlow();
-      return { status: 400, html: this.callbackPage(false, 'Google did not return an authorization code.') };
-    }
-    try {
-      const response = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          client_id: this.config.googleClientId,
-          code,
-          code_verifier: flow.verifier,
-          grant_type: 'authorization_code',
-          redirect_uri: flow.redirectUri
-        }),
-        redirect: 'error',
-        signal: AbortSignal.timeout(20_000)
-      });
-      const tokenData = await response.json().catch(() => ({}));
-      if (!response.ok || !tokenData.access_token) {
-        const errorCode = typeof tokenData.error === 'string' && /^[a-z0-9_]{1,80}$/i.test(tokenData.error)
-          ? tokenData.error
-          : 'unknown_error';
-        throw new Error(`Google token exchange failed: ${errorCode} (HTTP ${response.status}).`);
-      }
-      this.googleToken = {
-        accessToken: tokenData.access_token,
-        expiresAt: Date.now() + Math.max(60, Number(tokenData.expires_in) || 3600) * 1000,
-        refreshToken: tokenData.refresh_token || this.googleToken?.refreshToken || ''
-      };
-      this.clearGoogleFlow();
-      return { status: 200, html: this.callbackPage(true, 'Google Drive and Gmail are connected for this Windows user. You can close this page and return to the add-in.') };
-    } catch (error) {
-      this.clearGoogleFlow();
-      return { status: 400, html: this.callbackPage(false, safeError(error, 'Google sign-in failed. Check the OAuth setup and try again.')) };
-    }
-  }
-
-  callbackPage(ok, message) {
-    const safe = String(message).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
-    return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Source sign-in</title><body style="font:16px Segoe UI,Arial,sans-serif;max-width:620px;margin:15vh auto;padding:24px;color:#242424"><h2>${ok ? 'Connected' : 'Sign-in not completed'}</h2><p>${safe}</p></body></html>`;
-  }
-
-  async googleAccessToken() {
-    if (!this.googleToken) throw new Error('Connect Google Drive and Gmail first.');
-    if (this.googleToken.accessToken && this.googleToken.expiresAt > Date.now() + 60_000) return this.googleToken.accessToken;
-    if (!this.googleToken.refreshToken) throw new Error('Google sign-in expired. Reconnect Google Drive and Gmail.');
-    const response = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: this.config.googleClientId,
-        refresh_token: this.googleToken.refreshToken,
-        grant_type: 'refresh_token'
-      }),
-      redirect: 'error',
-      signal: AbortSignal.timeout(20_000)
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data.access_token) {
-      this.googleToken = null;
-      throw new Error('Google sign-in expired. Reconnect Google Drive and Gmail.');
-    }
-    this.googleToken = {
-      accessToken: data.access_token,
-      expiresAt: Date.now() + Math.max(60, Number(data.expires_in) || 3600) * 1000,
-      refreshToken: data.refresh_token || this.googleToken.refreshToken
-    };
-    return this.googleToken.accessToken;
-  }
-
-  async remoteGoogleTool(serviceUrl, name, args) {
-    const token = await this.googleAccessToken();
-    const transport = new StreamableHTTPClientTransport(new URL(serviceUrl), {
-      requestInit: { headers: { Authorization: `Bearer ${token}` } },
-      redirectPolicy: 'same-origin'
-    });
-    const client = new Client({ name: 'excel-qwen-grok-google-mcp', version: '1.0.0' });
-    try {
-      await client.connect(transport);
-      const result = await client.callTool({ name, arguments: args });
-      return parseToolResult(result);
-    } finally {
-      await client.close().catch(() => {});
-    }
-  }
-
-  async searchGoogleDrive(query) {
-    const escaped = query.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    const response = await this.remoteGoogleTool(GOOGLE_DRIVE_URL, 'search_files', {
-      query: `fullText contains '${escaped}'`, pageSize: 10, excludeContentSnippets: false
-    });
-    const files = Array.isArray(response.files) ? response.files : [];
-    return {
-      source: 'google_drive',
-      items: files.map(file => ({
-        id: String(file.id || ''), name: String(file.title || 'Untitled').slice(0, 500),
-        detail: [file.mimeType, file.modifiedTime].filter(Boolean).join(' · '),
-        snippet: String(file.contentSnippet || '').slice(0, 1200), url: String(file.viewUrl || ''),
-        mimeType: String(file.mimeType || ''), kind: 'Google Drive'
-      })).filter(file => file.id)
-    };
-  }
-
-  async readGoogleDrive(fileId, name = 'Google Drive file') {
-    const response = await this.remoteGoogleTool(GOOGLE_DRIVE_URL, 'read_file_content', { fileId, includeComments: false });
-    const text = String(response.fileContent || response.text || '').trim();
-    if (!text) throw new Error('Google Drive did not return readable text for this file.');
-    const clipped = truncateText(text);
-    return { name, kind: 'Google Drive', ...clipped };
-  }
-
-  async searchGmail(query) {
-    const response = await this.remoteGoogleTool(GOOGLE_GMAIL_URL, 'search_threads', { query, pageSize: 10 });
-    const threads = Array.isArray(response.threads) ? response.threads : [];
-    return {
-      source: 'gmail',
-      items: threads.map(thread => {
-        const message = thread.messages?.[thread.messages.length - 1] || thread.messages?.[0] || {};
-        return {
-          id: String(thread.id || ''), name: String(message.subject || 'Email thread').slice(0, 500),
-          detail: [message.sender, message.date].filter(Boolean).join(' · '),
-          snippet: String(message.snippet || '').slice(0, 1200), kind: 'Gmail thread'
-        };
-      }).filter(item => item.id)
-    };
-  }
-
-  async readGmailThread(threadId) {
-    const response = await this.remoteGoogleTool(GOOGLE_GMAIL_URL, 'get_thread', { threadId, messageFormat: 'FULL_CONTENT' });
-    const messages = Array.isArray(response.messages) ? response.messages : [];
-    const body = messages.map(message => {
-      const content = String(message.plaintextBody || htmlToText(message.htmlBody) || message.snippet || '').trim();
-      return [
-        message.subject ? `Subject: ${message.subject}` : '',
-        message.sender ? `From: ${message.sender}` : '',
-        message.date ? `Date: ${message.date}` : '',
-        content
-      ].filter(Boolean).join('\n');
-    }).filter(Boolean).join('\n\n---\n\n');
-    if (!body) throw new Error('Gmail did not return readable text for this thread.');
-    return { name: messages[0]?.subject || 'Gmail thread', kind: 'Gmail thread', ...truncateText(body) };
   }
 
   async startOneDriveInteractiveFlow() {
@@ -532,7 +287,7 @@ export class LocalSourceMcp {
       extracted = buffer.toString('utf8');
       if (ext === 'html' || ext === 'htm' || ext === 'xml') extracted = htmlToText(extracted);
     } else {
-      throw new Error('OneDrive review supports XLSX/XLSM, DOCX, HTML, TXT, MD, CSV, TSV, JSON and XML files. Use Google Drive MCP for PDF review.');
+      throw new Error('OneDrive review supports XLSX/XLSM, DOCX, HTML, TXT, MD, CSV, TSV, JSON and XML files.');
     }
     if (!String(extracted).trim()) throw new Error('OneDrive did not return readable text for this file.');
     return { name, kind: `OneDrive ${ext.toUpperCase()}`, ...truncateText(extracted) };
@@ -540,28 +295,17 @@ export class LocalSourceMcp {
 
   async search(source, query) {
     if (typeof query !== 'string' || !query.trim() || query.length > 300) throw new Error('Enter a search query of 1 to 300 characters.');
-    const names = { google_drive: 'google_drive_search', gmail: 'gmail_search', onedrive: 'onedrive_search' };
-    if (!names[source]) throw new Error('Choose Google Drive, Gmail or OneDrive.');
-    return this.invoke(names[source], { query: query.trim() });
+    if (source !== 'onedrive') throw new Error('Choose OneDrive.');
+    return this.invoke('onedrive_search', { query: query.trim() });
   }
 
   async read(source, input = {}) {
-    const names = {
-      google_drive: ['google_drive_read', { fileId: input.id, name: input.name || 'Google Drive file' }],
-      gmail: ['gmail_read_thread', { threadId: input.id }],
-      onedrive: ['onedrive_read', { fileId: input.id, name: input.name }]
-    };
-    if (!names[source] || typeof input.id !== 'string' || !input.id || input.id.length > 500) throw new Error('Choose a valid search result to read.');
-    if (source === 'onedrive' && (typeof input.name !== 'string' || !input.name || input.name.length > 500)) throw new Error('The OneDrive file name is invalid.');
-    return this.invoke(names[source][0], names[source][1]);
+    if (source !== 'onedrive' || typeof input.id !== 'string' || !input.id || input.id.length > 500) throw new Error('Choose a valid OneDrive search result to read.');
+    if (typeof input.name !== 'string' || !input.name || input.name.length > 500) throw new Error('The OneDrive file name is invalid.');
+    return this.invoke('onedrive_read', { fileId: input.id, name: input.name });
   }
 
   async disconnect(source) {
-    if (source === 'google') {
-      this.googleToken = null;
-      this.clearGoogleFlow();
-      return;
-    }
     if (source === 'onedrive') {
       const account = this.graphAccount;
       if (account && this.graphApp) await this.graphApp.getTokenCache().removeAccount(account).catch(() => {});
@@ -569,6 +313,6 @@ export class LocalSourceMcp {
       this.graphFlow = null;
       return;
     }
-    throw new Error('Choose Google or OneDrive.');
+    throw new Error('Choose OneDrive.');
   }
 }

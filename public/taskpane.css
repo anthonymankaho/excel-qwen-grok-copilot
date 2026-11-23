@@ -20,8 +20,8 @@
 .source-connect>div{display:flex;flex-direction:column;gap:3px;min-width:0}
 .source-connect strong{font-size:11px}
 .source-connect small{font-size:10px;color:#777d89;overflow-wrap:anywhere}
-.source-search{display:grid;grid-template-columns:94px minmax(0,1fr) auto;gap:6px;margin-top:10px}
-.source-search select,.source-search input{min-width:0;width:100%;border:1px solid #dfe1e6;border-radius:7px;padding:7px;font:11px inherit;font-family:inherit;background:white;color:#333}
+.source-search{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;margin-top:10px}
+.source-search input{min-width:0;width:100%;border:1px solid #dfe1e6;border-radius:7px;padding:7px;font:11px inherit;font-family:inherit;background:white;color:#333}
 .source-results{display:flex;flex-direction:column;gap:6px;margin-top:8px}
 .source-result{border:1px solid #e7e9ee;border-radius:8px;padding:8px;background:#fff}
 .source-result strong{display:block;font-size:11px;overflow-wrap:anywhere}

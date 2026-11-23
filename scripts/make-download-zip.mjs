@@ -41,7 +41,7 @@ FIRST USE
 OPTIONAL CLOUD SOURCES
    The app owner sets the public OAuth client IDs once in cloud-oauth.json
    before sharing the package. Each colleague then clicks Connect and signs
-   in to their own Google or Microsoft account. No account address or token
+   in to their own Microsoft account. No account address or token
    is built into the app.
 
 WORD

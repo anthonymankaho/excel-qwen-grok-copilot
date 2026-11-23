@@ -24,7 +24,6 @@ function cloudOAuthConfig() {
   try {
     const config = JSON.parse(fs.readFileSync(path.join(root, 'cloud-oauth.json'), 'utf8'));
     return {
-      googleClientId: typeof config.googleClientId === 'string' ? config.googleClientId : '',
       microsoftClientId: typeof config.microsoftClientId === 'string' ? config.microsoftClientId : ''
     };
   } catch { return {}; }
@@ -95,15 +94,6 @@ export function createRelay() {
     if (req.method === 'GET' && url.pathname === '/api/health') return send(res, 200, { ok: true, configured: { qwen: Boolean(secrets.qwen), grok: Boolean(secrets.grok) } });
 
     if (req.method === 'GET' && url.pathname === '/api/connectors/status') return send(res, 200, sources.status());
-
-    if (req.method === 'POST' && url.pathname === '/api/connectors/google/authorize') {
-      try {
-        await readBody(req);
-        return send(res, 200, await sources.startGoogleOAuth());
-      } catch (error) {
-        return send(res, 400, { error: error.message });
-      }
-    }
 
     if (req.method === 'POST' && url.pathname === '/api/connectors/onedrive/authorize') {
       try {
