@@ -21,7 +21,9 @@ Pick the mode **before** you send. The pane defaults to **Agent**.
 - **Direct on** — safe actions are written immediately; deletes, clears, renames, network formulas and irreversible changes still wait for your click.
 - **Direct off** — you approve the plan, then every action waits for **Apply edits**.
 
-The Agent loop stops at **10 rounds**, on **Stop**, when a check fails, or when it needs you. If it reaches the round cap while the model requests another step, the pane shows a **round-limit warning**; review the audit card and send a follow-up to continue.
+The composer shows the current **Agent round out of 10** and what Agent is doing. If more work is pending at round 10, review the audit card and choose **Continue Agent · 繼續** to give the same task another 10 rounds in the current chat. Review any pending edits or resolve failed checks and missing inputs before sending a follow-up. **Stop** prevents another step from starting. An Office edit already underway may finish and appear on its own card with **Undo last apply** when available.
+
+輸入區會顯示 **Agent 目前輪數（每批最多 10 輪）**及當前進度。第 10 輪後如仍有工作，先檢視審計卡，再按 **Continue Agent · 繼續**，即可在同一對話為原任務增加最多 10 輪。若有待審批修改、檢查失敗或資料缺漏，請先處理再發送後續指示。按 **Stop** 會阻止下一步開始。已開始的 Office 修改仍可能完成，並顯示在修改卡片上。可復原的修改會提供 **Undo last apply**。
 
 ---
 

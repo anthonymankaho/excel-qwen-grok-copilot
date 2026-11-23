@@ -16,6 +16,8 @@ const KEY_STORE = 'eqgc.keys.v1';
 const RELAY_STORE = 'eqgc.relay.v1';
 const RISKY_FORMULA = /^=.*\b(?:WEBSERVICE|FILTERXML|RTD|REGISTER\.ID|CALL|DDE|INFO|HYPERLINK)\s*\(/i;
 const state = { messages: [], lastAnswer: '', busy: false, officeReady: false, forceSheet: false, turn: 0, host: '', audit: [], attachments: [] };
+let activeAgent = null;
+let agentCheckpoint = null;
 const $ = id => document.getElementById(id);
 let abortChat = null;
 let sourcePollTimer = null;
@@ -1691,9 +1693,9 @@ async function renderEditsCard(edits, skipped) {
   conversation.append(card); conversation.scrollTop = conversation.scrollHeight;
 }
 
-function dedupContext(messages) {
+function dedupContext(messages, freshCount = 1) {
   // Older turns keep their prose only; re-sending past workbook/file context multiplies input tokens each turn.
-  return messages.map((m, i) => (m.role === 'user' && i < messages.length - 1)
+  return messages.map((m, i) => (m.role === 'user' && i < messages.length - freshCount)
     ? { ...m, content: m.content.replace(/\n\n\[Attached file START:[^\]]+\][\s\S]*?\n\[Attached file END\]/g, '').replace(/\n\n\[(?:Excel (?:selection|used range|workbook metadata|range)|Word (?:selection|document|document outline))[^\]]*\]\n[\s\S]*$/, '') }
     : m);
 }
@@ -1771,7 +1773,27 @@ function resetComposer() {
   $('send').setAttribute?.('aria-label', 'Send message');
 }
 
+function showAgentStatus(round, detail) {
+  const status = $('agentStatus');
+  if (!status) return;
+  status.textContent = detail ? `Agent ${round}/${AgentCore.MAX_LOOPS} · ${detail}` : '';
+  syncAgentControls();
+}
+
+function syncAgentControls() {
+  const controls = $('agentControls');
+  if (!controls) return;
+  controls.classList.toggle('hidden', !$('agentStatus').textContent || (!activeAgent && operatingMode() !== 'agent'));
+  $('continueAgent').classList.toggle('hidden', !agentCheckpoint || state.busy);
+}
+
 function stopGeneration() {
+  if (activeAgent) {
+    activeAgent.stopRequested = true;
+    abortChat?.abort();
+    showAgentStatus(activeAgent.round, 'Stopping… · 正在停止…');
+    return;
+  }
   state.turn += 1;
   abortChat?.abort();
   resetComposer();
@@ -2113,9 +2135,11 @@ async function executeClassified(actions, { direct }) {
   }
   let status = blocked.length ? 'BLOCKED' : 'SUCCESS';
   let failure = '';
+  let appliedActions = [];
   if (safe.length) {
     try {
       const records = await applyPlan(safe);
+      appliedActions = safe;
       status = blocked.length ? 'WARNING' : 'SUCCESS';
       // Without this card the agent loop applied changes with no Undo offered at all.
       renderAppliedCard(safe, records, blocked.length);
@@ -2126,7 +2150,7 @@ async function executeClassified(actions, { direct }) {
     }
   }
   if (blocked.length) await renderPlanCard(blocked, 0, { manualOnly: true });
-  return { status, blocked: blocked.length, applied: safe.length, failure };
+  return { status, blocked: blocked.length, appliedActions, failure };
 }
 
 function renderAppliedCard(actions, records, blockedCount) {
@@ -2211,54 +2235,83 @@ function renderModePlan(plan, actions, skipped) {
   conversation.scrollTop = conversation.scrollHeight;
 }
 
-async function sendAgentPrompt(prompt) {
+async function sendAgentPrompt(prompt, checkpoint = null) {
   const clean = prompt.trim();
   if (!clean || state.busy) return;
+  if (clean.length > 49_500) { toast('Message is too large. Shorten the prompt and try again.'); return; }
   const turn = ++state.turn;
+  const mode = operatingMode();
+  const run = mode === 'agent' ? { round: 0, stopRequested: false } : null;
+  const task = checkpoint || { prompt: clean, progress: [], observation: '', observationSource: '' };
+  activeAgent = run;
+  if (!checkpoint) agentCheckpoint = null;
   state.busy = true;
+  if (run) $('newChat').disabled = true;
+  showAgentStatus(0, run ? 'Preparing · 準備中' : '');
   $('send').textContent = '■';
   $('send').setAttribute?.('aria-label', 'Stop');
+  const interrupted = () => turn !== state.turn || run?.stopRequested;
+  let outcome = 'Could not finish · 未能完成';
+  const observe = (content, source = '') => {
+    task.observation = content;
+    task.observationSource = source;
+    state.messages.push({ role: 'user', content });
+  };
   try {
     await ensureKeys();
-    if (turn !== state.turn) return;
-    const mode = operatingMode();
+    if (interrupted()) return;
     let routed = await routeForPrompt(clean, mode);
+    if (interrupted()) return;
     if (routed.error) { toast(routed.error); return; }
-    state.audit.push(AgentCore.audit({ kind: 'request', mode, provider: routed.provider, reason: routed.reason, text: clean.slice(0, 500) }));
+    const displayPrompt = checkpoint ? 'Continue Agent · 繼續 Agent' : clean;
+    state.audit.push(AgentCore.audit({ kind: 'request', mode, provider: routed.provider, reason: checkpoint ? 'continued after round limit' : routed.reason, text: displayPrompt.slice(0, 500) }));
     const files = attachmentContext();
+    const resumeContext = checkpoint ? [
+      '[Agent continuation] Continue the original task from the preceding user message. Use the conversation and the pane observations below. Re-read the affected workbook range or Word selection before editing if the current state is uncertain. Avoid repeating edits already applied. Review pending decisions and report any remaining work.',
+      task.progress.length ? `Recent edits confirmed by the pane at the time of application (verify if the user has since edited or undone them):\n${task.progress.join('\n')}` : '',
+      task.observation ? `Latest pane observation:\n${task.observation}` : ''
+    ].filter(Boolean).join('\n\n') : '';
     const contextLimit = Math.max(0, Math.min(CONTEXT_CAP, 49_000 - clean.length - files.length - FINANCE_EVIDENCE_INSTRUCTION.length - 300));
     if (contextLimit < 300 && $('includeContext').checked) { toast('The prompt and attachments leave too little room for workbook context. Remove a file or shorten the prompt.'); return; }
     let ctx = null;
     try { ctx = await contextForMode(mode, contextLimit); } catch (error) { if (turn === state.turn) toast(`Could not read workbook context: ${error.message}`); }
-    if (turn !== state.turn) return;
+    if (interrupted()) return;
     const financeTask = AgentCore.isFinancePrompt(`${clean}\n${files}\n${ctx?.text || ''}`);
     const evidenceSources = collectFinanceSources(ctx, files);
+    if (checkpoint?.observationSource) evidenceSources.push(checkpoint.observationSource);
     const financeValidations = [];
     let financeAnswerText = '';
     const userPrompt = financeTask ? `${clean}${FINANCE_EVIDENCE_INSTRUCTION}` : clean;
     const content = `${userPrompt}${files}${ctx ? `\n\n${ctx.header}\n${ctx.text}` : ''}\n\n[Mode: ${mode}]`;
     if (content.length > 49_500) { toast('Message plus workbook context is too large — shorten the message or turn context off.'); return; }
+    agentCheckpoint = null;
     state.forceSheet = false;
     state.messages.push({ role: 'user', content });
+    if (resumeContext) state.messages.push({ role: 'user', content: resumeContext });
     const fileNames = state.attachments.map(file => file.name);
-    renderMessage('user', clean + (fileNames.length ? `\n\nAttachments: ${fileNames.join(', ')}` : '') + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
+    renderMessage('user', displayPrompt + (fileNames.length ? `\n\nAttachments: ${fileNames.join(', ')}` : '') + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
     state.audit.push(AgentCore.audit({ kind: 'context', address: ctx?.address || 'none', chars: ctx?.chars || 0 }));
     if (state.attachments.length) state.audit.push(AgentCore.audit({ kind: 'context', address: fileNames.join(', '), chars: files.length }));
     let guard = 0;
     let retried = false;
     while (guard < AgentCore.MAX_LOOPS) {
-      if (turn !== state.turn) return;
+      if (interrupted()) return;
+      if (run) {
+        run.round = guard + 1;
+        showAgentStatus(run.round, 'Waiting for model · 等候模型');
+      }
       let result;
       try {
-        result = await streamChat({ provider: routed.provider, model: routed.model, endpoint: routed.endpoint, messages: dedupContext(state.messages.slice(-24)), fast: $('fastMode').checked, host: state.host === 'Word' ? 'word' : 'excel', mode });
+        const messages = dedupContext(state.messages.slice(-24), resumeContext && guard === 0 ? 2 : 1);
+        result = await streamChat({ provider: routed.provider, model: routed.model, endpoint: routed.endpoint, messages, fast: $('fastMode').checked, host: state.host === 'Word' ? 'word' : 'excel', mode });
       } catch (error) {
-        if (error.name === 'AbortError' || retried || !routed.fallback || turn !== state.turn) throw error;
+        if (error.name === 'AbortError' || retried || !routed.fallback || interrupted()) throw error;
         retried = true;
         state.audit.push(AgentCore.audit({ kind: 'fallback', provider: routed.fallback, reason: error.message }));
         routed = { ...routed, provider: routed.fallback, model: routed.fallback === 'grok' ? $('grokModel').value.trim() : $('qwenModel').value.trim(), fallback: '' };
         continue;
       }
-      if (turn !== state.turn) return;
+      if (interrupted()) return;
       const envelope = AgentCore.parseEnvelope(result.text);
       const revision = parseRevision(result.text);
       financeAnswerText = envelope.prose || revision.prose;
@@ -2267,7 +2320,7 @@ async function sendAgentPrompt(prompt) {
       $('insertAnswer').disabled = !state.lastAnswer;
       $('lastAnswerState').textContent = result.model ? `via ${result.model}` : '';
       result.bubble.children[result.bubble.children.length - 1].textContent = state.lastAnswer;
-      state.audit.push(AgentCore.audit({ kind: 'model', provider: routed.provider, model: result.model, decision: envelope.decision || 'COMPLETE', plan: envelope.plan?.goal || '' }));
+      state.audit.push(AgentCore.audit({ kind: 'model', round: run?.round, provider: routed.provider, model: result.model, decision: envelope.decision || 'COMPLETE', plan: envelope.plan?.goal || '' }));
       const normalized = envelope.actions ? normalizeActions(envelope.actions) : { actions: revision.actions || [], skipped: revision.skipped || 0 };
       if (mode === 'chat') {
         if (normalized.actions.length || revision.edits) {
@@ -2278,9 +2331,11 @@ async function sendAgentPrompt(prompt) {
       }
       if (mode === 'plan' || envelope.decision === 'NEEDS_USER' || (mode === 'agent' && !$('directRevise').checked && normalized.actions.length)) {
         renderModePlan(envelope.plan, normalized.actions, normalized.skipped);
+        outcome = normalized.actions.length ? 'Review required · 等候審批' : 'Input required · 等候輸入';
         break;
       }
-      if (envelope.profileRequest && !normalized.actions.length && guard < AgentCore.MAX_LOOPS - 1) {
+      if (envelope.profileRequest && !normalized.actions.length) {
+        showAgentStatus(run.round, 'Reading sheet profile · 讀取工作表摘要');
         const sheet = normalizeSheet(envelope.profileRequest.sheet);
         let profile = null;
         let failure = '';
@@ -2290,31 +2345,36 @@ async function sendAgentPrompt(prompt) {
           catch (error) { failure = error.message; }
           if (!profile && !failure) failure = 'the sheet or range is empty';
         }
+        if (interrupted()) return;
         if (profile) {
           const text = formatProfile(sheet, profile).slice(0, 8000);
-          state.messages.push({ role: 'user', content: `Requested profile.\n\n${text}` });
           const address = `${sheet}!${profile.address}`;
-          evidenceSources.push(`${address} · profile statistics`);
+          const source = `${address} · profile statistics`;
+          observe(`Requested profile.\n\n${text}`, source);
+          evidenceSources.push(source);
           state.audit.push(AgentCore.audit({ kind: 'context', address: `${address} (profile)`, chars: text.length }));
         } else {
-          state.messages.push({ role: 'user', content: `No profile was produced for "${envelope.profileRequest.sheet}": ${failure}. Nothing was read, so this is not a successful read.` });
+          observe(`No profile was produced for "${envelope.profileRequest.sheet}": ${failure}. Nothing was read, so this is not a successful read.`);
           state.audit.push(AgentCore.audit({ kind: 'blocked', reason: `profile rejected: ${failure}` }));
         }
         guard += 1;
         continue;
       }
-      if (envelope.contextRequest && !normalized.actions.length && guard < AgentCore.MAX_LOOPS - 1) {
+      if (envelope.contextRequest && !normalized.actions.length) {
+        showAgentStatus(run.round, 'Reading workbook · 讀取活頁簿');
         const sheet = normalizeSheet(envelope.contextRequest.sheet);
         const asked = normalizeRange(envelope.contextRequest.range);
         const range = boundedRange(envelope.contextRequest.range, READ_MAX_CELLS);
         if (sheet && range) {
           const grid = await readGrid(sheet, range);
+          if (interrupted()) return;
           const full = annotateRows(grid.values, grid.formulas, `${sheet}!${range}`);
           const text = full.slice(0, 8000);
           const cut = full.length > text.length ? '\n[truncated: the read exceeded the context budget]' : '';
           const note = `Requested context.\n\n[Excel range ${sheet}!${range}]\n${text}${cut}`;
-          state.messages.push({ role: 'user', content: note });
-          evidenceSources.push(`${sheet}!${range}${cut ? ' · truncated' : ''}`);
+          const source = `${sheet}!${range}${cut ? ' · truncated' : ''}`;
+          observe(note, source);
+          evidenceSources.push(source);
           state.audit.push(AgentCore.audit({ kind: 'context', address: `${sheet}!${range}`, chars: text.length }));
           guard += 1;
           continue;
@@ -2327,27 +2387,41 @@ async function sendAgentPrompt(prompt) {
           : !asked
             ? `range "${envelope.contextRequest.range}" is not a valid A1 range`
             : `${sheet}!${asked} is ${size.rows * size.cols} cells, over the ${READ_MAX_CELLS}-cell read limit`;
-        state.messages.push({ role: 'user', content: `No range was read: ${reason}. Nothing was returned, so this is not a successful read. Request a smaller range and ask again.` });
+        observe(`No range was read: ${reason}. Nothing was returned, so this is not a successful read. Request a smaller range and ask again.`);
         state.audit.push(AgentCore.audit({ kind: 'blocked', reason: `context request rejected: ${reason}` }));
         guard += 1;
         continue;
       }
       const checks = usableChecks(envelope.plan);
       const profile = readFinanceProfile();
+      if (checks.length) showAgentStatus(run.round, 'Reading check inputs · 讀取檢查資料');
       const beforeGrids = await gridsForChecks(checks);
-      let exec = { status: 'SUCCESS', blocked: 0, applied: 0, failure: '' };
-      if (normalized.actions.length) exec = await executeClassified(normalized.actions, { direct: Boolean($('directRevise').checked) });
+      if (interrupted()) return;
+      let exec = { status: 'SUCCESS', blocked: 0, appliedActions: [], failure: '' };
+      if (normalized.actions.length) {
+        showAgentStatus(run.round, 'Applying edits · 套用修改');
+        exec = await executeClassified(normalized.actions, { direct: Boolean($('directRevise').checked) });
+      }
       state.audit.push(AgentCore.audit({ kind: 'execute', status: exec.status, count: normalized.actions.length, blocked: exec.blocked, skipped: normalized.skipped, reason: exec.failure }));
+      for (const action of exec.appliedActions) task.progress.push(describeAction(action).slice(0, 240));
+      task.progress = task.progress.slice(-12);
+      if (interrupted()) return;
       if (normalized.skipped) {
         state.messages.push({ role: 'user', content: `${normalized.skipped} proposed action(s) were rejected by the pane as unusable and were NOT applied. Re-check field names, counts and ranges: a pivot accepts at most 16 value fields and 8 fields each for rows, columns and filters.` });
       }
       if (exec.failure) {
         // The model must see the real Office.js error, not a bare "Observed: FAILED".
-        state.messages.push({ role: 'user', content: `The pane failed to apply that batch: ${exec.failure}. Nothing in that batch was written. Diagnose the cause and propose a corrected action; do not repeat the same action unchanged.` });
+        observe(`The pane reported an Office error applying that batch: ${exec.failure}. Re-read affected locations to determine what actually changed before proposing a correction. Do not repeat the same action unchanged.`);
+        if (exec.blocked) {
+          outcome = 'Edit failed · 修改失敗';
+          break;
+        }
         guard += 1;
         continue;
       }
+      if (checks.length) showAgentStatus(run.round, 'Checking results · 檢查結果');
       const afterGrids = await gridsForChecks(checks);
+      if (interrupted()) return;
       const validations = checks.map(check => ({
         ...AgentCore.evaluateGridCheck({ ...check, profile }, afterGrids[check.id], beforeGrids[check.id]),
         sheet: check.sheet,
@@ -2358,37 +2432,49 @@ async function sendAgentPrompt(prompt) {
       validations.forEach(result => state.audit.push(AgentCore.audit({ kind: 'validation', status: result.status, check: result.check, address: `${result.sheet}!${result.range}`, before: result.before, after: result.after, difference: result.difference })));
       if (validations.length) renderValidation(validations);
       const next = AgentCore.decide({ decision: envelope.decision, validations, iteration: guard, maxLoops: AgentCore.MAX_LOOPS });
+      if (exec.blocked && !validations.some(result => ['FAIL', 'NEEDS_USER'].includes(result.status)) && envelope.decision !== 'FAILED') {
+        observe(`${exec.blocked} proposed edit(s) are waiting for the user to review and have not been applied. Check the current state before proposing further edits.`);
+        state.audit.push(AgentCore.audit({ kind: 'stopped', reason: 'edits are waiting for review' }));
+        outcome = 'Review required · 等候審批';
+        break;
+      }
+      const observed = validations.map(result => `${result.check} ${result.status} at ${result.sheet}!${result.range}`).join('; ') || exec.status;
       if (next === 'FAILED') {
         const validationFailed = validations.some(result => result.status === 'FAIL');
         const limitReached = ['CONTINUE', 'REPLAN'].includes(envelope.decision)
           && guard + 1 >= AgentCore.MAX_LOOPS;
+        if (limitReached && !validationFailed) {
+          observe(`Observed: ${observed}. Continue only if every check passed.`);
+          guard += 1;
+          break;
+        }
         const reason = validationFailed
           ? 'validation failed'
-          : limitReached
-            ? `${AgentCore.MAX_LOOPS}-round limit reached; the model requested another step`
-            : 'the model reported that it could not complete this step';
+          : 'the model reported that it could not complete this step';
         state.audit.push(AgentCore.audit({ kind: 'stopped', reason }));
-        toast(limitReached
-          ? `Agent reached its ${AgentCore.MAX_LOOPS}-round limit. The model requested another step; review the audit card and send a follow-up to continue.`
-          : `Stopped: ${reason}. Nothing further will run.`);
+        outcome = validationFailed ? 'Check failed · 檢查失敗' : 'Model reported a failure · 模型回報失敗';
+        toast(`Stopped: ${reason}.`);
         break;
       }
       if (next === 'NEEDS_USER') {
         state.audit.push(AgentCore.audit({ kind: 'stopped', reason: 'a check needs a column' }));
         toast('Stopped. A finance check needs a column before it can pass or fail.');
+        outcome = 'Input required · 等候輸入';
         break;
       }
       if (next === 'CONTINUE' || next === 'REPLAN') {
-        const observed = validations.map(result => `${result.check} ${result.status}`).join('; ') || exec.status;
-        state.messages.push({ role: 'user', content: `Observed: ${observed}. Continue only if every check passed.` });
+        observe(`Observed: ${observed}. Continue only if every check passed.`);
         guard += 1;
         continue;
       }
+      outcome = 'Completed · 已完成';
       break;
     }
     if (guard >= AgentCore.MAX_LOOPS) {
+      agentCheckpoint = task;
+      outcome = 'Paused at round limit · 已達輪數上限';
       state.audit.push(AgentCore.audit({ kind: 'stopped', reason: `${AgentCore.MAX_LOOPS}-round limit reached` }));
-      toast(`Agent reached its ${AgentCore.MAX_LOOPS}-round limit. Review the audit card and send a follow-up to continue.`);
+      toast('Round limit reached. Review the audit card, then choose Continue Agent.');
     }
     renderAuditCard();
     if (financeTask) renderFinanceEvidenceCard([...new Set(evidenceSources)], financeValidations, financeAnswerText);
@@ -2410,7 +2496,19 @@ async function sendAgentPrompt(prompt) {
       toast(error.message);
     }
   } finally {
-    if (turn === state.turn) resetComposer();
+    if (turn === state.turn) {
+      if (run?.stopRequested) {
+        agentCheckpoint = null;
+        outcome = 'Stopped by you · 已手動停止';
+        state.audit.push(AgentCore.audit({ kind: 'stopped', reason: 'user pressed Stop' }));
+        renderAuditCard();
+        refreshContextCard();
+      }
+      activeAgent = null;
+      if (run) $('newChat').disabled = false;
+      resetComposer();
+      showAgentStatus(run?.round ?? 0, run ? outcome : '');
+    }
   }
 }
 
@@ -2418,6 +2516,7 @@ async function sendPrompt(prompt) {
   if (operatingMode() !== 'legacy') return sendAgentPrompt(prompt);
   const clean = prompt.trim();
   if (!clean || state.busy) return;
+  if (clean.length > 49_500) { toast('Message is too large. Shorten the prompt and try again.'); return; }
   const turn = ++state.turn;
   state.busy = true;
   $('send').textContent = '■';
@@ -2483,7 +2582,10 @@ function clearConversation() {
 }
 
 function newChat() {
+  if (activeAgent) return;
   stopGeneration();
+  agentCheckpoint = null;
+  showAgentStatus(0, '');
   state.messages = [];
   state.attachments = [];
   $('attachmentPicker').value = '';
@@ -2682,6 +2784,11 @@ $('disconnectOneDrive').addEventListener('click', () => disconnectSource('onedri
 $('searchSources').addEventListener('click', searchCloudSource);
 $('sourceQuery').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); searchCloudSource(); } });
 $('newChat').addEventListener('click', newChat);
+$('workMode')?.addEventListener('change', syncAgentControls);
+$('continueAgent')?.addEventListener('click', async () => {
+  if (state.busy || operatingMode() !== 'agent' || !agentCheckpoint) return;
+  await sendAgentPrompt(agentCheckpoint.prompt, agentCheckpoint);
+});
 $('attachFiles').addEventListener('click', () => $('attachmentPicker').click());
 $('attachmentPicker').addEventListener('change', async event => {
   await addAttachments(event.target.files || []);

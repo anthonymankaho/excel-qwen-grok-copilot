@@ -385,7 +385,7 @@
     return (entries || []).map(entry => {
       if (entry.kind === 'request') return `Request (${entry.mode}) via ${entry.provider} · ${entry.reason}`;
       if (entry.kind === 'context') return `Context ${entry.address || 'none'} · ${entry.chars || 0} chars`;
-      if (entry.kind === 'model') return `Model ${entry.model || entry.provider || ''} · ${entry.decision || 'no decision'}${entry.plan ? ` · ${entry.plan}` : ''}`;
+      if (entry.kind === 'model') return `${entry.round ? `Round ${entry.round} · ` : ''}Model ${entry.model || entry.provider || ''} · ${entry.decision || 'no decision'}${entry.plan ? ` · ${entry.plan}` : ''}`;
       if (entry.kind === 'execute') {
         const skipped = entry.skipped ? ` · ${entry.skipped} rejected as unusable` : '';
         const reason = entry.reason ? ` · ${entry.reason}` : '';

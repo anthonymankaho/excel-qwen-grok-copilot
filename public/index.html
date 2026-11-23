@@ -83,6 +83,10 @@
     <section id="conversation" class="conversation" aria-live="polite"><div class="welcome"><div class="welcome-icon">✦</div><h1>What should I revise?</h1><p>Ask about the selection, or tell me to change the sheet or the document.</p></div></section>
       <div class="insert-row"><button id="newChat" class="text-button" type="button">New chat</button><button id="insertAnswer" class="text-button" disabled>↳ Insert last answer into selection</button><span id="lastAnswerState"></span></div>
     <form id="composer" class="composer">
+      <div id="agentControls" class="agent-controls hidden">
+        <span id="agentStatus" role="status"></span>
+        <button id="continueAgent" type="button" class="secondary hidden">Continue Agent · 繼續</button>
+      </div>
       <textarea id="prompt" rows="2" placeholder="Ask, or tell me what to change..." aria-label="Message"></textarea>
       <input id="attachmentPicker" class="hidden" type="file" multiple accept=".html,.htm,.txt,.md,.csv,.tsv,.json,.xml,text/html,text/plain,text/csv,application/json,application/xml">
       <div class="composer-footer"><div class="provider-pill"><span id="statusDot" class="status-dot" title="Relay status"></span><select id="workMode" aria-label="Mode"><option value="chat">Chat</option><option value="plan">Plan</option><option value="agent" selected>Agent</option></select><select id="activeProvider" aria-label="Active provider"><option value="auto">Auto</option><option value="qwen" selected>Qwen</option><option value="grok">Grok</option></select></div><button id="attachFiles" class="secondary attach-button" type="button" aria-label="Attach files" title="Attach HTML reports or text files">📎 Attach</button><label class="context-toggle" title="Skip deep thinking for a quicker reply"><input type="checkbox" id="fastMode"> Fast</label><label class="context-toggle" title="In Agent mode, write safe changes immediately. Deletes, clears, renames, and network formulas still wait for a click."><input type="checkbox" id="directRevise" checked> Direct</label><button id="send" class="send-button" type="submit" aria-label="Send message">↑</button></div>

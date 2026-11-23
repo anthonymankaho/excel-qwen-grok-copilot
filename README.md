@@ -158,7 +158,8 @@ The first run against a real workbook (753-row AR ageing) proved profiling and r
 
 - **Execution errors were swallowed.** `executeClassified` only raised a toast; the audit showed `Execute FAILED · 1 actions` with no reason, and the model received a bare `Observed: FAILED`. The real Office.js message is now recorded in the audit **and** fed back to the model so it can correct itself.
 - **A pivot value-field cap of 8 silently rejected an ageing pivot.** This workbook legitimately needs 11 value fields (USD O/S + nine buckets + Credits). The cap is now 16, and rejected actions are reported to the model and shown in the audit as `N rejected as unusable` instead of vanishing.
-- **Agent stops cleanly at its round limit.** The limit is now 10 rounds. Reaching it is reported as a round-limit warning, separately from a failed finance check or a model-reported failure.
+- **Agent shows its round and progress.** If work is pending at round 10, **Continue Agent · 繼續** resumes the same task in the current chat. Review requests and check failures have their own stop messages.
+- **Agent 顯示輪數和工作進度。** 第 10 輪仍有工作時，可按 **Continue Agent · 繼續**，在目前對話接續原任務。待審批修改及檢查失敗會各自顯示停止原因。
 - **Pivot field names are validated against the real headers.** A mismatch now names the offending field and lists the available headers, and removes the partial pivot and any sheet it created, instead of failing opaquely later. The destination sheet is also synced before use.
 
 `npm run check` passes. `npm test` → **64 pass / 2 fail**, still only the Windows `spawn unzip ENOENT` packaging failures. Two new tests: an 11-value-field ageing pivot is accepted, and an unknown field produces a named error with no partial pivot left behind.
@@ -179,7 +180,7 @@ This is the Copilot-style revise. The earlier pane sent one prompt, attached a l
 - **A failed check is a workpaper, not a silent fix.** The card states the issue, the evidence, a possible cause, the check, and the recommended action. A journal entry is a draft. The pane does not clear a reconciliation difference on its own.
 - **Auto** chooses Qwen or Grok only when that key is already loaded. A finance, Plan, or Agent request prefers Grok when that key is present and **Fast** is off. Otherwise it prefers Qwen. If the chosen provider errors, the pane tries the other loaded key once.
 - **An audit card** closes each Chat, Plan, and Agent turn: request, mode, provider, plan, context sent, actions, blocked actions, and check results. API keys are left out. **New chat** clears the trail.
-- **Direct, Apply, and Undo stay.** With Direct on, Agent writes safe actions immediately. Deletes, clears, renames, and formulas that can reach the network wait for a click. With Direct off, you approve the plan and then press **Apply edits**. **Undo last apply** is on the card. **Stop** cancels the current round. The loop ends after 10 rounds.
+- **Direct, Apply, and Undo.** With Direct on, Agent writes safe actions immediately. Deletes, clears, renames, and formulas that can reach the network wait for a click. With Direct off, you approve the plan and then press **Apply edits**. **Undo last apply** is on the card. **Stop** cancels model generation and prevents the next step. An Office edit already in progress may finish.
 
 Restart the relay and reopen the pane after you install this update. The manifest is 1.2.0.0. Word still needs `npm run start:word` once.
 
@@ -259,7 +260,7 @@ History stays in memory. Reloading the pane clears it. Each request sends at mos
 
 **Plan** inspects metadata, then returns one plan: goal, steps, assumptions, required inputs, risks, and the checks it wants. Proposed actions sit on the same card. Nothing is written until you press **Approve**. If Direct is off, **Approve** is followed by **Apply edits**.
 
-**Agent** uses the same metadata. It can ask for one range, run the safe actions for that step, read those cells back, and calculate the checks. The loop stops at 10 rounds, when you press **Stop**, when the plan needs you, or when a check fails. If the model still requests another step at the cap, the pane shows a round-limit warning; send a follow-up to continue. With Direct off, a step that would write waits for **Approve**, then **Apply edits**.
+**Agent** uses the same metadata. It can ask for one range, run the safe actions for that step, read those cells back, and calculate the checks. The composer shows `Agent 1/10` and the current activity. At the round limit, review the audit card and use **Continue Agent · 繼續** if offered. Use the review card for pending edits. With Direct off, a step that would write waits for **Approve**, then **Apply edits**.
 
 **Auto**, next to the mode, picks Qwen or Grok only from keys already loaded in the relay. It will not send the workbook to a provider that has no key.
 

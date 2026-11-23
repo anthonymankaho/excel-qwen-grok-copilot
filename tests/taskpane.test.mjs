@@ -23,6 +23,11 @@ function makeElement(id) {
     },
     addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
     append(...nodes) { for (const n of nodes) { n.parent = this; this.children.push(n); } },
+    replaceChildren(...nodes) {
+      for (const child of this.children) child.parent = null;
+      this.children.length = 0;
+      this.append(...nodes);
+    },
     querySelector(sel) { return this.children.find(c => String(c.className).split(' ').includes(sel.slice(1))) || null; },
     remove() { if (this.parent) this.parent.children = this.parent.children.filter(c => c !== this); this.parent = null; },
     focus() {}, requestSubmit() { return fire(el, 'submit'); }
@@ -787,6 +792,50 @@ test('Agent mode asks for columns when debit and credit are not identified', asy
   assert.equal(sb.writes.some(w => w.cell === 'F1'), false);
   assert.match(visible(sb.els('conversation')), /NEEDS_USER debitEqualsCredit/);
   assert.equal(visible(sb.els('conversation')).includes('FAIL debitEqualsCredit'), false);
+});
+
+test('Agent pauses after the tenth read and continues the task with that result', async () => {
+  const read = 'Reading.\n```json\n{"contextRequest":{"sheet":"Sheet1","range":"B2"},"decision":"CONTINUE"}\n```';
+  const sb = makeSandbox({
+    selection: singleEmpty, used: usedSmall,
+    cells: { 'Sheet1!B2': { value: 73 } },
+    reply: { turns: [...Array(10).fill(read), 'Finished reading.'] }
+  });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  await ask(sb, 'Inspect the selected worksheet');
+  assert.equal(chatCalls(sb).length, 10);
+  assert.match(sb.els('agentStatus').textContent, /Agent 10\/10.*Paused/);
+  assert.equal(sb.els('continueAgent').classList.contains('hidden'), false);
+  await fire(sb.els('continueAgent'), 'click');
+  assert.equal(chatCalls(sb).length, 11);
+  assert.match(chatCalls(sb).at(-1).body.messages.at(-2).content, /Inspect the selected worksheet/);
+  assert.match(lastContent(sb), /Latest pane observation:[\s\S]+Sheet1!B2[\s\S]+Row 2:\s+73/);
+  assert.match(sb.els('agentStatus').textContent, /Agent 1\/10.*Completed/);
+  assert.equal(sb.els('continueAgent').classList.contains('hidden'), true);
+});
+
+test('Stop during check input read prevents the planned Agent edit', async () => {
+  const reply = { text: 'Ready.\n```json\n{"plan":{"goal":"Fill the value","steps":[{"id":1,"objective":"Fill B2"}],"finalValidation":[{"check":"formulaErrors","sheet":"Sheet1","range":"B2"}]},"actions":[{"op":"set","sheet":"Sheet1","range":"B2","value":7}],"decision":"COMPLETE"}\n```' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  sb.els('directRevise').checked = true;
+  const officeRun = sb.Excel.run;
+  let finishRead;
+  sb.Excel.run = callback => /Reading check inputs/.test(sb.els('agentStatus').textContent)
+    ? new Promise(resolve => { finishRead = () => resolve(officeRun(callback)); })
+    : officeRun(callback);
+  const request = ask(sb, 'Fill the value');
+  await flush();
+  assert.equal(typeof finishRead, 'function');
+  await fire(sb.els('composer'), 'submit');
+  assert.match(sb.els('agentStatus').textContent, /Stopping/);
+  finishRead();
+  await request;
+  assert.equal(sb.writes.length, 0);
+  assert.match(sb.els('agentStatus').textContent, /Stopped by you/);
+  assert.equal(sb.els('continueAgent').classList.contains('hidden'), true);
 });
 
 test('Agent mode with Direct off waits for Approve before writing', async () => {
