@@ -27,7 +27,7 @@ console.log('  2. In this folder run:  npm start');
 console.log('     That sideloads the add-in and opens Excel. Leave the window open - it is the relay.');
 console.log('  3. In Excel: Home > Add-ins > Qwen + Grok for Excel and Word.');
 console.log('  4. Settings > pick Qwen or Grok > paste YOUR OWN key > Remember ticked > Use key.');
-console.log('  5. Optional cloud sources: each person connects their own Google/Microsoft account. See README.md.');
+console.log('  5. Optional cloud sources: app owner sets shared client IDs once in cloud-oauth.json; each person clicks Connect and signs in to their own account. See README.md.');
 console.log('\n  Word instead of Excel:  npm run start:word');
 console.log('  Stop the relay:         npm run relay-stop');
 console.log('  Remove the sideload:    npm run stop');

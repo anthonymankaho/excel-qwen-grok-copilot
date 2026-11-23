@@ -39,9 +39,10 @@ FIRST USE
    ticked > Use key. The dot turns green.
 
 OPTIONAL CLOUD SOURCES
-   See README.md and SOP-INSTALL.md. Each colleague connects their own
-   Google and Microsoft accounts; no account address is built into the app.
-   OAuth app values are configured locally and are not included in this zip.
+   The app owner sets the public OAuth client IDs once in cloud-oauth.json
+   before sharing the package. Each colleague then clicks Connect and signs
+   in to their own Google or Microsoft account. No account address or token
+   is built into the app.
 
 WORD
    Close Word, then in this folder run:  npm run start:word

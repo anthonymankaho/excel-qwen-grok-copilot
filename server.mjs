@@ -20,6 +20,16 @@ function send(res, status, data, type = 'application/json; charset=utf-8') {
   res.end(body);
 }
 
+function cloudOAuthConfig() {
+  try {
+    const config = JSON.parse(fs.readFileSync(path.join(root, 'cloud-oauth.json'), 'utf8'));
+    return {
+      googleClientId: typeof config.googleClientId === 'string' ? config.googleClientId : '',
+      microsoftClientId: typeof config.microsoftClientId === 'string' ? config.microsoftClientId : ''
+    };
+  } catch { return {}; }
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -71,7 +81,7 @@ async function readProviderStream(response, provider, res) {
 
 export function createRelay() {
   const secrets = { qwen: '', grok: '' };
-  const sources = new LocalSourceMcp();
+  const sources = new LocalSourceMcp(cloudOAuthConfig());
   const server = http.createServer(async (req, res) => {
     const addr = server.address();
     const boundPort = addr && typeof addr === 'object' ? addr.port : port;
@@ -86,24 +96,10 @@ export function createRelay() {
 
     if (req.method === 'GET' && url.pathname === '/api/connectors/status') return send(res, 200, sources.status());
 
-    if (req.method === 'GET' && url.pathname === '/api/connectors/google/callback') {
-      const result = await sources.completeGoogleOAuth(url);
-      return send(res, result.status, result.html, 'text/html; charset=utf-8');
-    }
-
-    if (req.method === 'POST' && url.pathname === '/api/connectors/configure') {
-      try {
-        const body = await readBody(req);
-        return send(res, 200, await sources.configure(body));
-      } catch (error) {
-        return send(res, 400, { error: error.message });
-      }
-    }
-
     if (req.method === 'POST' && url.pathname === '/api/connectors/google/authorize') {
       try {
         await readBody(req);
-        return send(res, 200, await sources.startGoogleOAuth(boundPort));
+        return send(res, 200, await sources.startGoogleOAuth());
       } catch (error) {
         return send(res, 400, { error: error.message });
       }
@@ -112,7 +108,7 @@ export function createRelay() {
     if (req.method === 'POST' && url.pathname === '/api/connectors/onedrive/authorize') {
       try {
         await readBody(req);
-        return send(res, 200, { device: await sources.startOneDriveDeviceFlow() });
+        return send(res, 200, await sources.startOneDriveInteractiveFlow());
       } catch (error) {
         return send(res, 400, { error: error.message });
       }

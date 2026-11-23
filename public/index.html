@@ -37,15 +37,6 @@
       </div>
       <div class="button-row"><button id="saveKey" class="primary">Use key</button><button id="clearKey" class="secondary">Clear key</button><label class="context-toggle"><input type="checkbox" id="rememberKey" checked> Remember key on this PC</label></div>
       <p id="keyHint" class="hint">Keys go only to the relay at 127.0.0.1 on this computer. With Remember ticked they persist in this pane’s local browser storage (this PC, this Windows user only); untick for memory-only sessions. Clear key removes both. Use your own key — never someone else’s personal Token Plan key.</p>
-      <div id="cloudConnectorConfig">
-        <h2>Read-only cloud sources</h2>
-        <p class="hint">OAuth app settings are shared setup values; each person signs in to their own accounts. Account email addresses are not saved by this add-in.</p>
-        <label for="googleOAuthClientId">Google OAuth client ID</label><input id="googleOAuthClientId" autocomplete="off" placeholder="Google AI-agent OAuth client ID">
-        <label for="googleOAuthClientSecret">Google OAuth client secret</label><input id="googleOAuthClientSecret" type="password" autocomplete="new-password" placeholder="Keep private; do not commit to Git">
-        <label for="microsoftAppClientId">Microsoft public app client ID</label><input id="microsoftAppClientId" autocomplete="off" placeholder="Application (client) ID">
-        <div class="button-row"><button id="saveConnectorConfig" class="secondary" type="button">Save source settings</button><label class="context-toggle"><input type="checkbox" id="rememberConnectorConfig"> Remember on this PC</label></div>
-        <p class="hint">Remember stores the Google app secret in this Windows user's local browser storage. Otherwise it stays only in relay memory and must be entered again after a restart.</p>
-      </div>
       <h2>Finance checks</h2>
       <p class="hint">Leave these blank when the sheet has headers such as Debit and Credit. A check that cannot name its columns asks you. It does not mark pass or fail.</p>
       <label for="debitColumn">Debit column</label><input id="debitColumn" placeholder="Debit or 1" autocomplete="off">
@@ -71,12 +62,11 @@
 
     <details id="cloudSources" class="card cloud-sources">
       <summary><strong>Cloud sources</strong><span>OneDrive · Google Drive · Gmail</span></summary>
-      <p class="hint">Read-only search and preview. A result is added to your next question only after you choose Add to chat.</p>
+      <p class="hint">Read-only search and preview. Press Connect to sign in in your browser; each person uses their own account. The app owner sets shared IDs once in cloud-oauth.json. A result is added to your next question only after you choose Add to chat.</p>
       <div class="source-connect-grid">
-        <div class="source-connect"><div><strong>Google Drive + Gmail</strong><small id="googleSourceStatus">Not connected</small></div><button id="connectGoogle" class="secondary" type="button">Connect</button><a id="googleSignInLink" class="source-link hidden" target="_blank" rel="noopener noreferrer">Continue sign-in</a><button id="disconnectGoogle" class="text-button hidden" type="button">Disconnect</button></div>
+        <div class="source-connect"><div><strong>Google Drive + Gmail</strong><small id="googleSourceStatus">Not connected</small></div><button id="connectGoogle" class="secondary" type="button">Connect</button><button id="disconnectGoogle" class="text-button hidden" type="button">Disconnect</button></div>
         <div class="source-connect"><div><strong>Personal OneDrive</strong><small id="onedriveSourceStatus">Not connected</small></div><button id="connectOneDrive" class="secondary" type="button">Connect</button><button id="disconnectOneDrive" class="text-button hidden" type="button">Disconnect</button></div>
       </div>
-      <div id="oneDriveDevice" class="source-device hidden"><span>Microsoft sign-in code</span><strong id="oneDriveUserCode"></strong><a id="openOneDriveSignIn" class="source-link" target="_blank" rel="noopener noreferrer" href="https://microsoft.com/devicelogin">Open sign-in page</a></div>
       <div class="source-search">
         <select id="sourceType" aria-label="Cloud source"><option value="google_drive">Google Drive</option><option value="gmail">Gmail</option><option value="onedrive">OneDrive</option></select>
         <input id="sourceQuery" type="search" placeholder="Search files or Gmail syntax (e.g. subject:invoice)" aria-label="Search cloud source">

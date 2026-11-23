@@ -13,13 +13,12 @@ const PROFILE_DISTINCT = 12; // Sample values shown per column; enough to identi
 const CELL_CHAR_LIMIT = 32767;
 const KEY_STORE = 'eqgc.keys.v1';
 const RELAY_STORE = 'eqgc.relay.v1';
-const CONNECTOR_STORE = 'eqgc.cloud-sources.v1';
 const RISKY_FORMULA = /^=.*\b(?:WEBSERVICE|FILTERXML|RTD|REGISTER\.ID|CALL|DDE|INFO|HYPERLINK)\s*\(/i;
-const state = { messages: [], lastAnswer: '', busy: false, officeReady: false, forceSheet: false, turn: 0, host: '', audit: [], attachments: [], googleAuthUrl: '', oneDriveVerificationUri: '' };
+const state = { messages: [], lastAnswer: '', busy: false, officeReady: false, forceSheet: false, turn: 0, host: '', audit: [], attachments: [] };
 const $ = id => document.getElementById(id);
 let abortChat = null;
-let connectorConfigReady = null;
 let sourcePollTimer = null;
+try { localStorage.removeItem('eqgc.cloud-sources.v1'); } catch { /* obsolete connector secrets are not retained */ }
 
 function storedKeys() {
   try { return JSON.parse(localStorage.getItem(KEY_STORE) || '{}'); } catch { return {}; }
@@ -70,28 +69,6 @@ async function api(path, body) {
   return data;
 }
 
-function storedConnectorConfig() {
-  try { return JSON.parse(localStorage.getItem(CONNECTOR_STORE) || 'null'); } catch { return null; }
-}
-
-function rememberConnectorConfig(config) {
-  try {
-    if (config) localStorage.setItem(CONNECTOR_STORE, JSON.stringify(config));
-    else localStorage.removeItem(CONNECTOR_STORE);
-  } catch { /* storage unavailable: relay-only settings */ }
-}
-
-async function restoreConnectorConfig() {
-  if (hostedRelay()) return;
-  if (!connectorConfigReady) {
-    connectorConfigReady = (async () => {
-      const config = storedConnectorConfig();
-      if (config && (config.googleClientId || config.microsoftClientId)) await api('connectors/configure', config);
-    })().catch(error => { connectorConfigReady = null; throw error; });
-  }
-  return connectorConfigReady;
-}
-
 function toast(message) {
   const el = $('toast'); el.textContent = message; el.classList.remove('hidden');
   clearTimeout(toast.timer); toast.timer = setTimeout(() => el.classList.add('hidden'), 3200);
@@ -107,31 +84,17 @@ function setSourceStatus(id, value, connected = false) {
 async function refreshCloudSources() {
   if (hostedRelay()) return;
   try {
-    await restoreConnectorConfig();
     const status = await api('connectors/status');
     const google = status.google || {};
     const onedrive = status.onedrive || {};
-    setSourceStatus('googleSourceStatus', google.connected ? 'Connected · sign-in stays on this PC' : google.connecting ? 'Waiting for your sign-in' : google.configured ? 'Not connected · sign in with your account' : 'Add Google OAuth app settings in Settings', google.connected);
-    setSourceStatus('onedriveSourceStatus', onedrive.connected ? 'Connected · sign-in stays on this PC' : onedrive.connecting ? 'Waiting for your sign-in' : onedrive.error ? onedrive.error : onedrive.configured ? 'Not connected · sign in with your account' : 'Add Microsoft app ID in Settings', onedrive.connected);
+    setSourceStatus('googleSourceStatus', google.connected ? 'Connected · this PC' : google.connecting ? 'Finish sign-in in your browser' : google.configured ? 'Not connected · sign in with your account' : 'Not set up by app owner', google.connected);
+    setSourceStatus('onedriveSourceStatus', onedrive.connected ? 'Connected · this PC' : onedrive.connecting ? 'Finish sign-in in your browser' : onedrive.error ? onedrive.error : onedrive.configured ? 'Not connected · sign in with your account' : 'Not set up by app owner', onedrive.connected);
     $('connectGoogle').disabled = !google.configured || google.connected;
     $('connectGoogle').textContent = google.connected ? 'Connected' : google.connecting ? 'Signing in…' : 'Connect';
     $('disconnectGoogle').classList.toggle('hidden', !google.connected);
     $('connectOneDrive').disabled = !onedrive.configured || onedrive.connected || onedrive.connecting;
     $('connectOneDrive').textContent = onedrive.connected ? 'Connected' : onedrive.connecting ? 'Signing in…' : 'Connect';
     $('disconnectOneDrive').classList.toggle('hidden', !onedrive.connected);
-    $('oneDriveDevice').classList.toggle('hidden', !onedrive.device?.userCode);
-    if (onedrive.device?.userCode) {
-      $('oneDriveUserCode').textContent = onedrive.device.userCode;
-      $('openOneDriveSignIn').href = onedrive.device.verificationUri;
-      state.oneDriveVerificationUri = onedrive.device.verificationUri;
-    }
-    if (google.connected) {
-      state.googleAuthUrl = '';
-      $('googleSignInLink').classList.add('hidden');
-    } else if (!google.connecting) {
-      state.googleAuthUrl = '';
-      $('googleSignInLink').classList.add('hidden');
-    }
     if (google.connecting || onedrive.connecting) startSourcePolling();
     else stopSourcePolling();
   } catch (error) {
@@ -183,7 +146,6 @@ async function searchCloudSource() {
   $('searchSources').textContent = 'Searching…';
   $('sourceResults').replaceChildren();
   try {
-    await restoreConnectorConfig();
     const result = await api('connectors/search', { source, query });
     renderCloudResults(Array.isArray(result.items) ? result.items : []);
   } catch (error) {
@@ -2399,7 +2361,6 @@ function saveFinanceProfile() {
 function applyHostedChrome() {
   showExecutionPath();
   if (!hostedRelay()) return;
-  $('cloudConnectorConfig')?.classList.add('hidden');
   $('cloudSources')?.classList.add('hidden');
   $('relayFields')?.classList.remove('hidden');
   $('localKeyFields')?.classList.add('hidden');
@@ -2445,42 +2406,10 @@ function toggleProviderFields() {
   refreshSettings();
 }
 
-function loadConnectorConfigForm() {
-  const config = storedConnectorConfig();
-  if (!config || hostedRelay()) return;
-  $('googleOAuthClientId').value = config.googleClientId || '';
-  $('googleOAuthClientSecret').value = config.googleClientSecret || '';
-  $('microsoftAppClientId').value = config.microsoftClientId || '';
-  $('rememberConnectorConfig').checked = true;
-}
-
-async function saveConnectorSettings() {
-  const config = {
-    googleClientId: $('googleOAuthClientId').value.trim(),
-    googleClientSecret: $('googleOAuthClientSecret').value.trim(),
-    microsoftClientId: $('microsoftAppClientId').value.trim()
-  };
-  try {
-    await api('connectors/configure', config);
-    rememberConnectorConfig($('rememberConnectorConfig').checked ? config : null);
-    connectorConfigReady = null;
-    state.googleAuthUrl = '';
-    $('googleSignInLink').classList.add('hidden');
-    toast($('rememberConnectorConfig').checked ? 'Cloud source settings saved on this PC.' : 'Cloud source settings saved in local relay memory.');
-    await refreshCloudSources();
-  } catch (error) { toast(error.message); }
-}
-
 async function connectGoogleSources() {
   try {
-    await restoreConnectorConfig();
-    const result = await api('connectors/google/authorize', {});
-    const authUrl = new URL(result.authorizationUrl);
-    if (authUrl.origin !== 'https://accounts.google.com') throw new Error('The relay returned an invalid Google sign-in link.');
-    state.googleAuthUrl = authUrl.href;
-    $('googleSignInLink').href = authUrl.href;
-    $('googleSignInLink').classList.remove('hidden');
-    toast('Use Continue sign-in to choose your Google account.');
+    await api('connectors/google/authorize', {});
+    toast('Complete Google sign-in in the browser window.');
     startSourcePolling();
     await refreshCloudSources();
   } catch (error) { toast(error.message); }
@@ -2488,20 +2417,16 @@ async function connectGoogleSources() {
 
 async function connectOneDrive() {
   try {
-    await restoreConnectorConfig();
     await api('connectors/onedrive/authorize', {});
+    toast('Complete Microsoft sign-in in the browser window.');
+    startSourcePolling();
     await refreshCloudSources();
-    if (state.oneDriveVerificationUri) toast('Open the Microsoft sign-in page and enter the displayed code.');
   } catch (error) { toast(error.message); }
 }
 
 async function disconnectSource(source) {
   try {
     await api('connectors/disconnect', { source });
-    if (source === 'google') {
-      state.googleAuthUrl = '';
-      $('googleSignInLink').classList.add('hidden');
-    }
     $('sourceResults').replaceChildren();
     await refreshCloudSources();
     toast(`${source === 'google' ? 'Google' : 'OneDrive'} disconnected from this relay.`);
@@ -2570,13 +2495,10 @@ $('clearKey').addEventListener('click', async () => {
   try { await api('clear-key', { provider }); rememberKey(provider, ''); keysReady = null; await refreshSettings(); toast('Key cleared.'); }
   catch (error) { toast(error.message); }
 });
-$('saveConnectorConfig').addEventListener('click', saveConnectorSettings);
 $('connectGoogle').addEventListener('click', connectGoogleSources);
 $('connectOneDrive').addEventListener('click', connectOneDrive);
 $('disconnectGoogle').addEventListener('click', () => disconnectSource('google'));
 $('disconnectOneDrive').addEventListener('click', () => disconnectSource('onedrive'));
-$('googleSignInLink').addEventListener('click', () => { if (state.googleAuthUrl) startSourcePolling(); });
-$('openOneDriveSignIn').addEventListener('click', () => startSourcePolling());
 $('searchSources').addEventListener('click', searchCloudSource);
 $('sourceQuery').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); searchCloudSource(); } });
 $('sourceType').addEventListener('change', () => {
@@ -2600,7 +2522,6 @@ $('prompt').addEventListener('keydown', event => { if (event.key === 'Enter' && 
 $('insertAnswer').addEventListener('click', insertAnswer);
 document.querySelectorAll('.action').forEach(button => button.addEventListener('click', () => { $('prompt').value = button.dataset.prompt; $('prompt').focus(); }));
 loadFinanceProfile();
-loadConnectorConfigForm();
 ['debitColumn', 'creditColumn', 'amountColumn', 'keyColumns', 'requiredColumns', 'entityColumn', 'currencyColumn', 'dateColumn', 'checkTolerance'].forEach(id => {
   $(id).addEventListener('change', saveFinanceProfile);
 });

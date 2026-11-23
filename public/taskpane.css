@@ -20,11 +20,6 @@
 .source-connect>div{display:flex;flex-direction:column;gap:3px;min-width:0}
 .source-connect strong{font-size:11px}
 .source-connect small{font-size:10px;color:#777d89;overflow-wrap:anywhere}
-.source-link{font-size:10px;color:#5145cd;font-weight:600;text-decoration:none;padding:5px 2px;white-space:nowrap}
-.source-link:hover{text-decoration:underline}
-.source-device{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#f7f6ff;border:1px solid #dedcf8;border-radius:8px;padding:8px;margin:7px 0}
-.source-device span{font-size:10px;color:#696d79}
-.source-device strong{font:700 14px Consolas,monospace;letter-spacing:.08em}
 .source-search{display:grid;grid-template-columns:94px minmax(0,1fr) auto;gap:6px;margin-top:10px}
 .source-search select,.source-search input{min-width:0;width:100%;border:1px solid #dfe1e6;border-radius:7px;padding:7px;font:11px inherit;font-family:inherit;background:white;color:#333}
 .source-results{display:flex;flex-direction:column;gap:6px;margin-top:8px}

@@ -1,4 +1,6 @@
 import { randomBytes, createHash } from 'node:crypto';
+import http from 'node:http';
+import { spawn } from 'node:child_process';
 import { Client, InMemoryTransport, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { McpServer } from '@modelcontextprotocol/server';
 import { PublicClientApplication } from '@azure/msal-node';
@@ -78,9 +80,29 @@ function safeError(error, fallback) {
   return message || fallback;
 }
 
+function openSystemBrowser(rawUrl) {
+  const url = new URL(rawUrl);
+  if (url.protocol !== 'https:' || !['accounts.google.com', 'login.microsoftonline.com'].includes(url.hostname)) {
+    throw new Error('The sign-in provider returned an unsupported browser URL.');
+  }
+  const command = process.platform === 'win32' ? 'rundll32.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const args = process.platform === 'win32' ? ['url.dll,FileProtocolHandler', url.href] : [url.href];
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true });
+    child.once('error', reject);
+    child.once('spawn', () => { child.unref(); resolve(); });
+  });
+}
+
+const GOOGLE_CLIENT_ID_RE = /^[A-Za-z0-9-]+\.apps\.googleusercontent\.com$/;
+const MICROSOFT_CLIENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export class LocalSourceMcp {
-  constructor() {
-    this.config = { googleClientId: '', googleClientSecret: '', microsoftClientId: '' };
+  constructor(config = {}) {
+    this.config = {
+      googleClientId: typeof config.googleClientId === 'string' ? config.googleClientId.trim().slice(0, 500) : '',
+      microsoftClientId: typeof config.microsoftClientId === 'string' ? config.microsoftClientId.trim().slice(0, 100) : ''
+    };
     this.googleToken = null;
     this.googleFlow = null;
     this.graphApp = null;
@@ -125,47 +147,19 @@ export class LocalSourceMcp {
     ]);
   }
 
-  async configure(input = {}) {
-    const next = { ...this.config };
-    for (const key of Object.keys(next)) {
-      if (input[key] === undefined) continue;
-      if (typeof input[key] !== 'string' || input[key].length > 2000) throw new Error('Connector settings are invalid.');
-      next[key] = input[key].trim();
-    }
-    if (Boolean(next.googleClientId) !== Boolean(next.googleClientSecret)) {
-      throw new Error('Enter both the Google OAuth client ID and client secret.');
-    }
-    if (next.microsoftClientId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(next.microsoftClientId)) {
-      throw new Error('The Microsoft application ID should be a GUID.');
-    }
-    if (next.googleClientId !== this.config.googleClientId || next.googleClientSecret !== this.config.googleClientSecret) {
-      this.googleToken = null;
-      this.googleFlow = null;
-    }
-    if (next.microsoftClientId !== this.config.microsoftClientId) {
-      this.graphApp = null;
-      this.graphClientId = '';
-      this.graphAccount = null;
-      this.graphFlow = null;
-    }
-    this.config = next;
-    return this.status();
-  }
-
   status() {
-    if (this.googleFlow && Date.now() - this.googleFlow.createdAt > 10 * 60_000) this.googleFlow = null;
+    if (this.googleFlow && Date.now() - this.googleFlow.createdAt > 10 * 60_000) this.clearGoogleFlow();
     const waiting = this.graphFlow && ['starting', 'waiting'].includes(this.graphFlow.status);
     return {
       google: {
-        configured: Boolean(this.config.googleClientId && this.config.googleClientSecret),
+        configured: GOOGLE_CLIENT_ID_RE.test(this.config.googleClientId),
         connected: Boolean(this.googleToken?.refreshToken || (this.googleToken?.accessToken && this.googleToken.expiresAt > Date.now())),
         connecting: Boolean(this.googleFlow)
       },
       onedrive: {
-        configured: Boolean(this.config.microsoftClientId),
+        configured: MICROSOFT_CLIENT_ID_RE.test(this.config.microsoftClientId),
         connected: Boolean(this.graphAccount),
         connecting: Boolean(waiting),
-        device: waiting ? this.graphFlow.device : null,
         error: this.graphFlow?.status === 'error' ? this.graphFlow.error : ''
       }
     };
@@ -176,12 +170,35 @@ export class LocalSourceMcp {
     return parseToolResult(await this.client.callTool({ name, arguments: args }));
   }
 
-  async startGoogleOAuth(port) {
-    if (!this.config.googleClientId || !this.config.googleClientSecret) throw new Error('Add the Google OAuth client ID and secret in Settings first.');
+  clearGoogleFlow() {
+    const flow = this.googleFlow;
+    this.googleFlow = null;
+    if (flow?.timer) clearTimeout(flow.timer);
+    if (flow?.callbackServer?.listening) flow.callbackServer.close();
+  }
+
+  async startGoogleOAuth() {
+    if (!GOOGLE_CLIENT_ID_RE.test(this.config.googleClientId)) throw new Error('Google cloud sign-in is not configured by the app owner yet.');
+    if (this.googleFlow) throw new Error('Google sign-in is already open. Finish it in your browser or wait for it to expire.');
     const state = randomBytes(32).toString('base64url');
     const verifier = randomBytes(48).toString('base64url');
     const challenge = createHash('sha256').update(verifier).digest('base64url');
-    const redirectUri = `http://localhost:${port}/api/connectors/google/callback`;
+    const callbackServer = http.createServer(async (req, res) => {
+      const callbackUrl = new URL(req.url || '/', 'http://127.0.0.1');
+      if (req.method !== 'GET' || callbackUrl.pathname !== '/') {
+        res.writeHead(callbackUrl.pathname === '/favicon.ico' ? 204 : 404, { 'Cache-Control': 'no-store' });
+        return res.end();
+      }
+      const result = await this.completeGoogleOAuth(callbackUrl);
+      res.writeHead(result.status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+      res.end(result.html);
+    });
+    await new Promise((resolve, reject) => {
+      callbackServer.once('error', reject);
+      callbackServer.listen(0, '127.0.0.1', resolve);
+    });
+    const port = callbackServer.address().port;
+    const redirectUri = `http://127.0.0.1:${port}`;
     const authorizationUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     authorizationUrl.searchParams.set('client_id', this.config.googleClientId);
     authorizationUrl.searchParams.set('redirect_uri', redirectUri);
@@ -192,27 +209,36 @@ export class LocalSourceMcp {
     authorizationUrl.searchParams.set('state', state);
     authorizationUrl.searchParams.set('code_challenge', challenge);
     authorizationUrl.searchParams.set('code_challenge_method', 'S256');
-    this.googleFlow = { state, verifier, redirectUri, createdAt: Date.now() };
-    return { authorizationUrl: authorizationUrl.href };
+    const flow = { state, verifier, redirectUri, createdAt: Date.now(), callbackServer };
+    this.googleFlow = flow;
+    flow.timer = setTimeout(() => { if (this.googleFlow === flow) this.clearGoogleFlow(); }, 10 * 60_000);
+    flow.timer.unref();
+    try {
+      await openSystemBrowser(authorizationUrl.href);
+      return { connecting: true };
+    } catch (error) {
+      this.clearGoogleFlow();
+      throw new Error(safeError(error, 'Could not open the system browser.'));
+    }
   }
 
   async completeGoogleOAuth(url) {
     const flow = this.googleFlow;
     if (!flow || Date.now() - flow.createdAt > 10 * 60_000) {
-      this.googleFlow = null;
+      this.clearGoogleFlow();
       return { status: 400, html: this.callbackPage(false, 'This sign-in request expired. Close this page and start again in the add-in.') };
     }
     if (url.searchParams.get('state') !== flow.state) {
-      this.googleFlow = null;
+      this.clearGoogleFlow();
       return { status: 400, html: this.callbackPage(false, 'The sign-in response could not be verified. Start again in the add-in.') };
     }
     if (url.searchParams.has('error')) {
-      this.googleFlow = null;
+      this.clearGoogleFlow();
       return { status: 400, html: this.callbackPage(false, 'Google sign-in was cancelled or declined.') };
     }
     const code = url.searchParams.get('code');
     if (!code) {
-      this.googleFlow = null;
+      this.clearGoogleFlow();
       return { status: 400, html: this.callbackPage(false, 'Google did not return an authorization code.') };
     }
     try {
@@ -221,7 +247,6 @@ export class LocalSourceMcp {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           client_id: this.config.googleClientId,
-          client_secret: this.config.googleClientSecret,
           code,
           code_verifier: flow.verifier,
           grant_type: 'authorization_code',
@@ -237,10 +262,10 @@ export class LocalSourceMcp {
         expiresAt: Date.now() + Math.max(60, Number(tokenData.expires_in) || 3600) * 1000,
         refreshToken: tokenData.refresh_token || this.googleToken?.refreshToken || ''
       };
-      this.googleFlow = null;
+      this.clearGoogleFlow();
       return { status: 200, html: this.callbackPage(true, 'Google Drive and Gmail are connected for this Windows user. You can close this page and return to the add-in.') };
     } catch (error) {
-      this.googleFlow = null;
+      this.clearGoogleFlow();
       return { status: 400, html: this.callbackPage(false, safeError(error, 'Google sign-in failed. Check the OAuth setup and try again.')) };
     }
   }
@@ -259,7 +284,6 @@ export class LocalSourceMcp {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         client_id: this.config.googleClientId,
-        client_secret: this.config.googleClientSecret,
         refresh_token: this.googleToken.refreshToken,
         grant_type: 'refresh_token'
       }),
@@ -352,30 +376,23 @@ export class LocalSourceMcp {
     return { name: messages[0]?.subject || 'Gmail thread', kind: 'Gmail thread', ...truncateText(body) };
   }
 
-  async startOneDriveDeviceFlow() {
+  async startOneDriveInteractiveFlow() {
     const clientId = this.config.microsoftClientId;
-    if (!clientId) throw new Error('Add the Microsoft public application ID in Settings first.');
-    if (this.graphFlow && ['starting', 'waiting'].includes(this.graphFlow.status)) return this.graphFlow.device;
+    if (!MICROSOFT_CLIENT_ID_RE.test(clientId)) throw new Error('OneDrive sign-in is not configured by the app owner yet.');
+    if (this.graphFlow && ['starting', 'waiting'].includes(this.graphFlow.status)) return { connecting: true };
     if (!this.graphApp || this.graphClientId !== clientId) {
       this.graphApp = new PublicClientApplication({ auth: { clientId, authority: 'https://login.microsoftonline.com/consumers/' } });
       this.graphClientId = clientId;
       this.graphAccount = null;
     }
-    const flow = { status: 'starting', device: null, error: '', promise: null };
+    const flow = { status: 'starting', error: '', promise: null };
     this.graphFlow = flow;
-    let resolveDevice;
-    const deviceReady = new Promise(resolve => { resolveDevice = resolve; });
-    flow.promise = this.graphApp.acquireTokenByDeviceCode({
+    flow.promise = this.graphApp.acquireTokenInteractive({
       scopes: GRAPH_SCOPES,
-      deviceCodeCallback: response => {
-        flow.device = {
-          verificationUri: String(response.verificationUri || 'https://microsoft.com/devicelogin'),
-          userCode: String(response.userCode || ''),
-          expiresOn: response.expiresOn ? new Date(response.expiresOn).toISOString() : ''
-        };
-        flow.status = 'waiting';
-        resolveDevice(flow.device);
-      }
+      prompt: 'select_account',
+      openBrowser: openSystemBrowser,
+      successTemplate: '<!doctype html><meta charset="utf-8"><title>OneDrive connected</title><h2>OneDrive connected</h2><p>Close this window and return to Excel or Word.</p>',
+      errorTemplate: '<!doctype html><meta charset="utf-8"><title>Sign-in not completed</title><h2>Sign-in not completed</h2><p>Close this window and retry Connect in Excel or Word.</p>'
     }).then(async result => {
       if (!result?.account) throw new Error('Microsoft sign-in did not return an account.');
       if (this.graphFlow !== flow) {
@@ -384,19 +401,14 @@ export class LocalSourceMcp {
       }
       this.graphAccount = result.account;
       flow.status = 'connected';
-      flow.device = null;
       return true;
     }).catch(error => {
       flow.status = 'error';
       flow.error = safeError(error, 'Microsoft sign-in failed.');
-      flow.device = null;
       return false;
     });
-    const device = await Promise.race([
-      deviceReady,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Microsoft sign-in did not start. Check the application registration.')), 8000))
-    ]);
-    return device;
+    flow.status = 'waiting';
+    return { connecting: true };
   }
 
   async graphAccessToken() {
@@ -542,7 +554,7 @@ export class LocalSourceMcp {
   async disconnect(source) {
     if (source === 'google') {
       this.googleToken = null;
-      this.googleFlow = null;
+      this.clearGoogleFlow();
       return;
     }
     if (source === 'onedrive') {
