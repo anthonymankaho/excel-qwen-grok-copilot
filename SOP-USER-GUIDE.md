@@ -95,6 +95,10 @@ Even with **Direct on**, these are held for **Apply edits** / **Apply risky chan
 
 **Validation card** — for finance work. Debit = credit uses the Debit and Credit headers, or the columns set under **Finance checks** in Settings. Default tolerance 0.01. If those columns are not identified the card says **NEEDS_USER** and does *not* call the difference a pass or a fail. Formula errors, blank required fields, duplicate keys and a moved amount fail when their columns are known; a changed row count is a warning.
 
+**Finance evidence card** — appears when a prompt or its supplied context is finance-related. It lists the workbook ranges and report/document lines sent to the model, then checks bracketed citations such as `[Sheet1!A1:C8]` or `[report.html:L0001-L0008]` against those locations. A match confirms only that the location was supplied; it does not prove that the location supports the claim. Agent validation cards show independently calculated checks and their source range. Chat arithmetic is not independently recalculated by the add-in.
+
+**財務證據卡** — 當問題或所提供上下文涉及財務時顯示。卡片會列出傳給模型的工作簿範圍及報表／文件行數，並把 `[Sheet1!A1:C8]` 或 `[report.html:L0001-L0008]` 等方括號引用與已提供位置比對。比對成功只代表該位置已提供，不能證明該來源支持答案。Agent 驗證卡會顯示增益集獨立計算的檢查及其來源範圍；Chat 的算術不會由增益集獨立重算。
+
 **Audit card** — ends every turn. It records the request, provider, context reads, model decisions, actions, checks and stop reason. **It contains no API key.** `Execute FAILED` now carries the real error text, and rejected actions appear as `N rejected as unusable`. **New chat** clears it.
 
 **If a batch fails**, the pane tells the model the actual error so it can correct itself. Read the audit line rather than guessing.

@@ -11,6 +11,7 @@ const PROFILE_MAX_ROWS = 2000; // Profiling reads whole ranges, so it is bounded
 const PROFILE_MAX_COLS = 60;
 const PROFILE_DISTINCT = 12; // Sample values shown per column; enough to identify a grouping field.
 const CELL_CHAR_LIMIT = 32767;
+const FINANCE_EVIDENCE_INSTRUCTION = `\n\n[Finance evidence rules — apply only when the request or supplied data is finance/accounting related. Keep the response in English and Traditional Chinese, with aligned concise sections: Conclusion / 結論; Verified facts / 已核實資料; Calculation checks / 計算檢查; Assumptions and missing information / 假設及缺漏。 Cite each material claim and amount to an exact supplied location: Excel [Sheet!A1] or [Sheet!A1:C8], Word [Selection:L0001-L0005], or report [filename:L0001-L0005]. Excel context identifies column letters and row numbers; attached text identifies line numbers and preserves HTML headings. Never invent a cell, line, period, currency, or value. If only workbook metadata was supplied, request the exact range before claiming a value is verified. Show calculation inputs, formula, result, and rounding/tolerance. Say when a calculation is model-generated and has not been independently recalculated by the add-in. Only call an add-in check PASS when its validation card says PASS; report FAIL, WARNING, or NEEDS_USER as shown. Keep assumptions separate from source facts and state when evidence is insufficient. Do not change the required Agent JSON envelope.`;
 const KEY_STORE = 'eqgc.keys.v1';
 const RELAY_STORE = 'eqgc.relay.v1';
 const RISKY_FORMULA = /^=.*\b(?:WEBSERVICE|FILTERXML|RTD|REGISTER\.ID|CALL|DDE|INFO|HYPERLINK)\s*\(/i;
@@ -153,7 +154,7 @@ function addSourceAttachment(name, kind, sourceText) {
   if (state.attachments.length >= ATTACHMENT_MAX_FILES) { toast(`Attach up to ${ATTACHMENT_MAX_FILES} files per chat.`); return; }
   const text = String(sourceText || '').trim();
   if (!text) { toast('The selected source returned no readable text.'); return; }
-  const clipped = trimContext(text, ATTACHMENT_FILE_CAP);
+  const clipped = trimContext(annotateEvidenceLines(text), ATTACHMENT_FILE_CAP);
   state.attachments.push({ name: String(name || 'Cloud source').slice(0, 240), kind: String(kind || 'Cloud source').slice(0, 60), size: 0, text: clipped.text, chars: clipped.text.length, truncated: clipped.truncated });
   renderAttachments();
   refreshContextCard();
@@ -203,12 +204,26 @@ function flatCell(value) {
   return String(value ?? '').replace(/[\t\r\n]+/g, ' ');
 }
 
-function annotateRows(rows, formulas) {
-  return (rows || []).map((row, i) => (row || []).map((value, j) => {
-    const formula = formulas?.[i]?.[j];
-    const shown = flatCell(value);
-    return formula && String(formula).startsWith('=') ? `${shown} [${flatCell(formula)}]` : shown;
-  }).join('\t')).join('\n');
+function annotateRows(rows, formulas, address = '') {
+  const range = String(address || '').split('!').pop().replace(/\$/g, '').split(':')[0];
+  const origin = range.match(/^([A-Z]{1,3})([1-9]\d{0,6})$/i);
+  const firstColumn = origin ? columnIndex(origin[1]) : 0;
+  const firstRow = origin ? Number(origin[2]) : 0;
+  const data = (rows || []).map((row, i) => {
+    const cells = (row || []).map((value, j) => {
+      const formula = formulas?.[i]?.[j];
+      const shown = flatCell(value);
+      return formula && String(formula).startsWith('=') ? `${shown} [${flatCell(formula)}]` : shown;
+    }).join('\t');
+    return origin ? `Row ${firstRow + i}:\t${cells}` : cells;
+  });
+  if (origin && rows?.length) data.unshift(`Columns: ${(rows[0] || []).map((_, i) => indexToColumn(firstColumn + i)).join('\t')}`);
+  return data.join('\n');
+}
+
+function annotateEvidenceLines(text) {
+  return String(text || '').replace(/\r\n?/g, '\n').split('\n')
+    .map((line, index) => `[L${String(index + 1).padStart(4, '0')}] ${line}`).join('\n');
 }
 
 function trimContext(text, limit) {
@@ -230,7 +245,7 @@ async function buildWordContext(limit = CONTEXT_CAP) {
     return null;
   });
   if (!source) return null;
-  const clipped = trimContext(source.text, limit);
+  const clipped = trimContext(annotateEvidenceLines(source.text), limit);
   return { header: `[Word ${source.kind}]`, text: clipped.text, address: source.kind === 'selection' ? 'Selection' : 'Document', kind: source.kind, truncated: clipped.truncated, chars: clipped.text.length };
 }
 
@@ -244,7 +259,7 @@ async function buildContext(limit = CONTEXT_CAP) {
   }
   if (!source) { source = await readUsedRange(); kind = 'used range'; }
   if (!source) return null;
-  let text = annotateRows(source.text, source.formulas);
+  let text = annotateRows(source.text, source.formulas, source.address);
   if (!text) return null;
   let truncated = false;
   if (source.gridTruncated) {
@@ -277,6 +292,79 @@ function attachmentContext() {
   }
   if (state.attachments.length && state.attachments.some(file => !out.includes(`[Attached file START: ${file.name.replace(/[\[\]\r\n]/g, '_')} · ${file.kind}]`))) out = out.slice(0, ATTACHMENT_CAP - 110) + '\n[Other selected files omitted at the attachment context limit.]';
   return out;
+}
+
+function collectFinanceSources(ctx, attachmentText) {
+  const sources = [];
+  if (ctx?.address) {
+    if (ctx.kind === 'metadata') sources.push('Workbook metadata only · no cell values were read');
+    else if (state.host === 'Word') {
+      const lines = [...String(ctx.text || '').matchAll(/^\[L(\d+)\]/gm)].map(match => Number(match[1]));
+      const lineRef = lines.length ? ` · L${String(lines[0]).padStart(4, '0')}-L${String(lines.at(-1)).padStart(4, '0')}` : '';
+      sources.push(`Word ${ctx.address}${lineRef}${ctx.truncated ? ' · truncated' : ''}`);
+    } else sources.push(`Excel ${ctx.address}${ctx.truncated ? ' · truncated' : ''}`);
+  }
+  for (const file of state.attachments) {
+    const label = file.name.replace(/[\[\]\r\n]/g, '_');
+    const marker = `[Attached file START: ${label} · ${file.kind}]\n`;
+    const start = attachmentText.indexOf(marker);
+    if (start < 0) continue;
+    const contentStart = start + marker.length;
+    const end = attachmentText.indexOf('\n[Attached file END]', contentStart);
+    const excerpt = attachmentText.slice(contentStart, end < 0 ? attachmentText.length : end);
+    const lineNumbers = [...excerpt.matchAll(/^\[L(\d+)\]/gm)].map(match => Number(match[1]));
+    const lineRef = lineNumbers.length
+      ? `L${String(lineNumbers[0]).padStart(4, '0')}-L${String(lineNumbers.at(-1)).padStart(4, '0')}`
+      : 'included text';
+    sources.push(`${file.name} · ${lineRef}${file.truncated ? ' · source truncated' : ''}`);
+  }
+  return [...new Set(sources)];
+}
+
+function a1Bounds(range) {
+  const pieces = String(range || '').replace(/\$/g, '').split(':');
+  const parse = cell => {
+    const match = cell.match(/^([A-Z]{1,3})([1-9]\d{0,6})$/i);
+    return match ? { column: columnIndex(match[1]), row: Number(match[2]) } : null;
+  };
+  const first = parse(pieces[0] || '');
+  const last = parse(pieces[1] || pieces[0] || '');
+  return first && last ? { top: first.row, left: first.column, bottom: last.row, right: last.column } : null;
+}
+
+function financeCitationCheck(answer, sources) {
+  const citations = [...String(answer || '').matchAll(/\[([^\]\r\n]+)\]/g)]
+    .map(match => match[1].trim())
+    .filter(value => /!\$?[A-Z]{1,3}\$?\d/i.test(value) || /:L\d+/i.test(value));
+  return [...new Set(citations)].map(citation => {
+    const excel = citation.match(/^(.+)!([^!]+)$/);
+    if (excel) {
+      const citationSheet = normalizeSheet(excel[1]);
+      const citationBounds = a1Bounds(excel[2]);
+      const matched = citationBounds && sources.some(source => {
+        const address = source.replace(/^Excel\s+/i, '').split(' · ')[0];
+        const parts = address.split('!');
+        if (parts.length < 2 || normalizeSheet(parts.at(-2))?.toLowerCase() !== citationSheet?.toLowerCase()) return false;
+        const bounds = a1Bounds(parts.at(-1));
+        return bounds && citationBounds.top >= bounds.top && citationBounds.left >= bounds.left
+          && citationBounds.bottom <= bounds.bottom && citationBounds.right <= bounds.right;
+      });
+      return { citation, matched: Boolean(matched) };
+    }
+    const line = citation.match(/^(.+):L(\d+)(?:-L(\d+))?$/i);
+    if (line) {
+      const citedName = line[1].replace(/^Word\s+/i, '').toLowerCase();
+      const citedStart = Number(line[2]);
+      const citedEnd = Number(line[3] || line[2]);
+      const matched = sources.some(source => {
+        const ref = source.match(/^(.*) · L(\d+)-L(\d+)/);
+        if (!ref || ref[1].replace(/^Word\s+/i, '').toLowerCase() !== citedName) return false;
+        return citedStart >= Number(ref[2]) && citedEnd <= Number(ref[3]);
+      });
+      return { citation, matched: Boolean(matched) };
+    }
+    return { citation, matched: false };
+  });
 }
 
 function renderAttachments() {
@@ -324,6 +412,10 @@ function htmlAttachmentText(source) {
     if (caption) lines.unshift(caption);
     table.replaceWith(doc.createTextNode(`\n${lines.join('\n')}\n`));
   }
+  doc.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(node => {
+    const level = Number(node.tagName.slice(1)) || 1;
+    node.insertBefore(doc.createTextNode(`${'#'.repeat(level)} `), node.firstChild);
+  });
   doc.querySelectorAll('br').forEach(node => node.replaceWith(doc.createTextNode('\n')));
   doc.querySelectorAll('h1,h2,h3,h4,h5,h6,p,div,section,article,main,header,footer,li,tr').forEach(node => { node.before(doc.createTextNode('\n')); node.after(doc.createTextNode('\n')); });
   const title = (doc.querySelector('title')?.textContent || '').replace(/\s+/g, ' ').trim();
@@ -337,7 +429,7 @@ async function readAttachment(file) {
   if (!supported.has(ext)) throw new Error(`${file.name}: supported files are HTML, TXT, MD, CSV, TSV, JSON and XML.`);
   if (file.size > ATTACHMENT_MAX_BYTES) throw new Error(`${file.name}: file is over the 5 MB limit.`);
   const text = decodeAttachment(new Uint8Array(await file.arrayBuffer()), ext);
-  const extracted = ext === 'html' || ext === 'htm' ? htmlAttachmentText(text) : text.replace(/\u0000/g, '');
+  const extracted = annotateEvidenceLines(ext === 'html' || ext === 'htm' ? htmlAttachmentText(text) : text.replace(/\u0000/g, ''));
   if (!extracted.trim()) throw new Error(`${file.name}: no readable text was found.`);
   const clipped = trimContext(extracted, ATTACHMENT_FILE_CAP);
   return { name: file.name, kind: ext.toUpperCase(), size: file.size, text: clipped.text, chars: clipped.text.length, truncated: clipped.truncated };
@@ -1898,6 +1990,14 @@ function renderAuditCard() {
   conversation.scrollTop = conversation.scrollHeight;
 }
 
+function validationEvidence(result) {
+  return (result.details || []).map(detail => {
+    const relative = String(detail).match(/^R(\d+)C(\d+)$/);
+    if (!relative || !result.sheet || !result.range) return detail;
+    return `${result.sheet}!${cellAddress(result.range, Number(relative[1]) - 1, Number(relative[2]) - 1)}`;
+  });
+}
+
 function renderValidation(results) {
   const conversation = $('conversation');
   const card = document.createElement('div');
@@ -1910,8 +2010,16 @@ function renderValidation(results) {
   results.forEach(result => {
     const row = document.createElement('div');
     row.className = result.status === 'FAIL' ? 'edit-warning' : 'edit-note';
-    row.textContent = `${result.status} ${result.check}: before ${result.before} after ${result.after} difference ${result.difference}`;
-    card.append(row);
+    const location = result.sheet && result.range ? ` · ${result.sheet}!${result.range}` : '';
+    const tolerance = Number.isFinite(result.tolerance) ? ` · tolerance ${result.tolerance}` : '';
+    row.textContent = `${result.status} ${result.check}${location}: before ${result.before} after ${result.after} difference ${result.difference}${tolerance}`;
+    if (result.details?.length) {
+      const detail = document.createElement('div');
+      detail.className = 'edit-note';
+      const evidence = validationEvidence(result);
+      detail.textContent = `Evidence: ${evidence.slice(0, 5).join('; ')}${evidence.length > 5 ? `; +${evidence.length - 5} more` : ''}`;
+      card.append(row, detail);
+    } else card.append(row);
     if (result.status === 'FAIL' || result.status === 'NEEDS_USER') {
       const explained = AgentCore.explainFailure(result);
       const note = document.createElement('div');
@@ -1920,6 +2028,78 @@ function renderValidation(results) {
       card.append(note);
     }
   });
+  conversation.append(card);
+  conversation.scrollTop = conversation.scrollHeight;
+}
+
+function renderFinanceEvidenceCard(sources, validations = [], answer = '') {
+  const conversation = $('conversation');
+  const card = document.createElement('div');
+  card.className = 'message assistant edits-card';
+  const label = document.createElement('div');
+  label.className = 'message-label';
+  label.textContent = 'FINANCE EVIDENCE · 財務證據';
+  card.append(label);
+
+  const sourceLabel = document.createElement('div');
+  sourceLabel.className = 'edit-note';
+  sourceLabel.textContent = 'Sources sent to the model · 傳給模型的來源';
+  card.append(sourceLabel);
+  if (sources.length) {
+    sources.forEach(source => {
+      const row = document.createElement('div');
+      row.className = 'edit-row';
+      row.textContent = source;
+      card.append(row);
+    });
+  } else {
+    const row = document.createElement('div');
+    row.className = 'edit-warning';
+    row.textContent = 'No workbook or report data was read; this answer is not source-verified. · 未讀取工作簿或報表資料；此答案未經來源核實。';
+    card.append(row);
+  }
+
+  const citationLabel = document.createElement('div');
+  citationLabel.className = 'edit-note';
+  citationLabel.textContent = 'Answer citation locations · 答案中的來源位置';
+  card.append(citationLabel);
+  const citations = financeCitationCheck(answer, sources);
+  if (!citations.length) {
+    const row = document.createElement('div');
+    row.className = 'edit-warning';
+    row.textContent = 'No supported source citations were detected in the answer. · 答案中未偵測到可比對的來源標記。';
+    card.append(row);
+  } else {
+    citations.forEach(item => {
+      const row = document.createElement('div');
+      row.className = item.matched ? 'edit-row' : 'edit-warning';
+      row.textContent = `${item.matched ? 'Location matched' : 'Location not found in supplied context'} · ${item.citation}`;
+      card.append(row);
+    });
+    const note = document.createElement('div');
+    note.className = 'edit-note';
+    note.textContent = 'Location matching does not confirm that the cited source supports the claim. · 位置比對不代表該來源必然支持該結論。';
+    card.append(note);
+  }
+
+  if (validations.length) {
+    const checkLabel = document.createElement('div');
+    checkLabel.className = 'edit-note';
+    checkLabel.textContent = 'Add-in calculation checks · 增益集計算檢查';
+    card.append(checkLabel);
+    validations.forEach(result => {
+      const row = document.createElement('div');
+      row.className = result.status === 'FAIL' ? 'edit-warning' : 'edit-row';
+      const location = result.sheet && result.range ? ` · ${result.sheet}!${result.range}` : '';
+      row.textContent = `${result.status} ${result.check}${location} · before ${result.before} · after ${result.after} · difference ${result.difference}`;
+      card.append(row);
+    });
+  } else {
+    const row = document.createElement('div');
+    row.className = 'edit-note';
+    row.textContent = 'The add-in did not independently validate this answer’s arithmetic. · 本增益集沒有獨立驗證此答案的計算。';
+    card.append(row);
+  }
   conversation.append(card);
   conversation.scrollTop = conversation.scrollHeight;
 }
@@ -2046,12 +2226,17 @@ async function sendAgentPrompt(prompt) {
     if (routed.error) { toast(routed.error); return; }
     state.audit.push(AgentCore.audit({ kind: 'request', mode, provider: routed.provider, reason: routed.reason, text: clean.slice(0, 500) }));
     const files = attachmentContext();
-    const contextLimit = Math.max(0, Math.min(CONTEXT_CAP, 49_000 - clean.length - files.length - 300));
+    const contextLimit = Math.max(0, Math.min(CONTEXT_CAP, 49_000 - clean.length - files.length - FINANCE_EVIDENCE_INSTRUCTION.length - 300));
     if (contextLimit < 300 && $('includeContext').checked) { toast('The prompt and attachments leave too little room for workbook context. Remove a file or shorten the prompt.'); return; }
     let ctx = null;
     try { ctx = await contextForMode(mode, contextLimit); } catch (error) { if (turn === state.turn) toast(`Could not read workbook context: ${error.message}`); }
     if (turn !== state.turn) return;
-    const content = `${clean}${files}${ctx ? `\n\n${ctx.header}\n${ctx.text}` : ''}\n\n[Mode: ${mode}]`;
+    const financeTask = AgentCore.isFinancePrompt(`${clean}\n${files}\n${ctx?.text || ''}`);
+    const evidenceSources = collectFinanceSources(ctx, files);
+    const financeValidations = [];
+    let financeAnswerText = '';
+    const userPrompt = financeTask ? `${clean}${FINANCE_EVIDENCE_INSTRUCTION}` : clean;
+    const content = `${userPrompt}${files}${ctx ? `\n\n${ctx.header}\n${ctx.text}` : ''}\n\n[Mode: ${mode}]`;
     if (content.length > 49_500) { toast('Message plus workbook context is too large — shorten the message or turn context off.'); return; }
     state.forceSheet = false;
     state.messages.push({ role: 'user', content });
@@ -2076,6 +2261,7 @@ async function sendAgentPrompt(prompt) {
       if (turn !== state.turn) return;
       const envelope = AgentCore.parseEnvelope(result.text);
       const revision = parseRevision(result.text);
+      financeAnswerText = envelope.prose || revision.prose;
       state.messages.push({ role: 'assistant', content: result.text });
       state.lastAnswer = envelope.prose || revision.prose;
       $('insertAnswer').disabled = !state.lastAnswer;
@@ -2107,7 +2293,9 @@ async function sendAgentPrompt(prompt) {
         if (profile) {
           const text = formatProfile(sheet, profile).slice(0, 8000);
           state.messages.push({ role: 'user', content: `Requested profile.\n\n${text}` });
-          state.audit.push(AgentCore.audit({ kind: 'context', address: `${sheet}!${profile.address} (profile)`, chars: text.length }));
+          const address = `${sheet}!${profile.address}`;
+          evidenceSources.push(`${address} · profile statistics`);
+          state.audit.push(AgentCore.audit({ kind: 'context', address: `${address} (profile)`, chars: text.length }));
         } else {
           state.messages.push({ role: 'user', content: `No profile was produced for "${envelope.profileRequest.sheet}": ${failure}. Nothing was read, so this is not a successful read.` });
           state.audit.push(AgentCore.audit({ kind: 'blocked', reason: `profile rejected: ${failure}` }));
@@ -2121,11 +2309,12 @@ async function sendAgentPrompt(prompt) {
         const range = boundedRange(envelope.contextRequest.range, READ_MAX_CELLS);
         if (sheet && range) {
           const grid = await readGrid(sheet, range);
-          const full = annotateRows(grid.values, grid.formulas);
+          const full = annotateRows(grid.values, grid.formulas, `${sheet}!${range}`);
           const text = full.slice(0, 8000);
           const cut = full.length > text.length ? '\n[truncated: the read exceeded the context budget]' : '';
           const note = `Requested context.\n\n[Excel range ${sheet}!${range}]\n${text}${cut}`;
           state.messages.push({ role: 'user', content: note });
+          evidenceSources.push(`${sheet}!${range}${cut ? ' · truncated' : ''}`);
           state.audit.push(AgentCore.audit({ kind: 'context', address: `${sheet}!${range}`, chars: text.length }));
           guard += 1;
           continue;
@@ -2159,8 +2348,14 @@ async function sendAgentPrompt(prompt) {
         continue;
       }
       const afterGrids = await gridsForChecks(checks);
-      const validations = checks.map(check => AgentCore.evaluateGridCheck({ ...check, profile }, afterGrids[check.id], beforeGrids[check.id]));
-      validations.forEach(result => state.audit.push(AgentCore.audit({ kind: 'validation', status: result.status, check: result.check, before: result.before, after: result.after, difference: result.difference })));
+      const validations = checks.map(check => ({
+        ...AgentCore.evaluateGridCheck({ ...check, profile }, afterGrids[check.id], beforeGrids[check.id]),
+        sheet: check.sheet,
+        range: check.range,
+        tolerance: Number.isFinite(check.tolerance) ? check.tolerance : profile.tolerance
+      }));
+      if (financeTask) financeValidations.push(...validations);
+      validations.forEach(result => state.audit.push(AgentCore.audit({ kind: 'validation', status: result.status, check: result.check, address: `${result.sheet}!${result.range}`, before: result.before, after: result.after, difference: result.difference })));
       if (validations.length) renderValidation(validations);
       const next = AgentCore.decide({ decision: envelope.decision, validations, iteration: guard, maxLoops: AgentCore.MAX_LOOPS });
       if (next === 'FAILED') {
@@ -2196,6 +2391,7 @@ async function sendAgentPrompt(prompt) {
       toast(`Agent reached its ${AgentCore.MAX_LOOPS}-round limit. Review the audit card and send a follow-up to continue.`);
     }
     renderAuditCard();
+    if (financeTask) renderFinanceEvidenceCard([...new Set(evidenceSources)], financeValidations, financeAnswerText);
     refreshContextCard();
   } catch (error) {
     const bodyEl = error.bubble?.parent ? error.bubble.children[error.bubble.children.length - 1] : null;
@@ -2231,12 +2427,14 @@ async function sendPrompt(prompt) {
     if (turn !== state.turn) return;
     const provider = $('activeProvider').value;
     const files = attachmentContext();
-    const contextLimit = Math.max(0, Math.min(CONTEXT_CAP, 49_000 - clean.length - files.length - 100));
+    const contextLimit = Math.max(0, Math.min(CONTEXT_CAP, 49_000 - clean.length - files.length - FINANCE_EVIDENCE_INSTRUCTION.length - 100));
     if (contextLimit < 300 && $('includeContext').checked) { toast('The prompt and attachments leave too little room for workbook context. Remove a file or shorten the prompt.'); return; }
     let ctx = null;
     try { ctx = await buildContext(contextLimit); } catch (error) { if (turn === state.turn) toast(`Could not read workbook context: ${error.message}`); }
     if (turn !== state.turn) return;
-    const content = `${clean}${files}${ctx ? `\n\n${ctx.header}\n${ctx.text}` : ''}`;
+    const financeTask = AgentCore.isFinancePrompt(`${clean}\n${files}\n${ctx?.text || ''}`);
+    const evidenceSources = collectFinanceSources(ctx, files);
+    const content = `${clean}${financeTask ? FINANCE_EVIDENCE_INSTRUCTION : ''}${files}${ctx ? `\n\n${ctx.header}\n${ctx.text}` : ''}`;
     if (content.length > 49_500) { toast('Message plus workbook context is too large — shorten the message or turn context off.'); return; }
     state.forceSheet = false;
     state.messages.push({ role: 'user', content });
@@ -2250,6 +2448,7 @@ async function sendPrompt(prompt) {
     result.bubble.children[result.bubble.children.length - 1].textContent = revision.prose;
     if (revision.actions) await renderPlanCard(revision.actions, revision.skipped);
     else if (revision.edits) await renderEditsCard(revision.edits, revision.skipped);
+    if (financeTask) renderFinanceEvidenceCard(evidenceSources, [], revision.prose);
     refreshContextCard();
   } catch (error) {
     const bodyEl = error.bubble?.parent ? error.bubble.children[error.bubble.children.length - 1] : null;

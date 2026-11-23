@@ -98,6 +98,10 @@
     return { prose: source, plan: null, actions: null, decision: '', contextRequest: null, profileRequest: null };
   }
 
+  function isFinancePrompt(text) {
+    return /\b(?:finance|financial|accounting|reconcil(?:e|iation|ing)|journal|ledger|subledger|trial balance|debit|credit|month[- ]end|accrual|cash flow|profit and loss|income statement|balance sheet|working capital|accounts receivable|accounts payable|inventory|depreciation|tax|audit|hkfrs|hkas|ifrs|ias)\b|\b(?:p&l|ar|ap|a\/r|a\/p)\b|財務|會計|對賬|對帳|月結|月尾|分錄|借方|貸方|應收|應付|試算表|總賬|總帳|現金流|損益|資產負債|利潤|收入|成本|費用|稅務|稅項|審計|存貨|固定資產|折舊|租賃|預算|預測/i.test(String(text || ''));
+  }
+
   function routeProvider({ selected, mode, fast, text, ready }) {
     const available = name => Boolean(ready?.[name]);
     if (selected === 'qwen' || selected === 'grok') {
@@ -105,7 +109,7 @@
       return { provider: selected, reason: 'manual', fallback: '' };
     }
     if (selected !== 'auto') return { error: 'Choose Qwen, Grok, or Auto.', provider: '' };
-    const finance = /reconcil|journal|debit|credit|month-end|month end|trial balance|ledger|subledger|accrual/i.test(String(text || ''));
+    const finance = isFinancePrompt(text);
     const complex = mode === 'agent' || mode === 'plan' || finance || String(text || '').length > 500;
     const prefer = complex && !fast ? ['grok', 'qwen'] : ['qwen', 'grok'];
     const provider = prefer.find(available);
@@ -387,7 +391,7 @@
         const reason = entry.reason ? ` · ${entry.reason}` : '';
         return `Execute ${entry.status} · ${entry.count || 0} actions · blocked ${entry.blocked || 0}${skipped}${reason}`;
       }
-      if (entry.kind === 'validation') return `${entry.status} ${entry.check} · before ${entry.before} after ${entry.after} diff ${entry.difference}`;
+      if (entry.kind === 'validation') return `${entry.status} ${entry.check}${entry.address ? ` @ ${entry.address}` : ''} · before ${entry.before} after ${entry.after} diff ${entry.difference}`;
       if (entry.kind === 'blocked') return `Blocked · ${entry.reason}`;
       if (entry.kind === 'stopped') return `Stopped · ${entry.reason}`;
       if (entry.kind === 'fallback') return `Fallback to ${entry.provider} · ${entry.reason}`;
@@ -396,7 +400,7 @@
   }
 
   root.AgentCore = {
-    MAX_LOOPS, parseEnvelope, normalizePlan, normalizeFinanceProfile, routeProvider, isDestructive, isExcelError,
+    MAX_LOOPS, parseEnvelope, normalizePlan, normalizeFinanceProfile, isFinancePrompt, routeProvider, isDestructive, isExcelError,
     evaluateGridCheck, explainFailure, decide, audit, summarize, sumNumbers
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
