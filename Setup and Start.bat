@@ -1,6 +1,6 @@
 @echo off
 cd /d "%~dp0"
-echo === Qwen + Grok for Excel: first-time setup ===
+echo === Qwen for Excel: first-time setup ===
 call npm install
 call npm run autostart
 echo.

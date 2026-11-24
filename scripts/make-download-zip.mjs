@@ -3,10 +3,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateRawSync, inflateRawSync, crc32 } from 'node:zlib';
 
-const ROOT_NAME = 'Qwen-Grok-for-Excel-and-Word';
+const ROOT_NAME = 'Qwen-for-Excel-and-Word';
 const SKIP_DIRS = new Set(['node_modules', '.git', '.wrangler', 'download']);
 
-export const START_HERE = `Qwen + Grok for Excel and Word
+export const START_HERE = `Qwen for Excel and Word
 
 This folder has no API keys. Each person uses their own key.
 
@@ -19,7 +19,7 @@ INSTALL FROM A TERMINAL  (recommended)
      npm start
 
    If the folder path contains spaces, quote it:
-     cd "C:\\Users\\Your Name\\Qwen-Grok-for-Excel-and-Word"
+     cd "C:\\Users\\Your Name\\Qwen-for-Excel-and-Word"
 
    npm run setup checks Node 20+, runs npm install, and prints the next steps.
    npm start sideloads the add-in and opens Excel. Leave that terminal window
@@ -34,8 +34,8 @@ OR DOUBLE-CLICK
    running at sign-in. npm start alone is enough to use the add-in.
 
 FIRST USE
-4. In Excel: Home > Add-ins > Qwen + Grok for Excel and Word.
-5. Settings > pick Qwen or Grok > paste YOUR OWN key > leave Remember
+4. In Excel: Home > Add-ins > Qwen for Excel and Word.
+5. Settings > paste YOUR OWN Qwen key > leave Remember
    ticked > Use key. The dot turns green.
 
 OPTIONAL CLOUD SOURCES
@@ -192,7 +192,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isDirectRun) {
   const projectRoot = path.resolve(here, '..');
-  const outFile = path.resolve(projectRoot, process.argv[2] || 'download/Qwen-Grok-for-Excel-and-Word.zip');
+  const outFile = path.resolve(projectRoot, process.argv[2] || 'download/Qwen-for-Excel-and-Word.zip');
   const names = await makeDownloadZip(projectRoot, outFile);
   console.log(`${outFile} (${names.length} files)`);
 }

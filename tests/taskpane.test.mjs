@@ -30,6 +30,8 @@ function makeElement(id) {
     },
     querySelector(sel) { return this.children.find(c => String(c.className).split(' ').includes(sel.slice(1))) || null; },
     remove() { if (this.parent) this.parent.children = this.parent.children.filter(c => c !== this); this.parent = null; },
+    setAttribute(k, v) { (this.attributes ||= {})[k] = String(v); },
+    getAttribute(k) { return this.attributes?.[k] ?? null; },
     focus() {}, requestSubmit() { return fire(el, 'submit'); }
   };
   // Real DOM children is an HTMLCollection without .at(); keep it undefined so regressions fail here.
@@ -41,9 +43,9 @@ function fire(el, type, ev = {}) {
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, location }) {
+function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, location, sheetNames, usedRanges, healthBuild }) {
   const els = new Map();
-  const defaults = { provider: 'qwen', activeProvider: 'qwen', qwenModel: 'qwen4-max', qwenEndpoint: 'https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions' };
+  const defaults = { provider: 'qwen', qwenModel: 'qwen4-max', qwenEndpoint: 'https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions' };
   const get = id => { if (!els.has(id)) { const el = makeElement(id); if (defaults[id]) el.value = defaults[id]; if (id === 'includeContext' || id === 'rememberKey') el.checked = true; els.set(id, el); } return els.get(id); };
   const store = seedKeys ? { 'eqgc.keys.v1': JSON.stringify(seedKeys) } : {};
   const writes = [];
@@ -222,7 +224,7 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
       get visibility() { return sheetVisibility[name] || 'Visible'; },
       set visibility(v) { sheetVisibility[name] = v; writes.push({ sheet: name, kind: 'visibility', value: v }); },
       getRange: addr => makeWritableRange(name, addr),
-      getUsedRangeOrNullObject: () => ({ isNullObject: true, load() {} }),
+      getUsedRangeOrNullObject: () => (usedRanges?.[name] ? { isNullObject: false, load() {}, ...usedRanges[name] } : { isNullObject: true, load() {} }),
       charts: {
         add(type) {
           const rec = { sheet: name, kind: 'chart', type, name: '', title: '' };
@@ -300,6 +302,8 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
   const wordDoc = { selectionText: 'Hello team', bodyText: 'Hello team. More text.', style: 'Normal', font: wordFont };
   const sandbox = {
     console, JSON, Math, String, Array, Object, Promise, RegExp, Number, TextEncoder, TextDecoder, AbortController,
+    btoa: s => Buffer.from(s, 'binary').toString('base64'),
+    atob: s => Buffer.from(s, 'base64').toString('binary'),
     setTimeout: () => 0, clearTimeout: () => {},
     localStorage: {
       getItem: k => (k in store ? store[k] : null),
@@ -320,7 +324,7 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
           },
           worksheets: {
             load() {},
-            items: [{ name: 'Sheet1', load() {} }],
+            items: (sheetNames || ['Sheet1']).map(n => ({ name: n, load() {} })),
             getActiveWorksheet: () => ({ getUsedRangeOrNullObject: () => range(used) }),
             add(sheetName) { writes.push({ kind: 'addSheet', name: sheetName }); return makeSheet(sheetName); },
             getItem: sheet => makeSheet(sheet),
@@ -357,7 +361,17 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
     fetch: async (url, opts) => {
       const body = opts?.body ? JSON.parse(opts.body) : null;
       calls.push({ url, body, headers: opts?.headers || {} });
-      if (url.endsWith('/api/health')) return { ok: true, status: 200, json: async () => ({ ok: true, configured: { qwen: true, grok: false } }) };
+      if (url.endsWith('/api/health')) return { ok: true, status: 200, json: async () => ({ ok: true, build: healthBuild || '2026-11-24.6', configured: { qwen: true } }) };
+      if (url.endsWith('/api/extract')) return { ok: true, status: 200, json: async () => ({ text: '[Sheet: Data]\nL1: Voucher | Debit\nL2: GJ001 | 100', kind: 'XLSX' }) };
+      if (url.endsWith('/api/sessions/delete')) return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      if (url.includes('/api/sessions/read')) return { ok: true, status: 200, json: async () => ({ id: 's-old-1', started: '2026-11-24T09:00:00Z', prompt: 'review whole file', messages: [{ role: 'user', content: 'review whole file' }, { role: 'assistant', content: 'Old report.' }], audit: [], checkpoint: { prompt: 'review whole file', progress: [], observation: '' } }) };
+      if (url.endsWith('/api/sessions/save')) return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      if (url.endsWith('/api/sessions')) return { ok: true, status: 200, json: async () => ({ sessions: [{ id: 's-old-1', updated: '2026-11-24T09:00:00Z', workbook: 'MPL', prompt: 'review whole file', outcome: 'Completed', turns: 2 }] }) };
+      if (url.endsWith('/api/memory/add')) return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      if (url.endsWith('/api/memory')) return { ok: true, status: 200, json: async () => ({ text: '- [2026-11-24] MPL truth is 30_GJ_2026' }) };
+      if (url.includes('/api/skills/context')) return { ok: true, status: 200, json: async () => ({ selected: ['monthly-report-review'], text: 'SAVED SKILLS test block' }) };
+      if (url.endsWith('/api/skills/save')) return { ok: true, status: 200, json: async () => ({ ok: true, path: 'C:\\skills\\new-skill\\SKILL.md' }) };
+      if (url.endsWith('/api/skills')) return { ok: true, status: 200, json: async () => ({ root: 'C:\\skills', skills: [{ id: 'monthly-report-review', description: 'Review the whole report', chars: 100 }] }) };
       const turnText = Array.isArray(reply?.turns) ? reply.turns[Math.min(streamTurn, reply.turns.length - 1)] : null;
       const data = turnText != null ? { text: turnText, model: reply.model || 'test-model' } : (reply || { text: 'mock answer', model: 'test-model' });
       if (url.endsWith('/api/chat-stream')) {
@@ -794,24 +808,27 @@ test('Agent mode asks for columns when debit and credit are not identified', asy
   assert.equal(visible(sb.els('conversation')).includes('FAIL debitEqualsCredit'), false);
 });
 
-test('Agent pauses after the tenth read and continues the task with that result', async () => {
+test('Agent pauses at the round limit and continues the task with that result', async () => {
   const read = 'Reading.\n```json\n{"contextRequest":{"sheet":"Sheet1","range":"B2"},"decision":"CONTINUE"}\n```';
+  const reply = { turns: [] };
   const sb = makeSandbox({
     selection: singleEmpty, used: usedSmall,
     cells: { 'Sheet1!B2': { value: 73 } },
-    reply: { turns: [...Array(10).fill(read), 'Finished reading.'] }
+    reply
   });
+  const limit = sb.AgentCore.MAX_LOOPS;
+  reply.turns = [...Array(limit).fill(read), 'Finished reading.'];
   await boot(sb);
   sb.els('workMode').value = 'agent';
   await ask(sb, 'Inspect the selected worksheet');
-  assert.equal(chatCalls(sb).length, 10);
-  assert.match(sb.els('agentStatus').textContent, /Agent 10\/10.*Paused/);
+  assert.equal(chatCalls(sb).length, limit);
+  assert.match(sb.els('agentStatus').textContent, new RegExp(`Agent ${limit}\\/${limit}.*Paused`));
   assert.equal(sb.els('continueAgent').classList.contains('hidden'), false);
   await fire(sb.els('continueAgent'), 'click');
-  assert.equal(chatCalls(sb).length, 11);
+  assert.equal(chatCalls(sb).length, limit + 1);
   assert.match(chatCalls(sb).at(-1).body.messages.at(-2).content, /Inspect the selected worksheet/);
   assert.match(lastContent(sb), /Latest pane observation:[\s\S]+Sheet1!B2[\s\S]+Row 2:\s+73/);
-  assert.match(sb.els('agentStatus').textContent, /Agent 1\/10.*Completed/);
+  assert.match(sb.els('agentStatus').textContent, new RegExp(`Agent 1\\/${limit}.*Completed`));
   assert.equal(sb.els('continueAgent').classList.contains('hidden'), true);
 });
 
@@ -857,11 +874,10 @@ test('Agent mode with Direct off waits for Approve before writing', async () => 
   assert.ok(sb.writes.some(w => w.cell === 'B2' && w.value === 7));
 });
 
-test('Auto stays on Qwen when Grok has no key', async () => {
+test('Agent and chat route to Qwen only', async () => {
   const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Noted.', model: 'qwen4-max' } });
   await boot(sb);
   sb.els('workMode').value = 'agent';
-  sb.els('activeProvider').value = 'auto';
   await ask(sb, 'Reconcile the ledger');
   assert.equal(chatCalls(sb).at(-1).body.provider, 'qwen');
   assert.equal(chatCalls(sb).at(-1).body.mode, 'agent');
@@ -905,25 +921,272 @@ test('Agent read-back delivers every column of a wide sheet, not just A to H', a
   assert.match(visible(sb.els('conversation')), /Context Aging!A1:Q2/);
 });
 
-test('An over-limit read request is reported as not read, never as Observed SUCCESS', async () => {
+test('An over-limit read is paged with offset until fully read, never reported as not read', async () => {
   const reply = {
     model: 'm',
     turns: [
       'Reading.\n```json\n{"actions":[],"contextRequest":{"sheet":"Aging","range":"A1:Z200"},"decision":"CONTINUE"}\n```',
-      'Understood.\n```json\n{"actions":[],"decision":"COMPLETE"}\n```'
+      'Next chunk.\n```json\n{"actions":[],"contextRequest":{"sheet":"Aging","range":"A1:Z200","offset":76},"decision":"CONTINUE"}\n```',
+      'Last chunk.\n```json\n{"actions":[],"contextRequest":{"sheet":"Aging","range":"A1:Z200","offset":152},"decision":"CONTINUE"}\n```',
+      'Done.\n```json\n{"actions":[],"decision":"COMPLETE"}\n```'
     ]
   };
-  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, cells: { 'Aging!A1': { value: 'Entity' } } });
   await boot(sb);
   sb.els('workMode').value = 'agent';
   sb.els('directRevise').checked = true;
   await ask(sb, 'review the whole ageing sheet');
-  assert.equal(chatCalls(sb).length, 2);
+  assert.equal(chatCalls(sb).length, 4);
+  const first = chatCalls(sb)[1].body.messages.at(-1).content;
+  assert.match(first, /\[Excel range Aging!A1:Z76\]/);
+  assert.match(first, /76\/200 rows/);
+  assert.match(first, /offset=76/);
+  const second = chatCalls(sb)[2].body.messages.at(-1).content;
+  assert.match(second, /\[Excel range Aging!A77:Z152\]/);
+  assert.match(second, /152\/200 rows/);
+  assert.match(second, /offset=152/);
   const fed = lastContent(sb);
-  assert.match(fed, /No range was read/);
-  assert.match(fed, /5200 cells, over the 2000-cell read limit/);
-  assert.equal(/Observed: SUCCESS/.test(fed), false);
+  assert.match(fed, /\[Excel range Aging!A153:Z200\]/);
+  assert.match(fed, /200\/200 rows/);
+  assert.match(fed, /fully read/);
+  assert.equal(/No range was read/.test(fed), false);
   assert.equal(sb.writes.length, 0);
+});
+
+test('A finance check aggregates the full requested range, not a 160-cell sample', async () => {
+  const cells = { 'Sheet1!A1': { value: 'Debit' }, 'Sheet1!B1': { value: 'Credit' } };
+  for (let r = 2; r <= 200; r++) {
+    cells[`Sheet1!A${r}`] = { value: 1 };
+    cells[`Sheet1!B${r}`] = { value: r === 200 ? 0 : 1 };
+  }
+  const reply = { text: 'Check.\n```json\n{"plan":{"goal":"Verify the balance","finalValidation":[{"check":"debitEqualsCredit","sheet":"Sheet1","range":"A1:B200"}]},"actions":[],"decision":"COMPLETE"}\n```' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, cells });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  await ask(sb, 'verify the journal balances');
+  const shown = visible(sb.els('conversation'));
+  assert.match(shown, /FAIL debitEqualsCredit/);
+  assert.match(shown, /before 199 after 198 difference 1/);
+});
+
+test('A check range that cannot be fully read is NEEDS_USER, never PASS', async () => {
+  const reply = { text: 'Check.\n```json\n{"plan":{"goal":"Scan errors","finalValidation":[{"check":"formulaErrors","sheet":"Ledger","range":"A1:Z2000"}]},"actions":[],"decision":"COMPLETE"}\n```' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, cells: { 'Ledger!A1': { value: 'Date' } } });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  const run = sb.Excel.run;
+  let runs = 0;
+  sb.Excel.run = callback => {
+    if (/Reading check inputs|Checking results/.test(sb.els('agentStatus').textContent)) {
+      runs += 1;
+      if (runs % 2 === 0) return Promise.reject(new Error('The requested resource does not exist.'));
+    }
+    return run(callback);
+  };
+  await ask(sb, 'scan the ledger for errors');
+  const shown = visible(sb.els('conversation'));
+  assert.match(shown, /NEEDS_USER formulaErrors/);
+  assert.match(shown, /could not be fully read/);
+  assert.equal(/PASS formulaErrors/.test(shown), false);
+});
+
+test('Chat reviews the whole file read-only: scan, group balance and cross-check, never writes', async () => {
+  const cells = {
+    '30_GJ_2026!A1': { value: 'Voucher' }, '30_GJ_2026!B1': { value: 'Debit' }, '30_GJ_2026!C1': { value: 'Credit' },
+    '30_GJ_2026!A2': { value: 'GJ001' }, '30_GJ_2026!B2': { value: 100 }, '30_GJ_2026!C2': { value: 100 },
+    '30_GJ_2026!A3': { value: 'GJ002' }, '30_GJ_2026!B3': { value: 50 }, '30_GJ_2026!C3': { value: 50 },
+    '40_CSV!A1': { value: 'Voucher' }, '40_CSV!B1': { value: 'Debit' }, '40_CSV!C1': { value: 'Credit' },
+    '40_CSV!A2': { value: 'GJ001' }, '40_CSV!B2': { value: 100 }, '40_CSV!C2': { value: 100 },
+    '40_CSV!A3': { value: 'GJ002' }, '40_CSV!B3': { value: 50 }, '40_CSV!C3': { value: 50 },
+    '40_CSV!A4': { value: 'GJ002' }, '40_CSV!B4': { value: 50 }, '40_CSV!C4': { value: 50 }
+  };
+  const reply = { turns: [
+    'Scanning.\n```json\n{"scanRequest":{},"decision":"CONTINUE"}\n```',
+    'Reviewed.\n```json\n{"plan":{"goal":"Whole-file review","finalValidation":[{"check":"groupBalance","sheet":"30_GJ_2026","range":"A1:C3"},{"check":"crossCheck","sheet":"40_CSV","range":"A1:C4","otherSheet":"30_GJ_2026","otherRange":"A1:C3","columns":[2]}]},"actions":[],"decision":"COMPLETE"}\n```'
+  ] };
+  const sb = makeSandbox({
+    selection: singleEmpty, used: usedSmall, reply, cells,
+    sheetNames: ['30_GJ_2026', '40_CSV'],
+    usedRanges: {
+      '30_GJ_2026': { address: "'30_GJ_2026'!A1:C3", rowCount: 3, columnCount: 3 },
+      '40_CSV': { address: "'40_CSV'!A1:C4", rowCount: 4, columnCount: 3 }
+    }
+  });
+  await boot(sb);
+  sb.els('workMode').value = 'chat';
+  await ask(sb, 'Please review the whole workbook journal.');
+  assert.equal(sb.writes.length, 0);
+  assert.equal(chatCalls(sb).length, 2);
+  const scanFed = chatCalls(sb)[1].body.messages.at(-1).content;
+  assert.match(scanFed, /Workbook scan: 2 sheets, 0 error values/);
+  assert.match(scanFed, /sheet: 30_GJ_2026 .*scanned 3\/3/);
+  assert.match(scanFed, /sheet: 40_CSV .*scanned 4\/4/);
+  const shown = visible(sb.els('conversation'));
+  assert.match(shown, /PASS groupBalance/);
+  assert.match(shown, /FAIL crossCheck/);
+  assert.match(shown, /rows 3 vs 2/);
+  assert.match(shown, /total 200 vs 150/);
+});
+
+test('Saved skills context is attached to the question and audited', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Noted.', model: 'm' } });
+  await boot(sb);
+  sb.els('workMode').value = 'chat';
+  await ask(sb, 'review the whole report');
+  assert.match(lastContent(sb), /\[Saved skills\]\nSAVED SKILLS test block/);
+  assert.match(visible(sb.els('conversation')), /skills monthly-report-review/);
+});
+
+test('Save current task as skill posts a new folder with trigger and procedure', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Procedure.', model: 'm' } });
+  await boot(sb);
+  await ask(sb, 'review the whole report');
+  sb.els('skillId').value = 'oct-close-review';
+  sb.els('skillDescription').value = 'October close review';
+  await fire(sb.els('saveSkill'), 'click'); await flush();
+  const save = sb.calls.find(c => String(c.url).endsWith('/api/skills/save'));
+  assert.ok(save);
+  assert.equal(save.body.id, 'oct-close-review');
+  assert.match(save.body.body, /## Trigger[\s\S]+review the whole report/);
+  assert.match(save.body.body, /Procedure\./);
+});
+
+test('Memory notes are attached to questions while Share is on', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Noted.', model: 'm' } });
+  await boot(sb);
+  sb.els('workMode').value = 'chat';
+  await ask(sb, 'review the whole report');
+  assert.match(lastContent(sb), /\[Memory\]\n- \[2026-11-24\] MPL truth is 30_GJ_2026/);
+});
+
+test('A finished run saves its session for later resume', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Report.', model: 'm' } });
+  await boot(sb);
+  sb.els('workMode').value = 'chat';
+  await ask(sb, 'review the whole report');
+  await flush();
+  const save = sb.calls.find(c => String(c.url).endsWith('/api/sessions/save'));
+  assert.ok(save);
+  assert.match(save.body.id, /^s-[a-z0-9-]+$/);
+  assert.equal(save.body.prompt, 'review the whole report');
+  assert.ok(save.body.messages.some(m => m.role === 'assistant' && m.content === 'Report.'));
+});
+
+test('History resume restores the conversation and the Agent checkpoint', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Continued.', model: 'm' } });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  await flush();
+  const row = sb.els('historyList').children[0];
+  const resume = row.children.find(c => c.textContent === 'Resume');
+  await fire(resume, 'click'); await flush();
+  assert.match(visible(sb.els('conversation')), /Old report\./);
+  assert.equal(sb.els('continueAgent').classList.contains('hidden'), false);
+  await fire(sb.els('continueAgent'), 'click'); await flush();
+  assert.match(lastContent(sb), /Continue the original task/);
+});
+
+test('Copilot-style sidebar hides the five browse cards and Share quick toggle mirrors the consent gate', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Ok.', model: 'm' } });
+  await boot(sb);
+  // The sandbox does not parse index.html classes, so drive the toggle from JS both ways.
+  const initial = sb.els('sidebar').classList.contains('hidden');
+  await fire(sb.els('sidebarToggle'), 'click');
+  assert.equal(sb.els('sidebar').classList.contains('hidden'), !initial);
+  if (sb.els('sidebar').classList.contains('hidden')) await fire(sb.els('sidebarToggle'), 'click');
+  assert.equal(sb.els('sidebar').classList.contains('hidden'), false);
+  const html = fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8');
+  const aside = html.slice(html.indexOf('<aside id="sidebar"'), html.indexOf('</aside>'));
+  for (const id of ['contextEyebrow', 'cloudSources', 'skillsCard', 'historyCard', 'memoryCard']) {
+    assert.ok(aside.includes(`id="${id}"`), `${id} lives in the sidebar`);
+  }
+  assert.equal(html.indexOf('id="cloudSources"'), html.lastIndexOf('id="cloudSources"'), 'cards are not duplicated in main');
+  sb.els('shareQuick').checked = false;
+  await fire(sb.els('shareQuick'), 'change');
+  assert.equal(sb.els('includeContext').checked, false);
+  sb.els('includeContext').checked = true;
+  await fire(sb.els('includeContext'), 'change');
+  assert.equal(sb.els('shareQuick').checked, true);
+  await fire(sb.els('sidebarClose'), 'click');
+  assert.equal(sb.els('sidebar').classList.contains('hidden'), true);
+  await fire(sb.els('sidebarToggle'), 'click');
+  assert.equal(sb.els('sidebar').classList.contains('hidden'), false);
+});
+
+test('XLSX attachments are extracted by the local relay and attached as evidence', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Ok.', model: 'm' } });
+  await boot(sb);
+  const picker = sb.els('attachmentPicker');
+  picker.files = [{ name: 'book.xlsx', size: 1000, arrayBuffer: async () => new Uint8Array([80, 75]).buffer }];
+  await fire(picker, 'change', { target: picker }); await flush();
+  const extract = sb.calls.find(c => String(c.url).endsWith('/api/extract'));
+  assert.ok(extract);
+  assert.equal(extract.body.name, 'book.xlsx');
+  assert.match(sb.els('attachmentTextPreview').textContent, /Voucher \| Debit/);
+});
+
+test('History delete arms once, then deletes the session on confirm', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Ok.', model: 'm' } });
+  await boot(sb); await flush();
+  const row = sb.els('historyList').children[0];
+  const del = row.children.find(c => c.textContent === 'Delete');
+  await fire(del, 'click');
+  assert.equal(del.textContent, 'Confirm delete?');
+  assert.equal(sb.calls.some(c => String(c.url).endsWith('/api/sessions/delete')), false);
+  await fire(del, 'click'); await flush();
+  const call = sb.calls.find(c => String(c.url).endsWith('/api/sessions/delete'));
+  assert.ok(call);
+  assert.equal(call.body.id, 's-old-1');
+});
+
+test('every pane element id exists in index.html (removed controls cannot break the pane silently)', () => {
+  const html = fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8');
+  const ids = new Set([...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]));
+  const js = fs.readFileSync(path.join(root, 'public', 'taskpane.js'), 'utf8');
+  const used = [...new Set([...js.matchAll(/\$\('([A-Za-z0-9_-]+)'\)/g)].map(m => m[1]))];
+  const missing = used.filter(id => !ids.has(id));
+  assert.deepEqual(missing, []);
+});
+
+test('A stale relay build is reported and blocks the send instead of a silent failure', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Noted.' }, healthBuild: '2026-11-01.1' });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  await ask(sb, 'review the whole workbook');
+  assert.equal(chatCalls(sb).length, 0);
+  assert.match(sb.els('agentStatus').textContent, /relay is running build 2026-11-01\.1/);
+  assert.match(visible(sb.els('conversation')), /Restart the relay/);
+});
+
+test('A failed sheet scan is reported INCOMPLETE, never as a clean zero-error sheet', async () => {
+  const reply = { turns: [
+    'Scanning.\n```json\n{"scanRequest":{},"decision":"CONTINUE"}\n```',
+    'Noted.\n```json\n{"actions":[],"decision":"COMPLETE"}\n```'
+  ] };
+  const sb = makeSandbox({
+    selection: singleEmpty, used: usedSmall, reply,
+    cells: { 'Sheet1!A1': { value: 'Date' }, 'Bad!A1': { value: '#REF!' } },
+    sheetNames: ['Sheet1', 'Bad'],
+    usedRanges: {
+      Sheet1: { address: "'Sheet1'!A1:B2", rowCount: 2, columnCount: 2 },
+      Bad: { address: "'Bad'!A1:B2", rowCount: 2, columnCount: 2 }
+    }
+  });
+  await boot(sb);
+  sb.els('workMode').value = 'chat';
+  const run = sb.Excel.run;
+  let syncs = 0;
+  sb.Excel.run = callback => run(context => {
+    if (/Scanning/.test(sb.els('agentStatus').textContent)) {
+      const sync = context.sync;
+      context.sync = async () => { syncs += 1; if (syncs === 3) throw new Error('The requested resource does not exist.'); return sync(); };
+    }
+    return callback(context);
+  });
+  await ask(sb, 'review the whole workbook');
+  const fed = chatCalls(sb)[1].body.messages.at(-1).content;
+  assert.match(fed, /sheet: Sheet1 .*INCOMPLETE: The requested resource does not exist/);
+  assert.match(fed, /sheet: Bad .*errors 1 \| at A1/);
 });
 
 test('A profile request returns column statistics, not raw cells', async () => {

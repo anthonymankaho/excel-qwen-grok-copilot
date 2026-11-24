@@ -2,7 +2,7 @@
   "name": "excel-qwen-grok-copilot",
   "version": "0.1.0",
   "private": true,
-  "description": "A local Excel task pane assistant powered by Qwen or Grok APIs.",
+  "description": "A local Excel task pane assistant powered by the Qwen API.",
   "scripts": {
     "setup": "node scripts/setup.mjs",
     "start": "office-addin-debugging start manifest.xml desktop --app excel --no-debug --no-live-reload",

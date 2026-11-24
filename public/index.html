@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta http-equiv="X-UA-Compatible" content="IE=Edge">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Qwen + Grok for Excel and Word</title>
+  <title>Qwen for Excel and Word</title>
   <link rel="stylesheet" href="taskpane.css">
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
   <script defer src="agent-core.js"></script>
@@ -12,21 +12,69 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><div class="brand-icon">✦</div><div><strong>Office Assistant</strong><small id="brandHost">Excel and Word</small></div></div>
-    <button id="settingsToggle" class="icon-button" title="Settings" aria-label="Settings">⚙</button>
+    <div class="brand"><div class="brand-icon">✦</div><div><strong>Qwen in Excel</strong><small id="brandHost">Excel and Word</small></div></div>
+    <div class="topbar-actions"><button id="sidebarToggle" class="icon-button" title="Browse · 瀏覽" aria-label="Toggle sidebar" aria-expanded="false">☰</button><button id="settingsToggle" class="icon-button" title="Settings" aria-label="Settings">⚙</button></div>
   </header>
+  <aside id="sidebar" class="sidebar hidden" aria-label="Browse">
+    <div class="sidebar-head"><strong>Browse · 瀏覽</strong><button id="sidebarClose" class="icon-button" aria-label="Close sidebar">×</button></div>
+    <button id="newChatSide" class="primary side-new" type="button">＋ New chat · 新聊天</button>
+    <section class="context-card card">
+      <div class="context-top"><span id="contextEyebrow" class="eyebrow">WORKBOOK CONTEXT · AUTO</span><button id="refreshSelection" class="text-button">↻ Refresh</button></div>
+      <div id="selectionName" class="selection-name">Open Excel to read context</div>
+      <div id="selectionPreview" class="selection-preview">Agent discovers sheets and reads relevant ranges. Chat uses the selected range or active sheet.</div>
+      <div id="attachmentList" class="attachment-list" aria-live="polite"></div>
+      <details id="attachmentPreview" class="attachment-preview hidden"><summary>Preview extracted attachment text</summary><pre id="attachmentTextPreview"></pre></details>
+      <div id="executionPath" class="hint">Local · the relay stays on this PC</div>
+      <div class="context-actions"><label class="context-toggle"><input type="checkbox" id="includeContext" checked> Share Office file data with AI</label><button id="addUsedRange" class="chip">＋ Active sheet</button><span id="contextHint">Nothing sent yet</span></div>
+    </section>
+    <details id="cloudSources" class="card cloud-sources">
+      <summary><strong>Cloud sources</strong><span>OneDrive</span></summary>
+      <p class="hint">Read-only OneDrive search and preview. Press Connect to sign in with your personal Microsoft account in your browser. Each person uses their own account. A result is added to your next question only after you choose Review and add to chat.</p>
+      <div class="source-connect-grid">
+        <div class="source-connect"><div><strong>Personal OneDrive</strong><small id="onedriveSourceStatus">Not connected</small></div><button id="connectOneDrive" class="secondary" type="button">Connect</button><button id="disconnectOneDrive" class="text-button hidden" type="button">Disconnect</button></div>
+      </div>
+      <div class="source-search">
+        <input id="sourceQuery" type="search" placeholder="Search OneDrive files" aria-label="Search OneDrive files">
+        <button id="searchSources" class="primary" type="button">Search</button>
+      </div>
+      <div id="sourceResults" class="source-results" aria-live="polite"></div>
+    </details>
+    <details id="skillsCard" class="card cloud-sources">
+      <summary><strong>Saved skills</strong><span id="skillsCount">OneDrive</span></summary>
+      <p class="hint">Copilot-format skills in your local OneDrive folder (Copilot/Microsoft Excel/skills). With Share on, relevant skills are attached to each question automatically; type @name to force one. Saving writes a NEW skill folder — existing skills are never overwritten.</p>
+      <div id="skillsList" class="source-results" aria-live="polite"></div>
+      <div class="source-connect-grid">
+        <input id="skillId" placeholder="new-skill-name" aria-label="New skill name">
+        <input id="skillDescription" placeholder="When should it be used?" aria-label="New skill description">
+        <button id="saveSkill" class="secondary" type="button">Save current task as skill</button>
+      </div>
+    </details>
+    <details id="historyCard" class="card cloud-sources">
+      <summary><strong>History</strong><span id="historyCount">sessions</span></summary>
+      <p class="hint">Past conversations on this PC (local app data, like a CLI history). Resume restores the conversation and lets Agent continue from its checkpoint.</p>
+      <div id="historyList" class="source-results" aria-live="polite"></div>
+    </details>
+    <details id="memoryCard" class="card cloud-sources">
+      <summary><strong>Memory</strong><span id="memoryCount">notes</span></summary>
+      <p class="hint">Durable notes attached to every question while Share is on. Stored locally per Windows user — never in the repo or OneDrive.</p>
+      <pre id="memoryText" class="selection-preview"></pre>
+      <div class="source-connect-grid">
+        <input id="memoryNote" placeholder="Remember that…" aria-label="Memory note">
+        <button id="addMemory" class="secondary" type="button">Add note</button>
+      </div>
+    </details>
+  </aside>
   <main>
     <section id="settings" class="settings card hidden">
       <div class="section-heading"><div><h2>Provider settings</h2><p>Enter the key once; with Remember ticked it persists on this PC like a Claude sign-in.</p></div><button id="closeSettings" class="icon-button" aria-label="Close settings">×</button></div>
       <label for="provider">Provider</label>
-      <select id="provider"><option value="qwen">Qwen · QwenCloud Token Plan</option><option value="grok">Grok · xAI</option></select>
+      <select id="provider"><option value="qwen">Qwen · QwenCloud Token Plan</option></select>
       <div id="qwenFields">
         <label for="qwenEndpoint">Qwen chat completions URL</label>
         <input id="qwenEndpoint" type="url" value="https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions" autocomplete="url">
         <p class="hint">QwenCloud International Token Plan endpoint. Use your Token Plan key (sk-sp-…). The relay only calls HTTPS chat-completions URLs on qwencloudapi.com or aliyuncs.com.</p>
       <label for="qwenModel">Model</label><input id="qwenModel" value="qwen4-max" autocomplete="off">
       </div>
-      <div id="grokFields" class="hidden"><label for="grokModel">Model</label><input id="grokModel" value="grok-4.7" autocomplete="off"></div>
       <div id="relayFields" class="hidden">
         <label for="relayToken">Cloudflare relay token <span id="keyStatusHosted" class="key-status"></span></label>
         <input id="relayToken" type="password" placeholder="Token that unlocks the hosted relay" autocomplete="new-password">
@@ -50,29 +98,6 @@
       <label for="checkTolerance">Tolerance</label><input id="checkTolerance" value="0.01" autocomplete="off">
     </section>
 
-    <section class="context-card card">
-      <div class="context-top"><span id="contextEyebrow" class="eyebrow">WORKBOOK CONTEXT · AUTO</span><button id="refreshSelection" class="text-button">↻ Refresh</button></div>
-      <div id="selectionName" class="selection-name">Open Excel to read context</div>
-      <div id="selectionPreview" class="selection-preview">Agent discovers sheets and reads relevant ranges. Chat uses the selected range or active sheet.</div>
-      <div id="attachmentList" class="attachment-list" aria-live="polite"></div>
-      <details id="attachmentPreview" class="attachment-preview hidden"><summary>Preview extracted attachment text</summary><pre id="attachmentTextPreview"></pre></details>
-      <div id="executionPath" class="hint">Local · the relay stays on this PC</div>
-      <div class="context-actions"><label class="context-toggle"><input type="checkbox" id="includeContext" checked> Share Office file data with AI</label><button id="addUsedRange" class="chip">＋ Active sheet</button><span id="contextHint">Nothing sent yet</span></div>
-    </section>
-
-    <details id="cloudSources" class="card cloud-sources">
-      <summary><strong>Cloud sources</strong><span>OneDrive</span></summary>
-      <p class="hint">Read-only OneDrive search and preview. Press Connect to sign in with your personal Microsoft account in your browser. Each person uses their own account. A result is added to your next question only after you choose Review and add to chat.</p>
-      <div class="source-connect-grid">
-        <div class="source-connect"><div><strong>Personal OneDrive</strong><small id="onedriveSourceStatus">Not connected</small></div><button id="connectOneDrive" class="secondary" type="button">Connect</button><button id="disconnectOneDrive" class="text-button hidden" type="button">Disconnect</button></div>
-      </div>
-      <div class="source-search">
-        <input id="sourceQuery" type="search" placeholder="Search OneDrive files" aria-label="Search OneDrive files">
-        <button id="searchSources" class="primary" type="button">Search</button>
-      </div>
-      <div id="sourceResults" class="source-results" aria-live="polite"></div>
-    </details>
-
     <section class="quick-actions" aria-label="Quick actions">
       <button class="action" data-prompt="Summarize the selected spreadsheet data. Highlight key totals, patterns, and any caveats."><span>▤</span>Summarize</button>
       <button class="action" data-prompt="Explain the selected cells, including formulas and how their values relate."><span>ƒx</span>Explain</button>
@@ -88,8 +113,8 @@
         <button id="continueAgent" type="button" class="secondary hidden">Continue Agent · 繼續</button>
       </div>
       <textarea id="prompt" rows="2" placeholder="Ask, or tell me what to change..." aria-label="Message"></textarea>
-      <input id="attachmentPicker" class="hidden" type="file" multiple accept=".html,.htm,.txt,.md,.csv,.tsv,.json,.xml,text/html,text/plain,text/csv,application/json,application/xml">
-      <div class="composer-footer"><div class="provider-pill"><span id="statusDot" class="status-dot" title="Relay status"></span><select id="workMode" aria-label="Mode"><option value="chat">Chat</option><option value="plan">Plan</option><option value="agent" selected>Agent</option></select><select id="activeProvider" aria-label="Active provider"><option value="auto">Auto</option><option value="qwen" selected>Qwen</option><option value="grok">Grok</option></select></div><button id="attachFiles" class="secondary attach-button" type="button" aria-label="Attach files" title="Attach HTML reports or text files">📎 Attach</button><label class="context-toggle" title="Skip deep thinking for a quicker reply"><input type="checkbox" id="fastMode"> Fast</label><label class="context-toggle" title="In Agent mode, write safe changes immediately. Deletes, clears, renames, and network formulas still wait for a click."><input type="checkbox" id="directRevise" checked> Direct</label><button id="send" class="send-button" type="submit" aria-label="Send message">↑</button></div>
+      <input id="attachmentPicker" class="hidden" type="file" multiple accept=".html,.htm,.txt,.md,.csv,.tsv,.json,.xml,.pdf,.xlsx,.xlsm,text/html,text/plain,text/csv,application/json,application/xml,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+      <div class="composer-footer"><div class="provider-pill"><span id="statusDot" class="status-dot" title="Relay status"></span><select id="workMode" aria-label="Mode"><option value="chat">Chat</option><option value="plan">Plan</option><option value="agent" selected>Agent</option></select></div><button id="attachFiles" class="secondary attach-button" type="button" aria-label="Attach files" title="Attach HTML reports or text files">📎 Attach</button><label class="context-toggle" title="Share Office file data with AI"><input type="checkbox" id="shareQuick" checked> Share</label><label class="context-toggle" title="Skip deep thinking for a quicker reply"><input type="checkbox" id="fastMode"> Fast</label><label class="context-toggle" title="In Agent mode, write safe changes immediately. Deletes, clears, renames, and network formulas still wait for a click."><input type="checkbox" id="directRevise" checked> Direct</label><button id="send" class="send-button" type="submit" aria-label="Send message">↑</button></div>
     </form>
     <div class="footnote">Selected HTML/text files and reviewed cloud source text are sent with your next question. Cloud access is read-only. HTML scripts and styling are not executed or sent; chart images are not interpreted. Chat never writes. Plan waits for Approve. Agent writes safe changes when Direct is on. Deletes, clears, renames, and network formulas wait for a click.</div>
     <div id="toast" role="status" class="toast hidden"></div>

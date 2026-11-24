@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { handleRelayRequest } from '../worker.mjs';
 
 const token = 'relay-token-0123456789';
-const env = { RELAY_TOKEN: token, QWEN_API_KEY: 'sk-sp-testkey', GROK_API_KEY: '' };
+const env = { RELAY_TOKEN: token, QWEN_API_KEY: 'sk-sp-testkey' };
 
 function call(path, { method = 'GET', token: presented, origin, body } = {}) {
   const headers = {};
@@ -25,13 +25,13 @@ test('the hosted relay rejects a missing or wrong token and a foreign origin', a
   const data = await health.json();
   assert.equal(data.hosted, true);
   assert.equal(data.configured.qwen, true);
-  assert.equal(data.configured.grok, false);
+  assert.equal(data.configured.grok, undefined);
 });
 
 test('the hosted relay does not accept a pasted provider key and still blocks a non-Qwen URL', async () => {
   const configure = await call('/api/configure', { method: 'POST', token, body: { provider: 'grok', apiKey: 'xai-live-key-value' } });
   assert.equal(configure.status, 400);
-  assert.match(await configure.text(), /Worker secrets/);
+  assert.match(await configure.text(), /Worker secret/);
   const evil = await call('/api/chat', {
     method: 'POST',
     token,

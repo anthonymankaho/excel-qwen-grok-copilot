@@ -23,21 +23,27 @@ test('a plan keeps steps, assumptions, and finance checks, and drops an unnamed 
   assert.equal(AgentCore.normalizePlan({ steps: [] }), null);
 });
 
-test('Auto never routes workbook data to a provider without a key', () => {
-  const manual = AgentCore.routeProvider({ selected: 'qwen', mode: 'agent', fast: false, text: 'Reconcile debits', ready: { qwen: true, grok: true } });
+test('routing is Qwen-only and never sends without a key', () => {
+  assert.equal(AgentCore.MAX_LOOPS, 25);
+  const manual = AgentCore.routeProvider({ selected: 'qwen', mode: 'agent', fast: false, text: 'Reconcile debits', ready: { qwen: true } });
   assert.equal(manual.provider, 'qwen');
   assert.equal(manual.reason, 'manual');
-  const missing = AgentCore.routeProvider({ selected: 'grok', mode: 'chat', fast: false, text: 'Hi', ready: { qwen: true, grok: false } });
-  assert.equal(missing.provider, 'grok');
-  assert.match(missing.error, /Grok/);
-  const finance = AgentCore.routeProvider({ selected: 'auto', mode: 'agent', fast: false, text: 'Reconcile the ledger', ready: { qwen: true, grok: false } });
-  assert.equal(finance.provider, 'qwen');
-  assert.equal(finance.fallback, '');
-  const both = AgentCore.routeProvider({ selected: 'auto', mode: 'agent', fast: false, text: 'Reconcile the ledger', ready: { qwen: true, grok: true } });
-  assert.equal(both.provider, 'grok');
-  assert.equal(both.fallback, 'qwen');
-  const quick = AgentCore.routeProvider({ selected: 'auto', mode: 'chat', fast: true, text: 'What is in A1?', ready: { qwen: true, grok: true } });
-  assert.equal(quick.provider, 'qwen');
+  const missing = AgentCore.routeProvider({ selected: 'qwen', mode: 'chat', fast: false, text: 'Hi', ready: { qwen: false } });
+  assert.match(missing.error, /Qwen/);
+  const auto = AgentCore.routeProvider({ selected: 'auto', mode: 'agent', fast: false, text: 'Reconcile the ledger', ready: { qwen: true } });
+  assert.equal(auto.provider, 'qwen');
+  assert.equal(auto.fallback, '');
+  const other = AgentCore.routeProvider({ selected: 'grok', mode: 'chat', fast: false, text: 'Hi', ready: { qwen: true } });
+  assert.match(other.error, /Qwen only/);
+});
+
+test('a context request keeps a paging offset and normalizes invalid ones to zero', () => {
+  const envelope = AgentCore.parseEnvelope('```json\n{"contextRequest":{"sheet":"G. GL 2026","range":"A1:AD41773","offset":2000},"decision":"CONTINUE"}\n```');
+  assert.equal(envelope.contextRequest.offset, 2000);
+  const bad = AgentCore.parseEnvelope('```json\n{"contextRequest":{"sheet":"S","range":"A1:B2","offset":-5},"decision":"CONTINUE"}\n```');
+  assert.equal(bad.contextRequest.offset, 0);
+  const huge = AgentCore.parseEnvelope('```json\n{"contextRequest":{"sheet":"S","range":"A1:B2","offset":99999999},"decision":"CONTINUE"}\n```');
+  assert.equal(huge.contextRequest.offset, 1048575);
 });
 
 test('debit, blanks, duplicates, and formula errors are calculated from identified columns', () => {
@@ -75,6 +81,9 @@ test('debit, blanks, duplicates, and formula errors are calculated from identifi
   assert.equal(dupeUnknown.status, 'NEEDS_USER');
   const errors = AgentCore.evaluateGridCheck({ check: 'formulaErrors' }, { values: [[10, '#REF!']], formulas: [['=A1', '#REF!']] });
   assert.equal(errors.status, 'FAIL');
+  const unread = AgentCore.evaluateGridCheck({ check: 'formulaErrors' }, { values: [], formulas: [], readError: 'The requested resource does not exist.' });
+  assert.equal(unread.status, 'NEEDS_USER');
+  assert.match(unread.details[0], /could not be fully read/);
   const mixedTotal = AgentCore.evaluateGridCheck({ check: 'totalDelta' }, { values: [[10, 20]] });
   assert.equal(mixedTotal.status, 'NEEDS_USER');
   const explained = AgentCore.explainFailure(open);
@@ -102,6 +111,27 @@ test('the audit summary keeps the trail and drops secrets', () => {
   assert.match(summary, /Request \(agent\) via qwen/);
   assert.match(summary, /FAIL debitEqualsCredit/);
   assert.equal(summary.includes('sk-secret'), false);
+});
+
+test('groupBalance balances each voucher and crossCheck compares two ranges', () => {
+  const headers = ['Voucher', 'Debit', 'Credit'];
+  const balanced = AgentCore.evaluateGridCheck({ check: 'groupBalance' }, { values: [headers, ['GJ001', 100, 100], ['GJ002', 50, 50]] });
+  assert.equal(balanced.status, 'PASS');
+  assert.match(balanced.details[0], /2 groups balanced/);
+  const open = AgentCore.evaluateGridCheck({ check: 'groupBalance' }, { values: [headers, ['GJ001', 100, 99.99], ['GJ002', 50, 50]] });
+  assert.equal(open.status, 'FAIL');
+  assert.match(open.details[0], /GJ001: DR 100 CR 99.99 diff 0.01/);
+  const unnamed = AgentCore.evaluateGridCheck({ check: 'groupBalance' }, { values: [['A', 'B', 'C'], ['x', 1, 1]] });
+  assert.equal(unnamed.status, 'NEEDS_USER');
+  const cross = AgentCore.evaluateGridCheck({ check: 'crossCheck', columns: [2] }, { values: [headers, ['GJ001', 100, 100], ['GJ002', 50, 50]] }, { values: [headers, ['GJ001', 100, 100]] });
+  assert.equal(cross.status, 'FAIL');
+  assert.match(cross.details[0], /rows 2 vs 1/);
+  const crossOk = AgentCore.evaluateGridCheck({ check: 'crossCheck', columns: [2] }, { values: [headers, ['GJ001', 100, 100]] }, { values: [headers, ['GJ001', 100, 100]] });
+  assert.equal(crossOk.status, 'PASS');
+  const crossUnread = AgentCore.evaluateGridCheck({ check: 'crossCheck' }, { values: [headers] }, { values: [], readError: 'gone' });
+  assert.equal(crossUnread.status, 'NEEDS_USER');
+  const scan = AgentCore.parseEnvelope('```json\n{"scanRequest":true,"decision":"CONTINUE"}\n```');
+  assert.equal(JSON.stringify(scan.scanRequest), '{}');
 });
 
 test('a prose plan string is kept and a wide context request survives parsing', () => {

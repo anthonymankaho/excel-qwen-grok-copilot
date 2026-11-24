@@ -1,4 +1,5 @@
 const API = '';
+const PANE_BUILD = '2026-11-24.6'; // Must match relay-core RELAY_BUILD; a stale relay process is detected and reported.
 const CONTEXT_CAP = 45_000; // Relay rejects messages over 50,000 chars; leave room for the prompt itself.
 const ATTACHMENT_CAP = 26_000;
 const ATTACHMENT_FILE_CAP = 18_000;
@@ -6,18 +7,16 @@ const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
 const ATTACHMENT_MAX_FILES = 3;
 const MAX_CONTEXT_ROWS = 150;
 const MAX_CONTEXT_COLS = 30;
-const READ_MAX_CELLS = 2000; // One read-back batch. Full column width is kept; rows are trimmed to fit.
-const PROFILE_MAX_CELLS = 2_000_000; // Scan large sheets locally in batches; never claim more coverage than was read.
-const PROFILE_BATCH_CELLS = 20_000;
-const PROFILE_MAX_COLS = 60;
+const READ_MAX_CELLS = 2000; // One read-back batch; larger requests are paged with contextRequest.offset, never silently trimmed.
+const PROFILE_BATCH_CELLS = 20_000; // Profiles and finance checks scan the full requested range in batches; never claim more coverage than was read.
 const PROFILE_DISTINCT = 12; // Sample values shown per column; enough to identify a grouping field.
 const PROFILE_DISTINCT_CAP = 5000;
 const CELL_CHAR_LIMIT = 32767;
-const FINANCE_EVIDENCE_INSTRUCTION = `\n\n[Finance evidence rules — apply only when the request or supplied data is finance/accounting related. Keep the response in English and Traditional Chinese, with aligned concise sections: Conclusion / 結論; Verified facts / 已核實資料; Calculation checks / 計算檢查; Assumptions and missing information / 假設及缺漏。 Cite each material claim and amount to an exact supplied location: Excel [Sheet!A1] or [Sheet!A1:C8], Word [Selection:L0001-L0005], or report [filename:L0001-L0005]. Excel context identifies column letters and row numbers; attached text identifies line numbers and preserves HTML headings. Never invent a cell, line, period, currency, or value. If only workbook metadata was supplied, request the exact range before claiming a value is verified. Show calculation inputs, formula, result, and rounding/tolerance. Say when a calculation is model-generated and has not been independently recalculated by the add-in. Only call an add-in check PASS when its validation card says PASS; report FAIL, WARNING, or NEEDS_USER as shown. Keep assumptions separate from source facts and state when evidence is insufficient. Do not change the required Agent JSON envelope.`;
+const FINANCE_EVIDENCE_INSTRUCTION = `\n\n[Finance evidence rules — apply only when the request or supplied data is finance/accounting related. Keep the response in English and Traditional Chinese, with aligned concise sections: Conclusion / 結論; Verified facts / 已核實資料; Calculation checks / 計算檢查; Assumptions and missing information / 假設及缺漏。 Cite each material claim and amount to an exact supplied location: Excel [Sheet!A1] or [Sheet!A1:C8], Word [Selection:L0001-L0005], or report [filename:L0001-L0005]. Excel context identifies column letters and row numbers; attached text identifies line numbers and preserves HTML headings. Never invent a cell, line, period, currency, or value. If only workbook metadata was supplied, request the exact range before claiming a value is verified. Show calculation inputs, formula, result, and rounding/tolerance. Say when a calculation is model-generated and has not been independently recalculated by the add-in. Only call an add-in check PASS when its validation card says PASS; report FAIL, WARNING, or NEEDS_USER as shown. Keep assumptions separate from source facts and state when evidence is insufficient. For a whole-workbook review, structure the answer as: Conclusion / 結論; Passed checks / 已通過 (table); Exceptions by priority / 需處理 (issue, likely cause, recommended action, exact cells); Earlier open items / 原有未結事項; Suggested formulas / 建議公式; Next steps / 下一步 (offer fixes only after the user confirms). State which sheets and rows were covered. Do not change the required Agent JSON envelope.`;
 const KEY_STORE = 'eqgc.keys.v1';
 const RELAY_STORE = 'eqgc.relay.v1';
 const RISKY_FORMULA = /^=.*\b(?:WEBSERVICE|FILTERXML|RTD|REGISTER\.ID|CALL|DDE|INFO|HYPERLINK)\s*\(/i;
-const state = { messages: [], lastAnswer: '', busy: false, officeReady: false, forceSheet: false, turn: 0, host: '', audit: [], attachments: [] };
+const state = { messages: [], lastAnswer: '', lastPrompt: '', busy: false, officeReady: false, forceSheet: false, turn: 0, host: '', audit: [], attachments: [], sessionId: null, sessionStarted: null, workbookName: '' };
 let activeAgent = null;
 let agentCheckpoint = null;
 const $ = id => document.getElementById(id);
@@ -55,7 +54,7 @@ function ensureKeys() {
   if (!keysReady) keysReady = (async () => {
     const stored = storedKeys();
     let allOk = true;
-    for (const provider of ['qwen', 'grok']) {
+    for (const provider of ['qwen']) {
       if (stored[provider]) { try { await api('configure', { provider, apiKey: stored[provider] }); } catch { allOk = false; } }
     }
     if (!allOk) keysReady = null; // relay was offline; retry on next question
@@ -110,6 +109,140 @@ function startSourcePolling() {
 function stopSourcePolling() {
   if (sourcePollTimer) clearInterval(sourcePollTimer);
   sourcePollTimer = null;
+}
+
+function setSidebar(open) {
+  $('sidebar').classList.toggle('hidden', !open);
+  $('sidebarToggle').setAttribute('aria-expanded', String(open));
+  try { localStorage.setItem('eqgc.sidebar.v1', open ? '1' : '0'); } catch { /* storage optional */ }
+}
+
+function persistSession(outcome) {
+  if (!state.sessionId) return;
+  api('sessions/save', { id: state.sessionId, started: state.sessionStarted, workbook: state.workbookName, prompt: state.lastPrompt, outcome, messages: state.messages, audit: state.audit, checkpoint: agentCheckpoint }).catch(() => {});
+}
+
+async function refreshHistory() {
+  const card = $('historyCard');
+  if (!card) return;
+  if (hostedRelay()) { card.classList.add('hidden'); return; }
+  try {
+    const data = await api('sessions');
+    $('historyCount').textContent = `${data.sessions.length} sessions`;
+    const host = $('historyList');
+    host.replaceChildren();
+    if (!data.sessions.length) {
+      const empty = document.createElement('p'); empty.className = 'hint'; empty.textContent = 'No saved sessions yet on this PC.'; host.append(empty); return;
+    }
+    for (const s of data.sessions) {
+      const row = document.createElement('div'); row.className = 'source-connect';
+      const info = document.createElement('div');
+      const strong = document.createElement('strong'); strong.textContent = `${String(s.updated || '').slice(0, 16).replace('T', ' ')} · ${s.workbook || 'workbook'}`;
+      const small = document.createElement('small'); small.textContent = `${s.prompt} — ${s.outcome}`;
+      info.append(strong, small);
+      const resume = document.createElement('button'); resume.className = 'text-button'; resume.type = 'button'; resume.textContent = 'Resume';
+      resume.addEventListener('click', () => resumeSession(s.id));
+      const del = document.createElement('button'); del.className = 'text-button'; del.type = 'button'; del.textContent = 'Delete';
+      del.addEventListener('click', async () => {
+        if (del.dataset.armed !== '1') { del.dataset.armed = '1'; del.textContent = 'Confirm delete?'; return; }
+        try {
+          await api('sessions/delete', { id: s.id });
+          await refreshHistory();
+          toast('Session deleted.');
+        } catch (error) { toast(error.message); }
+      });
+      row.append(info, resume, del);
+      host.append(row);
+    }
+  } catch (error) { $('historyCount').textContent = error.message || 'Local relay unavailable'; }
+}
+
+async function resumeSession(id) {
+  if (state.busy) return toast('Stop the current run before resuming.');
+  try {
+    const s = await api(`sessions/read?id=${encodeURIComponent(id)}`);
+    if (!s || !Array.isArray(s.messages)) return toast('Session not found.');
+    state.sessionId = s.id;
+    state.sessionStarted = s.started;
+    state.lastPrompt = s.prompt || '';
+    state.messages = s.messages.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') }));
+    state.audit = Array.isArray(s.audit) ? s.audit : [];
+    const conversation = $('conversation');
+    conversation.replaceChildren();
+    for (const m of state.messages) renderMessage(m.role, m.content);
+    const lastAssistant = [...state.messages].reverse().find(m => m.role === 'assistant');
+    state.lastAnswer = lastAssistant ? lastAssistant.content : '';
+    $('insertAnswer').disabled = !state.lastAnswer;
+    agentCheckpoint = s.checkpoint || { prompt: state.lastPrompt, progress: [], observation: '', observationSource: '' };
+    showAgentStatus(0, 'Resumed · 已恢復');
+    syncAgentControls();
+    toast(`Resumed session ${s.id}`);
+  } catch (error) { toast(error.message); }
+}
+
+async function refreshMemory() {
+  const card = $('memoryCard');
+  if (!card) return;
+  if (hostedRelay()) { card.classList.add('hidden'); return; }
+  try {
+    const data = await api('memory');
+    const text = String(data.text || '');
+    $('memoryText').textContent = text || '(empty)';
+    $('memoryCount').textContent = `${text.trim() ? text.trim().split('\n').length : 0} notes`;
+  } catch (error) { $('memoryCount').textContent = error.message || 'Local relay unavailable'; }
+}
+
+async function addMemoryNote() {
+  const note = $('memoryNote').value.trim();
+  if (!note) return toast('Type a note to remember.');
+  try {
+    await api('memory/add', { note });
+    $('memoryNote').value = '';
+    await refreshMemory();
+    toast('Memory note saved on this PC.');
+  } catch (error) { toast(error.message); }
+}
+
+async function refreshSkills() {
+  const card = $('skillsCard');
+  if (!card) return;
+  if (hostedRelay()) { card.classList.add('hidden'); return; }
+  try {
+    const data = await api('skills');
+    $('skillsCount').textContent = data.root ? `${data.skills.length} · OneDrive` : 'No local skills folder';
+    const host = $('skillsList');
+    host.replaceChildren();
+    if (!data.skills.length) {
+      const empty = document.createElement('p'); empty.className = 'hint'; empty.textContent = 'No skills found in the local OneDrive Copilot skills folder.'; host.append(empty); return;
+    }
+    for (const skill of data.skills) {
+      const row = document.createElement('div'); row.className = 'source-connect';
+      const info = document.createElement('div');
+      const strong = document.createElement('strong'); strong.textContent = skill.id;
+      const small = document.createElement('small'); small.textContent = skill.description.slice(0, 140);
+      info.append(strong, small);
+      const use = document.createElement('button'); use.className = 'text-button'; use.type = 'button'; use.textContent = '@use';
+      use.addEventListener('click', () => { $('prompt').value = `@${skill.id} ${$('prompt').value}`; $('prompt').focus(); });
+      row.append(info, use);
+      host.append(row);
+    }
+  } catch (error) { $('skillsCount').textContent = error.message || 'Local relay unavailable'; }
+}
+
+async function saveCurrentSkill() {
+  const id = $('skillId').value.trim();
+  const description = $('skillDescription').value.trim();
+  const task = state.lastPrompt || $('prompt').value.trim();
+  if (!id) return toast('Enter a new skill name (lowercase letters, digits, hyphens).');
+  if (!description) return toast('Describe when the skill should be used.');
+  if (!task) return toast('Send a task first, then save it as a skill.');
+  const body = `# ${id}\n\n## Trigger\n\n${task}\n\n## Procedure applied\n\n${state.lastAnswer || '(no answer recorded yet)'}\n\n## Guardrails\n\nRead-only unless the user approves edits. Cite exact sheets and cells. State coverage and limitations. Never overwrite source data.`;
+  try {
+    const result = await api('skills/save', { id, description, body });
+    $('skillId').value = ''; $('skillDescription').value = '';
+    await refreshSkills();
+    toast(`Skill saved: ${result.path}`);
+  } catch (error) { toast(error.message); }
 }
 
 function renderCloudResults(items) {
@@ -429,11 +562,23 @@ function htmlAttachmentText(source) {
 
 async function readAttachment(file) {
   const ext = file.name.split('.').pop().toLowerCase();
-  const supported = new Set(['html', 'htm', 'txt', 'md', 'csv', 'tsv', 'json', 'xml']);
-  if (!supported.has(ext)) throw new Error(`${file.name}: supported files are HTML, TXT, MD, CSV, TSV, JSON and XML.`);
+  const local = new Set(['html', 'htm', 'txt', 'md', 'csv', 'tsv', 'json', 'xml']);
+  const relayed = new Set(['pdf', 'xlsx', 'xlsm']);
+  if (!local.has(ext) && !relayed.has(ext)) throw new Error(`${file.name}: supported files are HTML, TXT, MD, CSV, TSV, JSON, XML, PDF, XLSX and XLSM.`);
   if (file.size > ATTACHMENT_MAX_BYTES) throw new Error(`${file.name}: file is over the 5 MB limit.`);
-  const text = decodeAttachment(new Uint8Array(await file.arrayBuffer()), ext);
-  const extracted = annotateEvidenceLines(ext === 'html' || ext === 'htm' ? htmlAttachmentText(text) : text.replace(/\u0000/g, ''));
+  let extracted;
+  if (relayed.has(ext)) {
+    // Binary formats are extracted by the local relay (exceljs / pdftotext); the pane never parses them.
+    if (hostedRelay()) throw new Error(`${file.name}: PDF/XLSX extraction needs the local relay on this PC.`);
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    const result = await api('extract', { name: file.name, data: btoa(binary) });
+    extracted = annotateEvidenceLines(String(result.text || ''));
+  } else {
+    const text = decodeAttachment(new Uint8Array(await file.arrayBuffer()), ext);
+    extracted = annotateEvidenceLines(ext === 'html' || ext === 'htm' ? htmlAttachmentText(text) : text.replace(/\u0000/g, ''));
+  }
   if (!extracted.trim()) throw new Error(`${file.name}: no readable text was found.`);
   const clipped = trimContext(extracted, ATTACHMENT_FILE_CAP);
   return { name: file.name, kind: ext.toUpperCase(), size: file.size, text: clipped.text, chars: clipped.text.length, truncated: clipped.truncated };
@@ -499,7 +644,7 @@ function renderMessage(role, content) {
   conversation.querySelector('.welcome')?.remove();
   const bubble = document.createElement('div'); bubble.className = `message ${role}`;
   if (role === 'assistant') {
-    const label = document.createElement('div'); label.className = 'message-label'; label.textContent = $('activeProvider').value.toUpperCase(); bubble.append(label);
+    const label = document.createElement('div'); label.className = 'message-label'; label.textContent = 'QWEN'; bubble.append(label);
   }
   const body = document.createElement('div'); body.textContent = content; bubble.append(body); conversation.append(bubble); conversation.scrollTop = conversation.scrollHeight;
   return bubble;
@@ -644,6 +789,17 @@ function boundedRange(input, limit = 1000) {
   if (!range) return '';
   const size = rangeSize(range);
   return size.rows * size.cols <= limit ? range : '';
+}
+
+// Any range is walkable: one READ_MAX_CELLS batch per request, resumed with offset.
+function pagedRange(addr, offset = 0) {
+  const size = rangeSize(addr);
+  const skip = Math.min(Math.max(0, Number.isInteger(offset) ? offset : 0), size.rows - 1);
+  const rows = Math.min(size.rows - skip, Math.max(1, Math.floor(READ_MAX_CELLS / size.cols)));
+  const start = addr.split(':')[0].match(/^([A-Z]+)(\d+)$/);
+  const end = (addr.split(':')[1] || addr.split(':')[0]).match(/^([A-Z]+)(\d+)$/);
+  const top = Number(start[2]) + skip;
+  return { range: `${start[1]}${top}:${end[1]}${top + rows - 1}`, skip, rows, totalRows: size.rows, firstRow: Number(start[2]) };
 }
 
 function cellValueOk(value) {
@@ -1821,6 +1977,7 @@ async function readWorkbookMeta() {
     const sheets = book.worksheets;
     sheets.load?.('items/name');
     await context.sync();
+    state.workbookName = book.name || '';
     const sheetItems = sheets.items || [];
     const lines = [`workbook: ${book.name || '(unsaved)'}`, `sheets: ${sheetItems.length}`];
     for (const sheet of sheetItems.slice(0, 30)) {
@@ -1913,8 +2070,8 @@ async function profileSheet(sheetName, requested, onProgress = () => {}) {
     const start = addr.split(':')[0].match(/^([A-Z]+)(\d+)$/);
     const firstColumn = columnIndex(start[1]);
     const firstRow = Number(start[2]);
-    const cols = Math.min(size.cols, PROFILE_MAX_COLS);
-    const rows = Math.min(size.rows, Math.max(1, Math.floor(PROFILE_MAX_CELLS / cols)));
+    const cols = size.cols;
+    const rows = size.rows;
     const firstLetter = indexToColumn(firstColumn);
     const lastLetter = indexToColumn(firstColumn + cols - 1);
     const batchRows = Math.max(1, Math.floor(PROFILE_BATCH_CELLS / cols));
@@ -2020,11 +2177,93 @@ function formatProfile(sheetName, profile) {
   return `${head}\n${lines.join('\n')}${profile.complete ? '' : `\n[INCOMPLETE: ${sheetName}!${profile.requestedAddress} was requested; only the displayed profile range was read.${profile.scanError ? ` Excel error: ${profile.scanError}.` : ''}]`}`;
 }
 
-async function gridsForChecks(checks) {
+// Whole-workbook scan: every sheet's used range, batched, error values counted with addresses.
+async function scanWorkbook(onProgress = () => {}) {
+  return Excel.run(async context => {
+    const sheets = context.workbook.worksheets;
+    sheets.load('items/name');
+    await context.sync();
+    const results = [];
+    for (const item of sheets.items) {
+      const worksheet = context.workbook.worksheets.getItem(item.name);
+      const used = worksheet.getUsedRangeOrNullObject();
+      used.load(['isNullObject', 'address', 'rowCount', 'columnCount']);
+      await context.sync();
+      if (used.isNullObject) { results.push({ sheet: item.name, rows: 0, cols: 0, scanned: 0, errors: 0, errorCells: [], scanError: '' }); continue; }
+      const addr = plainRange(used.address);
+      const size = rangeSize(addr);
+      const start = addr.split(':')[0].match(/^([A-Z]+)(\d+)$/);
+      const end = (addr.split(':')[1] || addr.split(':')[0]).match(/^([A-Z]+)(\d+)$/);
+      const batchRows = Math.max(1, Math.floor(PROFILE_BATCH_CELLS / size.cols));
+      let errors = 0, scanned = 0, scanError = '';
+      const errorCells = [];
+      for (let offset = 0; offset < size.rows; offset += batchRows) {
+        const count = Math.min(batchRows, size.rows - offset);
+        const top = Number(start[2]) + offset;
+        const target = worksheet.getRange(`${start[1]}${top}:${end[1]}${top + count - 1}`);
+        target.load('values');
+        try { await context.sync(); }
+        catch (error) { scanError = String(error?.message || error).slice(0, 200); break; }
+        const values = target.values || [];
+        for (let r = 0; r < values.length; r++) {
+          for (let c = 0; c < (values[r] || []).length; c++) {
+            if (AgentCore.isExcelError(values[r][c])) {
+              errors += 1;
+              if (errorCells.length < 12) errorCells.push(`${indexToColumn(columnIndex(start[1]) + c)}${top + r}`);
+            }
+          }
+        }
+        scanned += count;
+        onProgress(item.name, scanned, size.rows);
+      }
+      results.push({ sheet: item.name, rows: size.rows, cols: size.cols, scanned, errors, errorCells, scanError });
+    }
+    return results;
+  });
+}
+
+function formatScan(results) {
+  const lines = results.map(r => {
+    const parts = [`sheet: ${r.sheet}`, `rows ${r.rows} × cols ${r.cols}`, `scanned ${r.scanned}/${r.rows}`, `errors ${r.errors}`];
+    if (r.errorCells.length) parts.push(`at ${r.errorCells.join(', ')}`);
+    if (r.scanError || r.scanned < r.rows) parts.push(`INCOMPLETE${r.scanError ? `: ${r.scanError}` : ''}`);
+    return parts.join(' | ');
+  });
+  const totalErrors = results.reduce((n, r) => n + r.errors, 0);
+  return `[Workbook scan: ${results.length} sheets, ${totalErrors} error values]\n${lines.join('\n')}`;
+}
+
+async function readFullGrid(sheet, range, wantFormulas) {
+  const size = rangeSize(range);
+  const batchRows = Math.max(1, Math.floor(PROFILE_BATCH_CELLS / size.cols));
+  const start = range.split(':')[0].match(/^([A-Z]+)(\d+)$/);
+  const end = (range.split(':')[1] || range.split(':')[0]).match(/^([A-Z]+)(\d+)$/);
+  const values = [], formulas = [];
+  for (let offset = 0; offset < size.rows; offset += batchRows) {
+    const count = Math.min(batchRows, size.rows - offset);
+    const top = Number(start[2]) + offset;
+    const batch = await Excel.run(async context => {
+      const cells = context.workbook.worksheets.getItem(sheet).getRange(`${start[1]}${top}:${end[1]}${top + count - 1}`);
+      cells.load(wantFormulas ? ['values', 'formulas'] : ['values']);
+      await context.sync();
+      return { values: cells.values || [], formulas: cells.formulas || [] };
+    });
+    if (batch.values.length !== count) throw new Error(`Excel returned ${batch.values.length} of ${count} check rows`);
+    values.push(...batch.values);
+    if (wantFormulas) formulas.push(...batch.formulas);
+  }
+  return { values, formulas };
+}
+
+async function gridsForChecks(checks, phase = 'after') {
   const grids = {};
   for (const check of checks) {
-    try { grids[check.id] = await readGrid(check.sheet, check.range); }
-    catch { grids[check.id] = { values: [], formulas: [] }; }
+    const target = check.check === 'crossCheck' && phase === 'before'
+      ? { sheet: check.otherSheet, range: check.otherRange }
+      : { sheet: check.sheet, range: check.range };
+    if (!target.sheet || !target.range) { grids[check.id] = { values: [], formulas: [], readError: 'the comparison range is missing' }; continue; }
+    try { grids[check.id] = await readFullGrid(target.sheet, target.range, check.check === 'formulaErrors'); }
+    catch (error) { grids[check.id] = { values: [], formulas: [], readError: String(error?.message || error).slice(0, 300) }; }
   }
   return grids;
 }
@@ -2032,25 +2271,22 @@ async function gridsForChecks(checks) {
 function usableChecks(plan) {
   return (plan?.finalValidation || []).map(check => {
     const sheet = normalizeSheet(check.sheet);
-    const range = boundedRange(check.range, 160);
-    return sheet && range ? { ...check, sheet, range } : null;
+    const range = normalizeRange(check.range);
+    return sheet && range ? { ...check, sheet, range, otherSheet: normalizeSheet(check.otherSheet), otherRange: normalizeRange(check.otherRange) } : null;
   }).filter(Boolean);
 }
 
 async function routeForPrompt(text, mode) {
-  let configured = { qwen: false, grok: false };
+  let configured = { qwen: false };
+  let relayBuild = '';
   try {
     const health = await api('health');
     configured = health.configured || configured;
+    relayBuild = typeof health.build === 'string' ? health.build : '';
   } catch { /* the send path reports a down relay */ }
-  const selected = $('activeProvider').value === 'auto' ? 'auto' : ($('activeProvider').value || 'qwen');
-  const routed = AgentCore.routeProvider({ selected, mode, fast: Boolean($('fastMode').checked), text, ready: configured });
+  const routed = AgentCore.routeProvider({ selected: 'qwen', ready: configured });
   if (routed.error) return routed;
-  return {
-    ...routed,
-    model: routed.provider === 'grok' ? $('grokModel').value.trim() : $('qwenModel').value.trim(),
-    endpoint: $('qwenEndpoint').value.trim()
-  };
+  return { ...routed, model: $('qwenModel').value.trim(), endpoint: $('qwenEndpoint').value.trim(), relayBuild, buildMismatch: Boolean(relayBuild) && relayBuild !== PANE_BUILD };
 }
 
 function renderAuditCard() {
@@ -2301,6 +2537,7 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
   const run = mode === 'agent' ? { round: 0, stopRequested: false } : null;
   const task = checkpoint || { prompt: clean, progress: [], observation: '', observationSource: '' };
   activeAgent = run;
+  if (!state.sessionId) { state.sessionId = `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`; state.sessionStarted = new Date().toISOString(); }
   if (!checkpoint) agentCheckpoint = null;
   state.busy = true;
   if (run) $('newChat').disabled = true;
@@ -2314,33 +2551,49 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
     task.observationSource = source;
     state.messages.push({ role: 'user', content });
   };
+  const failEarly = reason => {
+    outcome = reason;
+    toast(reason);
+    state.audit.push(AgentCore.audit({ kind: 'blocked', reason }));
+    renderAuditCard();
+  };
   try {
     await ensureKeys();
     if (interrupted()) return;
     let routed = await routeForPrompt(clean, mode);
     if (interrupted()) return;
-    if (routed.error) { toast(routed.error); return; }
+    if (routed.error) { failEarly(routed.error); return; }
+    if (routed.buildMismatch) { failEarly(`The relay is running build ${routed.relayBuild} but this pane is ${PANE_BUILD}. Restart the relay (npm run relay-stop, then npm start) and send again.`); return; }
     const displayPrompt = checkpoint ? 'Continue Agent · 繼續 Agent' : clean;
     state.audit.push(AgentCore.audit({ kind: 'request', mode, provider: routed.provider, reason: checkpoint ? 'continued after round limit' : routed.reason, text: displayPrompt.slice(0, 500) }));
     const files = attachmentContext();
+    state.lastPrompt = clean;
+    let skillCtx = null;
+    try { if ($('includeContext').checked) skillCtx = await api(`skills/context?question=${encodeURIComponent(clean)}`); } catch { /* saved skills are optional */ }
+    if (interrupted()) return;
+    const skillText = skillCtx?.text || '';
+    let memoryText = '';
+    try { if ($('includeContext').checked) memoryText = String((await api('memory')).text || '').slice(-4000); } catch { /* memory is optional */ }
+    if (interrupted()) return;
     const resumeContext = checkpoint ? [
       '[Agent continuation] Continue the original task from the preceding user message. Use the conversation and the pane observations below. Re-read the affected workbook range or Word selection before editing if the current state is uncertain. Avoid repeating edits already applied. Review pending decisions and report any remaining work.',
       task.progress.length ? `Recent edits confirmed by the pane at the time of application (verify if the user has since edited or undone them):\n${task.progress.join('\n')}` : '',
       task.observation ? `Latest pane observation:\n${task.observation}` : ''
     ].filter(Boolean).join('\n\n') : '';
-    const contextLimit = Math.max(0, Math.min(CONTEXT_CAP, 49_000 - clean.length - files.length - FINANCE_EVIDENCE_INSTRUCTION.length - 300));
-    if (contextLimit < 300 && $('includeContext').checked) { toast('The prompt and attachments leave too little room for workbook context. Remove a file or shorten the prompt.'); return; }
+    const contextLimit = Math.max(0, Math.min(CONTEXT_CAP, 49_000 - clean.length - files.length - skillText.length - memoryText.length - FINANCE_EVIDENCE_INSTRUCTION.length - 300));
+    if (contextLimit < 300 && $('includeContext').checked) { failEarly('The prompt and attachments leave too little room for workbook context. Remove a file or shorten the prompt.'); return; }
     let ctx = null;
     try { ctx = await contextForMode(mode, contextLimit); } catch (error) { if (turn === state.turn) toast(`Could not read workbook context: ${error.message}`); }
     if (interrupted()) return;
     const financeTask = AgentCore.isFinancePrompt(`${clean}\n${files}\n${ctx?.text || ''}`);
     const evidenceSources = collectFinanceSources(ctx, files);
     if (checkpoint?.observationSource) evidenceSources.push(checkpoint.observationSource);
+    if (skillCtx?.selected?.length) evidenceSources.push(`Saved skills: ${skillCtx.selected.join(', ')}`);
     const financeValidations = [];
     let financeAnswerText = '';
     const userPrompt = financeTask ? `${clean}${FINANCE_EVIDENCE_INSTRUCTION}` : clean;
-    const content = `${userPrompt}${files}${ctx ? `\n\n${ctx.header}\n${ctx.text}` : ''}\n\n[Mode: ${mode}]`;
-    if (content.length > 49_500) { toast('Message plus workbook context is too large — shorten the message or turn context off.'); return; }
+    const content = `${userPrompt}${files}${ctx ? `\n\n${ctx.header}\n${ctx.text}` : ''}${skillText ? `\n\n[Saved skills]\n${skillText}` : ''}${memoryText ? `\n\n[Memory]\n${memoryText}` : ''}\n\n[Mode: ${mode}]`;
+    if (content.length > 49_500) { failEarly('Message plus workbook context is too large — shorten the message or turn context off.'); return; }
     agentCheckpoint = null;
     state.forceSheet = false;
     state.messages.push({ role: 'user', content });
@@ -2348,26 +2601,18 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
     const fileNames = state.attachments.map(file => file.name);
     renderMessage('user', displayPrompt + (fileNames.length ? `\n\nAttachments: ${fileNames.join(', ')}` : '') + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
     state.audit.push(AgentCore.audit({ kind: 'context', address: ctx?.address || 'none', chars: ctx?.chars || 0 }));
+    if (skillText) state.audit.push(AgentCore.audit({ kind: 'context', address: `skills ${skillCtx.selected.join(', ')}`, chars: skillText.length }));
+    if (memoryText) state.audit.push(AgentCore.audit({ kind: 'context', address: 'memory', chars: memoryText.length }));
     if (state.attachments.length) state.audit.push(AgentCore.audit({ kind: 'context', address: fileNames.join(', '), chars: files.length }));
     let guard = 0;
-    let retried = false;
     while (guard < AgentCore.MAX_LOOPS) {
       if (interrupted()) return;
       if (run) {
         run.round = guard + 1;
         showAgentStatus(run.round, 'Waiting for model · 等候模型');
       }
-      let result;
-      try {
-        const messages = dedupContext(state.messages.slice(-24), resumeContext && guard === 0 ? 2 : 1);
-        result = await streamChat({ provider: routed.provider, model: routed.model, endpoint: routed.endpoint, messages, fast: $('fastMode').checked, host: state.host === 'Word' ? 'word' : 'excel', mode });
-      } catch (error) {
-        if (error.name === 'AbortError' || retried || !routed.fallback || interrupted()) throw error;
-        retried = true;
-        state.audit.push(AgentCore.audit({ kind: 'fallback', provider: routed.fallback, reason: error.message }));
-        routed = { ...routed, provider: routed.fallback, model: routed.fallback === 'grok' ? $('grokModel').value.trim() : $('qwenModel').value.trim(), fallback: '' };
-        continue;
-      }
+      const messages = dedupContext(state.messages.slice(-24), resumeContext && guard === 0 ? 2 : 1);
+      const result = await streamChat({ provider: routed.provider, model: routed.model, endpoint: routed.endpoint, messages, fast: $('fastMode').checked, host: state.host === 'Word' ? 'word' : 'excel', mode });
       if (interrupted()) return;
       const envelope = AgentCore.parseEnvelope(result.text);
       const revision = parseRevision(result.text);
@@ -2376,17 +2621,10 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
       state.lastAnswer = envelope.prose || revision.prose;
       $('insertAnswer').disabled = !state.lastAnswer;
       $('lastAnswerState').textContent = result.model ? `via ${result.model}` : '';
-      result.bubble.children[result.bubble.children.length - 1].textContent = state.lastAnswer;
+      result.bubble.children[result.bubble.children.length - 1].textContent = state.lastAnswer || '(model returned only a JSON envelope; see the audit card)';
       state.audit.push(AgentCore.audit({ kind: 'model', round: run?.round, provider: routed.provider, model: result.model, decision: envelope.decision || 'COMPLETE', plan: envelope.plan?.goal || '' }));
       const normalized = envelope.actions ? normalizeActions(envelope.actions) : { actions: revision.actions || [], skipped: revision.skipped || 0 };
-      if (mode === 'chat') {
-        if (normalized.actions.length || revision.edits) {
-          state.audit.push(AgentCore.audit({ kind: 'blocked', reason: 'chat mode does not write' }));
-          toast('Chat mode does not change the file.');
-        }
-        break;
-      }
-      if (!$('includeContext').checked && (envelope.profileRequest || envelope.contextRequest || usableChecks(envelope.plan).length)) {
+      if (!$('includeContext').checked && (envelope.profileRequest || envelope.contextRequest || envelope.scanRequest || usableChecks(envelope.plan).length)) {
         observe('Office file sharing is off. No workbook or document range was read or sent to AI. Turn on Share Office file data with AI to review the open file.');
         state.audit.push(AgentCore.audit({ kind: 'blocked', reason: 'Office file sharing is off' }));
         outcome = 'File sharing off · 檔案分享已關閉';
@@ -2397,8 +2635,31 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
         outcome = normalized.actions.length ? 'Review required · 等候審批' : 'Input required · 等候輸入';
         break;
       }
+      if (envelope.scanRequest && !normalized.actions.length) {
+        showAgentStatus(run?.round || 1, 'Scanning workbook · 掃描活頁簿');
+        let results = null;
+        let failure = '';
+        try {
+          results = await scanWorkbook((sheet, done, total) => {
+            if (interrupted()) { const stopped = new Error('Stopped'); stopped.name = 'AbortError'; throw stopped; }
+            showAgentStatus(run?.round || 1, `Scanning ${sheet} ${done}/${total} · 掃描工作表`);
+          });
+        } catch (error) { failure = String(error?.message || error).slice(0, 300); }
+        if (interrupted()) return;
+        if (results) {
+          const clipped = trimContext(formatScan(results), 8000);
+          observe(`Requested workbook scan.\n\n${clipped.text}`, 'Workbook scan · all sheets');
+          evidenceSources.push('Workbook scan · all sheets');
+          state.audit.push(AgentCore.audit({ kind: 'context', address: 'workbook scan', chars: clipped.text.length }));
+        } else {
+          observe(`The workbook scan failed: ${failure}. Nothing was read, so this is not a successful read.`);
+          state.audit.push(AgentCore.audit({ kind: 'blocked', reason: `workbook scan failed: ${failure}` }));
+        }
+        guard += 1;
+        continue;
+      }
       if (envelope.profileRequest && !normalized.actions.length) {
-        showAgentStatus(run.round, 'Reading sheet profile · 讀取工作表摘要');
+        showAgentStatus(run?.round || 1, 'Reading sheet profile · 讀取工作表摘要');
         const sheet = normalizeSheet(envelope.profileRequest.sheet);
         let profile = null;
         let failure = '';
@@ -2430,10 +2691,11 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
         continue;
       }
       if (envelope.contextRequest && !normalized.actions.length) {
-        showAgentStatus(run.round, 'Reading workbook · 讀取活頁簿');
+        showAgentStatus(run?.round || 1, 'Reading workbook · 讀取活頁簿');
         const sheet = normalizeSheet(envelope.contextRequest.sheet);
         const asked = normalizeRange(envelope.contextRequest.range);
-        const range = boundedRange(envelope.contextRequest.range, READ_MAX_CELLS);
+        const page = asked ? pagedRange(asked, envelope.contextRequest.offset) : null;
+        const range = page ? page.range : '';
         if (sheet && range) {
           let grid;
           try { grid = await readGrid(sheet, range); }
@@ -2449,7 +2711,9 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
           const full = annotateRows(grid.values, grid.formulas, `${sheet}!${range}`);
           const text = full.slice(0, 8000);
           const cut = full.length > text.length ? '\n[truncated: the read exceeded the context budget]' : '';
-          const note = `Requested context.\n\n[Excel range ${sheet}!${range}]\n${text}${cut}`;
+          const consumed = page.skip + page.rows;
+          const coverage = `\n[Coverage: ${consumed}/${page.totalRows} rows of ${sheet}!${asked} read (rows ${page.firstRow + page.skip}-${page.firstRow + consumed - 1}). ${consumed >= page.totalRows ? 'The requested range is fully read.' : `Send contextRequest with offset=${consumed} for the next chunk.`}]`;
+          const note = `Requested context.\n\n[Excel range ${sheet}!${range}]\n${text}${cut}${coverage}`;
           const source = `${sheet}!${range}${cut ? ' · truncated' : ''}`;
           observe(note, source);
           evidenceSources.push(source);
@@ -2459,12 +2723,9 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
         }
         // State why nothing was read. Falling through used to report "Observed: SUCCESS",
         // which the model took as a successful but empty read, then refused to guess columns.
-        const size = asked ? rangeSize(asked) : null;
         const reason = !sheet
           ? `sheet "${envelope.contextRequest.sheet}" is not a usable sheet name`
-          : !asked
-            ? `range "${envelope.contextRequest.range}" is not a valid A1 range`
-            : `${sheet}!${asked} is ${size.rows * size.cols} cells, over the ${READ_MAX_CELLS}-cell read limit`;
+          : `range "${envelope.contextRequest.range}" is not a valid A1 range`;
         observe(`No range was read: ${reason}. Nothing was returned, so this is not a successful read. Request a smaller range and ask again.`);
         state.audit.push(AgentCore.audit({ kind: 'blocked', reason: `context request rejected: ${reason}` }));
         guard += 1;
@@ -2472,13 +2733,21 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
       }
       const checks = usableChecks(envelope.plan);
       const profile = readFinanceProfile();
-      if (checks.length) showAgentStatus(run.round, 'Reading check inputs · 讀取檢查資料');
-      const beforeGrids = await gridsForChecks(checks);
+      if (checks.length) showAgentStatus(run?.round || 1, 'Reading check inputs · 讀取檢查資料');
+      const beforeGrids = await gridsForChecks(checks, 'before');
       if (interrupted()) return;
       let exec = { status: 'SUCCESS', blocked: 0, appliedActions: [], failure: '' };
-      if (normalized.actions.length) {
-        showAgentStatus(run.round, 'Applying edits · 套用修改');
-        exec = await executeClassified(normalized.actions, { direct: Boolean($('directRevise').checked) });
+      if (normalized.actions.length || revision.edits) {
+        if (mode === 'chat') {
+          state.audit.push(AgentCore.audit({ kind: 'blocked', reason: 'chat mode does not write' }));
+          toast('Chat mode does not change the file.');
+          outcome = 'Chat read-only · Chat 唯讀';
+          break;
+        }
+        if (normalized.actions.length) {
+          showAgentStatus(run?.round || 1, 'Applying edits · 套用修改');
+          exec = await executeClassified(normalized.actions, { direct: Boolean($('directRevise').checked) });
+        }
       }
       state.audit.push(AgentCore.audit({ kind: 'execute', status: exec.status, count: normalized.actions.length, blocked: exec.blocked, skipped: normalized.skipped, reason: exec.failure }));
       for (const action of exec.appliedActions) task.progress.push(describeAction(action).slice(0, 240));
@@ -2497,8 +2766,8 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
         guard += 1;
         continue;
       }
-      if (checks.length) showAgentStatus(run.round, 'Checking results · 檢查結果');
-      const afterGrids = await gridsForChecks(checks);
+      if (checks.length) showAgentStatus(run?.round || 1, 'Checking results · 檢查結果');
+      const afterGrids = await gridsForChecks(checks, 'after');
       if (interrupted()) return;
       const validations = checks.map(check => ({
         ...AgentCore.evaluateGridCheck({ ...check, profile }, afterGrids[check.id], beforeGrids[check.id]),
@@ -2541,6 +2810,10 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
         break;
       }
       if (next === 'CONTINUE' || next === 'REPLAN') {
+        if (mode === 'chat' && !checks.length && !envelope.contextRequest && !envelope.profileRequest && !envelope.scanRequest) {
+          outcome = 'Completed · 已完成';
+          break;
+        }
         observe(`Observed: ${observed}. Continue only if every check passed.`);
         guard += 1;
         continue;
@@ -2573,6 +2846,9 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
       renderMessage('assistant', `Error: ${error.message}`);
       toast(error.message);
     }
+    outcome = 'Error · 錯誤';
+    state.audit.push(AgentCore.audit({ kind: 'stopped', reason: String(error.message || error).slice(0, 300) }));
+    renderAuditCard();
   } finally {
     if (turn === state.turn) {
       if (run?.stopRequested) {
@@ -2585,6 +2861,10 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
       activeAgent = null;
       if (run) $('newChat').disabled = false;
       resetComposer();
+      state.audit.push(AgentCore.audit({ kind: 'stopped', reason: `run ended at round ${run?.round ?? 0}: ${outcome}` }));
+      renderAuditCard();
+      persistSession(outcome);
+      refreshHistory();
       showAgentStatus(run?.round ?? 0, run ? outcome : '');
     }
   }
@@ -2596,28 +2876,37 @@ async function sendPrompt(prompt) {
   if (!clean || state.busy) return;
   if (clean.length > 49_500) { toast('Message is too large. Shorten the prompt and try again.'); return; }
   const turn = ++state.turn;
+  if (!state.sessionId) { state.sessionId = `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`; state.sessionStarted = new Date().toISOString(); }
   state.busy = true;
   $('send').textContent = '■';
   $('send').setAttribute?.('aria-label', 'Stop');
   try {
     await ensureKeys();
     if (turn !== state.turn) return;
-    const provider = $('activeProvider').value;
+    const provider = 'qwen';
     const files = attachmentContext();
-    const contextLimit = Math.max(0, Math.min(CONTEXT_CAP, 49_000 - clean.length - files.length - FINANCE_EVIDENCE_INSTRUCTION.length - 100));
+    state.lastPrompt = clean;
+    let skillCtx = null;
+    try { if ($('includeContext').checked) skillCtx = await api(`skills/context?question=${encodeURIComponent(clean)}`); } catch { /* saved skills are optional */ }
+    if (turn !== state.turn) return;
+    const skillText = skillCtx?.text || '';
+    let memoryText = '';
+    try { if ($('includeContext').checked) memoryText = String((await api('memory')).text || '').slice(-4000); } catch { /* memory is optional */ }
+    if (turn !== state.turn) return;
+    const contextLimit = Math.max(0, Math.min(CONTEXT_CAP, 49_000 - clean.length - files.length - skillText.length - memoryText.length - FINANCE_EVIDENCE_INSTRUCTION.length - 100));
     if (contextLimit < 300 && $('includeContext').checked) { toast('The prompt and attachments leave too little room for workbook context. Remove a file or shorten the prompt.'); return; }
     let ctx = null;
     try { ctx = await buildContext(contextLimit); } catch (error) { if (turn === state.turn) toast(`Could not read workbook context: ${error.message}`); }
     if (turn !== state.turn) return;
     const financeTask = AgentCore.isFinancePrompt(`${clean}\n${files}\n${ctx?.text || ''}`);
     const evidenceSources = collectFinanceSources(ctx, files);
-    const content = `${clean}${financeTask ? FINANCE_EVIDENCE_INSTRUCTION : ''}${files}${ctx ? `\n\n${ctx.header}\n${ctx.text}` : ''}`;
+    const content = `${clean}${financeTask ? FINANCE_EVIDENCE_INSTRUCTION : ''}${files}${ctx ? `\n\n${ctx.header}\n${ctx.text}` : ''}${skillText ? `\n\n[Saved skills]\n${skillText}` : ''}${memoryText ? `\n\n[Memory]\n${memoryText}` : ''}`;
     if (content.length > 49_500) { toast('Message plus workbook context is too large — shorten the message or turn context off.'); return; }
     state.forceSheet = false;
     state.messages.push({ role: 'user', content });
     const fileNames = state.attachments.map(file => file.name);
     renderMessage('user', clean + (fileNames.length ? `\n\nAttachments: ${fileNames.join(', ')}` : '') + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
-    const result = await streamChat({ provider, model: provider === 'qwen' ? $('qwenModel').value.trim() : $('grokModel').value.trim(), endpoint: $('qwenEndpoint').value.trim(), messages: dedupContext(state.messages.slice(-24)), fast: $('fastMode').checked, host: state.host === 'Word' ? 'word' : 'excel' });
+    const result = await streamChat({ provider, model: $('qwenModel').value.trim(), endpoint: $('qwenEndpoint').value.trim(), messages: dedupContext(state.messages.slice(-24)), fast: $('fastMode').checked, host: state.host === 'Word' ? 'word' : 'excel' });
     if (turn !== state.turn) return;
     const revision = parseRevision(result.text);
     state.messages.push({ role: 'assistant', content: result.text });
@@ -2644,7 +2933,7 @@ async function sendPrompt(prompt) {
       toast(error.message);
     }
   } finally {
-    if (turn === state.turn) resetComposer();
+    if (turn === state.turn) { resetComposer(); persistSession('Completed · 已完成'); refreshHistory(); }
   }
 }
 
@@ -2672,6 +2961,8 @@ function newChat() {
   state.lastAnswer = '';
   state.forceSheet = false;
   state.audit = [];
+  state.sessionId = null;
+  state.sessionStarted = null;
   $('insertAnswer').disabled = true;
   $('lastAnswerState').textContent = '';
   clearConversation();
@@ -2736,7 +3027,7 @@ function applyHostedChrome() {
   $('relayFields')?.classList.remove('hidden');
   $('localKeyFields')?.classList.add('hidden');
   const hint = $('keyHint');
-  if (hint) hint.textContent = 'This pane is served by Cloudflare. The relay token unlocks it. Qwen and Grok keys stay in Cloudflare secrets and are not typed here. Remember keeps the token in this pane only.';
+  if (hint) hint.textContent = 'This pane is served by Cloudflare. The relay token unlocks it. The Qwen key stays in Cloudflare secrets and is not typed here. Remember keeps the token in this pane only.';
   const saved = relayToken();
   if (saved) sessionRelayToken = saved;
 }
@@ -2751,7 +3042,7 @@ async function refreshSettings() {
   try {
     const data = await api('health');
     if (hostedRelay()) {
-      const provider = $('activeProvider').value === 'grok' ? 'grok' : 'qwen';
+      const provider = 'qwen';
       const active = Boolean(data.configured?.[provider]);
       const status = $('keyStatusHosted');
       if (status) {
@@ -2771,9 +3062,6 @@ async function refreshSettings() {
 }
 
 function toggleProviderFields() {
-  const isQwen = $('provider').value === 'qwen';
-  $('qwenFields').classList.toggle('hidden', !isQwen); $('grokFields').classList.toggle('hidden', isQwen);
-  $('activeProvider').value = $('provider').value;
   refreshSettings();
 }
 
@@ -2815,14 +3103,12 @@ async function insertAnswer() {
 $('settingsToggle').addEventListener('click', () => { $('settings').classList.toggle('hidden'); refreshSettings(); });
 $('closeSettings').addEventListener('click', () => $('settings').classList.add('hidden'));
 $('provider').addEventListener('change', toggleProviderFields);
-$('activeProvider').addEventListener('change', () => {
-  const value = $('activeProvider').value;
-  if (value !== 'qwen' && value !== 'grok') return;
-  $('provider').value = value;
-  toggleProviderFields();
-});
 $('refreshSelection').addEventListener('click', refreshContextCard);
-$('includeContext').addEventListener('change', refreshContextCard);
+$('includeContext').addEventListener('change', () => { $('shareQuick').checked = $('includeContext').checked; refreshContextCard(); });
+$('shareQuick').addEventListener('change', () => { $('includeContext').checked = $('shareQuick').checked; refreshContextCard(); });
+$('sidebarToggle').addEventListener('click', () => setSidebar($('sidebar').classList.contains('hidden')));
+$('sidebarClose').addEventListener('click', () => setSidebar(false));
+$('newChatSide').addEventListener('click', () => { newChat(); setSidebar(false); });
 $('addUsedRange').addEventListener('click', () => { state.forceSheet = true; refreshContextCard(); toast('Next question will use the whole active sheet.'); });
 $('saveKey').addEventListener('click', async () => {
   if (hostedRelay()) {
@@ -2860,6 +3146,8 @@ $('clearKey').addEventListener('click', async () => {
 $('connectOneDrive').addEventListener('click', connectOneDrive);
 $('disconnectOneDrive').addEventListener('click', () => disconnectSource('onedrive'));
 $('searchSources').addEventListener('click', searchCloudSource);
+$('saveSkill').addEventListener('click', saveCurrentSkill);
+$('addMemory').addEventListener('click', addMemoryNote);
 $('sourceQuery').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); searchCloudSource(); } });
 $('newChat').addEventListener('click', newChat);
 $('workMode')?.addEventListener('change', () => { state.forceSheet = false; syncAgentControls(); refreshContextCard(); });
@@ -2902,6 +3190,13 @@ Office.onReady(info => {
   applyHostedChrome();
   refreshSettings();
   refreshCloudSources();
+  refreshSkills();
+  refreshHistory();
+  refreshMemory();
   ensureKeys().then(refreshSettings);
 });
 applyHostedChrome();
+refreshSkills();
+refreshHistory();
+refreshMemory();
+try { if (localStorage.getItem('eqgc.sidebar.v1') === '1') setSidebar(true); } catch { /* storage optional */ }

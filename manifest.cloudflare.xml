@@ -4,8 +4,8 @@
   <Version>1.3.0.0</Version>
   <ProviderName>Local Office AI Assistant</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
-  <DisplayName DefaultValue="Qwen + Grok for Excel and Word"/>
-  <Description DefaultValue="Revise an Excel workbook or Word document with Qwen or Grok."/>
+  <DisplayName DefaultValue="Qwen for Excel and Word"/>
+  <Description DefaultValue="Revise an Excel workbook or Word document with Qwen."/>
   <IconUrl DefaultValue="https://excel-qwen-grok.anthonym-354.workers.dev/icon-32.png"/>
   <HighResolutionIconUrl DefaultValue="https://excel-qwen-grok.anthonym-354.workers.dev/icon-64.png"/>
   <SupportUrl DefaultValue="https://excel-qwen-grok.anthonym-354.workers.dev/"/>

@@ -1,6 +1,6 @@
 # SOP 1 — Installation 安裝程序
 
-**Qwen + Grok for Excel and Word.** This document covers getting the add-in onto a PC and keeping it running. For how to *use* it, read `SOP-USER-GUIDE.md` (說明書).
+**Qwen for Excel and Word.** This document covers getting the add-in onto a PC and keeping it running. For how to *use* it, read `SOP-USER-GUIDE.md` (說明書).
 
 Each person uses **their own API key**. The owner's Token Plan key stays on the owner's computer and is never shared, never committed, and never pasted into chat.
 
@@ -14,7 +14,7 @@ Each person uses **their own API key**. The owner's Token Plan key stays on the 
 | OS | Windows for the desktop sideload and for auto-start. The relay itself runs anywhere Node runs |
 | Office | Desktop **Excel** and/or **Word** (Microsoft 365 / 2019+). Excel on the web uses the hosted route in §7 |
 | Folder | The folder that holds `manifest.xml`. Every command below runs from there |
-| Key | Your own Qwen or Grok key. Nothing is bundled |
+| Key | Your own Qwen key. Nothing is bundled |
 
 The pane and the local relay both live at `http://127.0.0.1:3000`. The local manifest is version **1.2.0.0**; the hosted manifest is **1.3.0.0**.
 
@@ -25,7 +25,7 @@ The pane and the local relay both live at `http://127.0.0.1:3000`. The local man
 
 ## 2. Get the files 取得檔案
 
-**Option A — zip (normal route for teammates).** The owner sends `Qwen-Grok-for-Excel-and-Word.zip`. Extract it anywhere outside a cloud-synced folder if you can. The zip contains **no keys**.
+**Option A — zip (normal route for teammates).** The owner sends `Qwen-for-Excel-and-Word.zip`. Extract it anywhere outside a cloud-synced folder if you can. The zip contains **no keys**.
 
 **Option B — git (only if you have repository access).** The repository is private.
 
@@ -40,7 +40,7 @@ To rebuild the zip yourself, from the project folder:
 npm run package
 ```
 
-That writes `download/Qwen-Grok-for-Excel-and-Word.zip`, including a generated `START-HERE.txt`. It skips `node_modules`, `.git`, `.wrangler`, `download`, and any `.env*` file.
+That writes `download/Qwen-for-Excel-and-Word.zip`, including a generated `START-HERE.txt`. It skips `node_modules`, `.git`, `.wrangler`, `download`, and any `.env*` file.
 
 ---
 
@@ -49,7 +49,7 @@ That writes `download/Qwen-Grok-for-Excel-and-Word.zip`, including a generated `
 **Close Excel and Word first.** The sideload cannot register while they are open.
 
 ```powershell
-cd "C:\Users\Your Name\Qwen-Grok-for-Excel-and-Word"
+cd "C:\Users\Your Name\Qwen-for-Excel-and-Word"
 npm run setup
 npm start
 ```
@@ -59,12 +59,12 @@ npm start
 
 Prefer plain npm? `npm install` then `npm start` is exactly equivalent; `setup` only adds the version check and the guidance.
 
-Then in Excel: **Home → Add-ins → Qwen + Grok for Excel and Word**.
+Then in Excel: **Home → Add-ins → Qwen for Excel and Word**.
 
 ### First key entry 首次輸入 key
 
 1. In the pane open **Settings**.
-2. Pick **Qwen** or **Grok**.
+2. The provider is **Qwen**; paste your own key.
 3. Paste **your own** key.
 4. Leave **Remember key on this PC** ticked.
 5. Press **Use key**. The provider dot turns green.
@@ -77,7 +77,7 @@ OneDrive search is desktop/local-relay only. Each colleague signs in to their ow
 
 1. Create a Microsoft public app registration that supports personal Microsoft accounts. Add the **Mobile and desktop applications** platform with `http://localhost` redirect support and delegated `Files.Read`. Sign-in uses the system browser and PKCE; no Microsoft client secret is used.
 2. Fill `microsoftClientId` once in the root `cloud-oauth.json`, then include the file in the shared package. Restart the local relay after changing it. This is a public application ID, not a user credential. Do not put account emails, access tokens, or client secrets in the file.
-3. Each colleague opens **Cloud sources → Connect** and signs in through the system browser. Search results are read-only. A selected result reaches Qwen/Grok only after **Review and add to chat** and sending a question.
+3. Each colleague opens **Cloud sources → Connect** and signs in through the system browser. Search results are read-only. A selected result reaches Qwen only after **Review and add to chat** and sending a question.
 
 Each person uses their own account and grants consent separately; the pane no longer asks colleagues to enter OAuth app settings. These connectors are unavailable in the hosted Excel-on-the-web pane. See `README.md` and `SOP-USER-GUIDE.md` for details.
 
@@ -87,7 +87,7 @@ OneDrive 搜尋只支援桌面版／本機 Relay。每位同事登入自己的�
 
 1. **Microsoft：** 建立支援個人 Microsoft 帳戶的 public app registration，加入 **Mobile and desktop applications** 平台、`http://localhost` redirect 支援和委派 `Files.Read` 權限。登入使用系統瀏覽器和 PKCE；不使用 Microsoft client secret。
 2. 在根目錄 `cloud-oauth.json` 一次填入 `microsoftClientId`，並在分享套件時附上此檔案；更改後要重新啟動本機 Relay。這是公開應用程式 ID，不是使用者憑證。不可在檔案放入帳戶電郵、存取權杖或 client secret。
-3. 每位同事開啟 **Cloud sources → Connect**，在系統瀏覽器登入。搜尋結果只讀；只有按 **Review and add to chat** 並傳送問題後，所選結果才會傳給 Qwen/Grok。
+3. 每位同事開啟 **Cloud sources → Connect**，在系統瀏覽器登入。搜尋結果只讀；只有按 **Review and add to chat** 並傳送問題後，所選結果才會傳給 Qwen。
 
 每位使用者各自登入及授權；窗格不再要求同事輸入 OAuth 應用程式設定。Excel 網頁版不支援這些連接器。詳情見 `README.md` 和 `SOP-USER-GUIDE.md`。
 
@@ -137,7 +137,7 @@ Then confirm the relay is alive:
 curl http://127.0.0.1:3000/api/health
 ```
 
-Expect `{"ok":true,"configured":{"qwen":false,"grok":false}}` before you enter a key, and `qwen:true` after. Finally ask one real question in **Chat** mode — a reply proves the whole chain.
+Expect `{"ok":true,"configured":{"qwen":false}}` before you enter a key, and `qwen:true` after. Finally ask one real question in **Chat** mode — a reply proves the whole chain.
 
 ---
 
@@ -148,14 +148,13 @@ Use this when the pane must open from an `https://` address. No local install is
 1. In Excel: **Home → Add-ins → Upload My Add-in** → choose `manifest.cloudflare.xml`.
 2. The pane address is `https://excel-qwen-grok.anthonym-354.workers.dev`.
 3. Open **Settings**, paste the **relay token**, press **Use key**. The matching `RELAY_TOKEN` secret is already on the Worker. Ask the owner for the token; it is not in the zip.
-4. **No provider key is needed** — `QWEN_API_KEY` is already a Worker secret (set 2026-11-22). `GROK_API_KEY` is **not** set, so the hosted pane runs Qwen only and **Auto** stays on Qwen.
+4. **No provider key is needed** — `QWEN_API_KEY` is already a Worker secret (set 2026-11-22). The pane is Qwen-only (Grok removed 2026-11-24).
 
 Owner-only, to set or replace a provider secret:
 
 ```powershell
 npx wrangler login
 npx wrangler secret put QWEN_API_KEY
-npx wrangler secret put GROK_API_KEY
 npx wrangler secret list --name excel-qwen-grok
 ```
 

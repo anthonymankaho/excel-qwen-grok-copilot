@@ -1,4 +1,4 @@
-# SOP — Qwen + Grok for Excel and Word
+# SOP — Qwen for Excel and Word
 
 The runbook is now split in two. Pick the one you need:
 

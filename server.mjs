@@ -1,11 +1,14 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { extractGrokText, originAllowed, prepareChat, providerDelta, providerErrorMessage, requestHostAllowed, takeSseDataLines } from './relay-core.mjs';
+import ExcelJS from 'exceljs';
+import { RELAY_BUILD, appendMemory, buildSkillContext, deleteSession, listSessions, listSkills, originAllowed, prepareChat, providerDelta, providerErrorMessage, readMemory, readSession, requestHostAllowed, resolveSkillsRoot, saveSkill, takeSseDataLines, writeSession } from './relay-core.mjs';
 import { LocalSourceMcp } from './mcp-connectors.mjs';
 
-export { extractGrokText, originAllowed, prepareChat, providerDelta, providerErrorMessage, qwenEndpointAllowed, requestHostAllowed, takeSseDataLines } from './relay-core.mjs';
+export { originAllowed, prepareChat, providerDelta, providerErrorMessage, qwenEndpointAllowed, requestHostAllowed, takeSseDataLines } from './relay-core.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(root, 'public');
@@ -20,6 +23,40 @@ function send(res, status, data, type = 'application/json; charset=utf-8') {
   res.end(body);
 }
 
+// Local-only extraction: XLSX via exceljs, PDF via poppler pdftotext on PATH. Never imported by the Worker.
+async function extractXlsx(buffer) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  const sections = [];
+  for (const sheet of workbook.worksheets) {
+    const lines = [];
+    sheet.eachRow({ includeEmpty: false }, row => {
+      if (lines.length >= 2000) return;
+      const cells = [];
+      row.eachCell({ includeEmpty: true }, cell => cells.push(String(cell.text ?? '').replace(/\s+/g, ' ')));
+      lines.push(cells.join(' | '));
+    });
+    sections.push(`[Sheet: ${sheet.name}]\n${lines.join('\n')}`);
+    if (sections.length >= 20) break;
+  }
+  return sections.join('\n\n');
+}
+
+function extractPdf(buffer) {
+  return new Promise((resolve, reject) => {
+    const tmp = path.join(os.tmpdir(), `eqgc-${Date.now()}-${Math.random().toString(36).slice(2)}.pdf`);
+    const cleanup = () => { try { fs.unlinkSync(tmp); } catch { /* already gone */ } };
+    try { fs.writeFileSync(tmp, buffer); } catch (error) { reject(error); return; }
+    const child = spawn('pdftotext', ['-layout', '-enc', 'UTF-8', tmp, '-'], { windowsHide: true });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', part => { out += part; });
+    child.stderr.on('data', part => { err += part; });
+    child.on('error', error => { cleanup(); reject(new Error(`pdftotext is not available on this PC: ${error.message}`)); });
+    child.on('close', code => { cleanup(); code === 0 ? resolve(out) : reject(new Error(err.trim() || `pdftotext exited with ${code}`)); });
+  });
+}
+
 function cloudOAuthConfig() {
   try {
     const config = JSON.parse(fs.readFileSync(path.join(root, 'cloud-oauth.json'), 'utf8'));
@@ -29,14 +66,14 @@ function cloudOAuthConfig() {
   } catch { return {}; }
 }
 
-function readBody(req) {
+function readBody(req, limit = BODY_LIMIT) {
   return new Promise((resolve, reject) => {
     let body = '';
     let settled = false;
     const fail = error => { if (settled) return; settled = true; reject(error); };
     req.on('data', part => {
       body += part;
-      if (body.length > BODY_LIMIT) { req.destroy(); fail(new Error('Request too large')); }
+      if (body.length > limit) { req.destroy(); fail(new Error('Request too large')); }
     });
     req.on('end', () => {
       if (settled) return;
@@ -79,7 +116,7 @@ async function readProviderStream(response, provider, res) {
 }
 
 export function createRelay() {
-  const secrets = { qwen: '', grok: '' };
+  const secrets = { qwen: '' };
   const sources = new LocalSourceMcp(cloudOAuthConfig());
   const server = http.createServer(async (req, res) => {
     const addr = server.address();
@@ -91,7 +128,7 @@ export function createRelay() {
     try { url = new URL(req.url, `http://${host}:${boundPort}`); }
     catch { return send(res, 400, { error: 'Bad request.' }); }
 
-    if (req.method === 'GET' && url.pathname === '/api/health') return send(res, 200, { ok: true, configured: { qwen: Boolean(secrets.qwen), grok: Boolean(secrets.grok) } });
+    if (req.method === 'GET' && url.pathname === '/api/health') return send(res, 200, { ok: true, build: RELAY_BUILD, configured: { qwen: Boolean(secrets.qwen) } });
 
     if (req.method === 'GET' && url.pathname === '/api/connectors/status') return send(res, 200, sources.status());
 
@@ -134,19 +171,89 @@ export function createRelay() {
       }
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/skills') {
+      const root = resolveSkillsRoot(process.env.SKILLS_ROOT || '');
+      return send(res, 200, { root, skills: listSkills(root) });
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/skills/context') {
+      const root = resolveSkillsRoot(process.env.SKILLS_ROOT || '');
+      return send(res, 200, buildSkillContext(url.searchParams.get('question') || '', root));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/skills/save') {
+      try {
+        const body = await readBody(req);
+        const root = resolveSkillsRoot(process.env.SKILLS_ROOT || '');
+        const result = saveSkill(root, body);
+        if (result.error) return send(res, 400, { error: result.error });
+        return send(res, 200, { ok: true, path: result.path });
+      } catch (error) { return send(res, 400, { error: error.message }); }
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/sessions') return send(res, 200, { sessions: listSessions() });
+
+    if (req.method === 'GET' && url.pathname === '/api/sessions/read') {
+      const session = readSession(url.searchParams.get('id'));
+      if (!session) return send(res, 404, { error: 'Session not found.' });
+      return send(res, 200, session);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/sessions/save') {
+      try {
+        const result = writeSession(await readBody(req));
+        if (result.error) return send(res, 400, { error: result.error });
+        return send(res, 200, { ok: true });
+      } catch (error) { return send(res, 400, { error: error.message }); }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/sessions/delete') {
+      try {
+        const result = deleteSession((await readBody(req)).id);
+        if (result.error) return send(res, 400, { error: result.error });
+        return send(res, 200, { ok: true });
+      } catch (error) { return send(res, 400, { error: error.message }); }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/extract') {
+      try {
+        const body = await readBody(req, 8_000_000);
+        const name = String(body.name || '');
+        const ext = name.split('.').pop().toLowerCase();
+        const buffer = Buffer.from(String(body.data || ''), 'base64');
+        if (!buffer.length) return send(res, 400, { error: 'Empty file.' });
+        let text = '';
+        if (ext === 'xlsx' || ext === 'xlsm') text = await extractXlsx(buffer);
+        else if (ext === 'pdf') text = await extractPdf(buffer);
+        else return send(res, 400, { error: 'Extraction supports PDF, XLSX and XLSM.' });
+        if (!text.trim()) return send(res, 400, { error: `${name}: no readable text was found.` });
+        return send(res, 200, { text: text.slice(0, 200000), kind: ext.toUpperCase() });
+      } catch (error) { return send(res, 400, { error: error.message }); }
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/memory') return send(res, 200, { text: readMemory() });
+
+    if (req.method === 'POST' && url.pathname === '/api/memory/add') {
+      try {
+        const result = appendMemory((await readBody(req)).note);
+        if (result.error) return send(res, 400, { error: result.error });
+        return send(res, 200, { ok: true });
+      } catch (error) { return send(res, 400, { error: error.message }); }
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/configure') {
       try {
         const body = await readBody(req);
-        if (!['qwen', 'grok'].includes(body.provider) || typeof body.apiKey !== 'string' || body.apiKey.trim().length < 8 || body.apiKey.length > 500) return send(res, 400, { error: 'Enter a valid API key.' });
+        if (body.provider !== 'qwen' || typeof body.apiKey !== 'string' || body.apiKey.trim().length < 8 || body.apiKey.length > 500) return send(res, 400, { error: 'Enter a valid API key.' });
         secrets[body.provider] = body.apiKey.trim();
-        return send(res, 200, { ok: true, configured: { qwen: Boolean(secrets.qwen), grok: Boolean(secrets.grok) } });
+        return send(res, 200, { ok: true, configured: { qwen: Boolean(secrets.qwen) } });
       } catch (error) { return send(res, 400, { error: error.message }); }
     }
 
     if (req.method === 'POST' && url.pathname === '/api/clear-key') {
       try {
         const body = await readBody(req);
-        if (!['qwen', 'grok'].includes(body.provider)) return send(res, 400, { error: 'Unknown provider.' });
+        if (body.provider !== 'qwen') return send(res, 400, { error: 'Unknown provider.' });
         secrets[body.provider] = '';
         return send(res, 200, { ok: true });
       } catch (error) { return send(res, 400, { error: error.message }); }
@@ -161,7 +268,7 @@ export function createRelay() {
         const response = await fetch(target, { method: 'POST', headers: { Authorization: `Bearer ${secrets[provider]}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload), redirect: 'error', signal: AbortSignal.timeout(180_000) });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) return send(res, response.status, { error: providerErrorMessage(data, response.status) });
-        const text = provider === 'qwen' ? data?.choices?.[0]?.message?.content : extractGrokText(data);
+        const text = data?.choices?.[0]?.message?.content;
         if (typeof text !== 'string' || !text.trim()) return send(res, 502, { error: 'The provider returned no text answer.' });
         return send(res, 200, { text, model: data.model || model });
       } catch (error) {
@@ -246,5 +353,5 @@ if (isDirectRun()) {
     else console.error(error);
     process.exitCode = 1;
   });
-  server.listen(port, host, () => console.log(`Excel Qwen/Grok Copilot ready at http://${host}:${port}`));
+  server.listen(port, host, () => console.log(`Excel Qwen Copilot ready at http://${host}:${port}`));
 }

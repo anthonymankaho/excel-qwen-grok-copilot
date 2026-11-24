@@ -1,6 +1,6 @@
-# Qwen + Grok for Excel and Word
+# Qwen for Excel and Word
 
-A local task pane for desktop Excel and Word. You ask in plain language. Qwen or Grok plans the work, and the pane revises the open file through a fixed list of actions. On this PC the pane and the relay both live at `http://127.0.0.1:3000`. Excel on the web uses the HTTPS copy at `https://excel-qwen-grok.anthonym-354.workers.dev`. Company-wide deployment still needs an admin install.
+A local task pane for desktop Excel and Word. You ask in plain language. Qwen plans the work, and the pane revises the open file through a fixed list of actions. On this PC the pane and the relay both live at `http://127.0.0.1:3000`. Excel on the web uses the HTTPS copy at `https://excel-qwen-grok.anthonym-354.workers.dev`. Company-wide deployment still needs an admin install.
 
 ---
 
@@ -17,17 +17,22 @@ A local task pane for desktop Excel and Word. You ask in plain language. Qwen or
 
 ### Step 5 progress — 2026-11-24 / 第 5 步進度
 
-The October close trial showed that asking the user to pick technical read ranges is not a usable workbook-review flow. Agent now receives a workbook inventory and chooses the sheets and ranges itself. A large `profileRequest` scans up to 2 million cells locally in 20,000-cell batches, then sends compact column statistics, Excel error-value counts and explicit coverage to the model. A failed range read is reported as unread evidence so Agent can retry. **Share Office file data with AI** controls whether metadata and requested workbook reads can be sent; it is a data-sharing choice, not a sheet-scope setting. Raw range replies still have a 2,000-cell cap, Agent pauses at 10 model rounds, and a complete live Excel retest is pending.
+The October close trial showed that asking the user to pick technical read ranges is not a usable workbook-review flow. Agent now receives a workbook inventory and chooses the sheets and ranges itself. A large `profileRequest` scans up to 2 million cells locally in 20,000-cell batches, then sends compact column statistics, Excel error-value counts and explicit coverage to the model. A failed range read is reported as unread evidence so Agent can retry. **Share Office file data with AI** controls whether metadata and requested workbook reads can be sent; it is a data-sharing choice, not a sheet-scope setting. Raw range reads are delivered in 2,000-cell batches that Agent pages through with `contextRequest.offset` until the whole range is read; profiles and finance checks scan the full requested range with no cell or column cap; Agent pauses at 25 model rounds with **Continue Agent · 繼續**. A complete live Excel retest is pending.
 
-10 月月結試用顯示，不應要求使用者自行設定技術性的讀取範圍。現在 Agent 先取得活頁簿清單，再自行選擇工作表及範圍。大型 `profileRequest` 會在本機以每批 20,000 格掃描最多 200 萬格，向模型回傳精簡欄位統計、Excel 錯誤值數目及明確覆蓋範圍。範圍讀取失敗會標示為未讀取，供 Agent 重試。**Share Office file data with AI** 是資料分享選項，不是工作表範圍設定。原始範圍回覆仍限 2,000 格，Agent 每 10 輪會暫停，而完整 Excel 實機重測尚待進行。
+10 月月結試用顯示，不應要求使用者自行設定技術性的讀取範圍。現在 Agent 先取得活頁簿清單，再自行選擇工作表及範圍。大型 `profileRequest` 會在本機以每批 20,000 格掃描最多 200 萬格，向模型回傳精簡欄位統計、Excel 錯誤值數目及明確覆蓋範圍。範圍讀取失敗會標示為未讀取，供 Agent 重試。**Share Office file data with AI** 是資料分享選項，不是工作表範圍設定。原始範圍讀取以每批 2,000 格交付，Agent 用 `contextRequest.offset` 分頁直至讀完整個範圍；摘要與財務檢查掃描完整請求範圍，無儲存格或欄數上限；Agent 每 25 輪暫停，可按 **Continue Agent · 繼續**。完整 Excel 實機重測尚待進行。
+
+**2026-11-24 — Qwen in Excel, scope-free.** The Grok section was removed (UI, routing, relay, docs); the pane is Qwen-only. `contextRequest` accepts `offset` so any range is walkable; the 160-cell finance-check cap and the 2M-cell/60-column profile caps are gone — checks and profiles cover the full requested range, and a check that cannot fully read its range returns NEEDS_USER, never PASS. Round ceiling raised 10 → 25. `npm run check` and `npm test` pass 75/75; live Excel retest pending the owner reloading the pane.
+**2026-11-24 (later) — Chat whole-file review (Copilot parity).** Chat runs a read-only tool loop: `scanRequest` (every-sheet formula-error scan), `groupBalance` (per-voucher DR=CR), `crossCheck` (export vs ledger rows + totals), profiles and paged reads; report shape = passed-checks table, exceptions by priority, suggested formulas, next steps with confirmation-gated fixes. Chat never writes. `npm test` 78/78.
+**2026-11-24 — Qwen in Excel，無範圍限制。** Grok 區塊已移除（UI、路由、relay、文件），pane 僅用 Qwen。`contextRequest` 接受 `offset`，任何範圍皆可分頁讀完；160 格財務檢查上限與 200 萬格／60 欄摘要上限已移除——檢查與摘要覆蓋完整請求範圍，無法完整讀取的檢查回傳 NEEDS_USER，絕不 PASS。輪數上限 10 → 25。`npm run check` 與 `npm test` 75/75 通過；實機 Excel 重測待擁有者重新載入 pane。
+**2026-11-24（較後）— Chat 整本覆核（Copilot 看齊）。** Chat 具唯讀工具迴圈：`scanRequest` 全表公式錯誤掃描、`groupBalance` 每批次借貸、`crossCheck` 匯出對總帳、profile／分頁讀取；報告含已通過表、分優先級例外、建議公式與下一步（修改須確認）。Chat 絕不寫入。`npm test` 78/78。
 
 ### Step 6 — Microsoft Marketplace launch 正式上架
 
 **Planned after Step 5 · 計劃於第 5 步完成後進行**
 
-1. **Production service.** Host the pane and relay over HTTPS. Set up individual or organization sign-in in place of the shared test relay token, keep service credentials server-side, and confirm the supported Qwen/Grok access and pricing model. Decide whether OneDrive will ship in the hosted release. [Office Add-ins manifest guidance](https://learn.microsoft.com/en-us/office/dev/add-ins/develop/add-in-manifests)
+1. **Production service.** Host the pane and relay over HTTPS. Set up individual or organization sign-in in place of the shared test relay token, keep service credentials server-side, and confirm the supported Qwen access and pricing model. Decide whether OneDrive will ship in the hosted release. [Office Add-ins manifest guidance](https://learn.microsoft.com/en-us/office/dev/add-ins/develop/add-in-manifests)
 
-   **正式服務。** 以 HTTPS 部署工作窗格及 Relay，改用個別使用者或組織登入，服務憑證存於伺服器，並確認 Qwen／Grok 的使用方式與收費模式。決定 OneDrive 是否納入正式託管版本。
+   **正式服務。** 以 HTTPS 部署工作窗格及 Relay，改用個別使用者或組織登入，服務憑證存於伺服器，並確認 Qwen 的使用方式與收費模式。決定 OneDrive 是否納入正式託管版本。
 2. **Manifest and installation.** Create and validate the production manifest with the publisher identity, app ID, version, icons and support URL. Test clean installation and core workflows on the Excel and Word clients the listing will support. [Microsoft publishing checklist](https://learn.microsoft.com/en-us/partner-center/marketplace-offers/checklist)
 
    **正式發行檔與安裝。** 建立及驗證正式 manifest，確認發行者名稱、應用程式 ID、版本、圖示和支援網址。以市集標示支援的 Excel 及 Word 用戶端測試全新安裝及主要功能。
@@ -49,7 +54,7 @@ The October close trial showed that asking the user to pick technical read range
 **Close Excel and Word first**, then run these three lines:
 
 ```powershell
-cd "C:\Users\Your Name\Qwen-Grok-for-Excel-and-Word"
+cd "C:\Users\Your Name\Qwen-for-Excel-and-Word"
 npm run setup
 npm start
 ```
@@ -57,7 +62,7 @@ npm start
 - **`npm run setup`** — checks Node.js 20+, runs `npm install`, prints the next steps. Installs no auto-start, writes no key.
 - **`npm start`** — sideloads the add-in into desktop Excel and opens Excel. **Leave that terminal window open: it *is* the relay.**
 
-Then in Excel: **Home → Add-ins → Qwen + Grok for Excel and Word** → **Settings** → pick Qwen or Grok → paste **your own** key → leave **Remember** ticked → **Use key**. The dot turns green.
+Then in Excel: **Home → Add-ins → Qwen for Excel and Word** → **Settings** → pick Qwen → paste **your own** key → leave **Remember** ticked → **Use key**. The dot turns green.
 
 Plain npm is identical: `npm install` then `npm start`. Requires **Node.js 20+** from https://nodejs.org.
 
@@ -66,7 +71,7 @@ Plain npm is identical: `npm install` then `npm start`. Requires **Node.js 20+**
 
 ### From the zip 用 zip
 
-Get `Qwen-Grok-for-Excel-and-Word.zip` from the owner, or download it from **[`download/`](download/Qwen-Grok-for-Excel-and-Word.zip)** in this repository. Extract it and run the same commands in that folder. `START-HERE.txt` inside is the one-page quick start. The zip carries **no keys**.
+Get `Qwen-for-Excel-and-Word.zip` from the owner, or download it from **[`download/`](download/Qwen-for-Excel-and-Word.zip)** in this repository. Extract it and run the same commands in that folder. `START-HERE.txt` inside is the one-page quick start. The zip carries **no keys**.
 
 The zip is a build artifact: rebuild it with `npm run package` after any code or doc change, and commit the result so the download never serves stale code. If you have repository access, cloning and running `npm run setup` is always the most current route.
 
@@ -124,7 +129,7 @@ OneDrive 文字檢視支援 XLSX/XLSM、DOCX、HTML、TXT、MD、CSV、TSV、JSO
 The owner's Qwen Token Plan key was rotated. For this repository's Cloudflare Worker (`excel-qwen-grok`):
 
 - `QWEN_API_KEY` is now **set** as a Worker secret, so the hosted pane can call Qwen with no key entry.
-- `GROK_API_KEY` is **still not set** — an xAI key is needed before Grok works in the hosted pane. Until then **Auto** stays on Qwen.
+- `GROK_API_KEY` is no longer used — Grok was removed on 2026-11-24; the pane and relay are Qwen-only.
 - `RELAY_TOKEN` was left untouched.
 - `npx wrangler secret list --name excel-qwen-grok` returns exactly `QWEN_API_KEY` and `RELAY_TOKEN`.
 
@@ -132,9 +137,9 @@ The value was pushed from an environment variable through wrangler's stdin. It w
 
 Verified on the same key, for context: it returns HTTP 200 on both Token Plan endpoints (`token-plan.maas.qwencloudapi.com` and `token-plan.ap-southeast-1.maas.aliyuncs.com`), and its model list does **not** include `qwen-max`, `qwen-turbo`, or `qwen-plus` — those return `400 Model not exist`. `qwen4-max`, this pane's Qwen default, is on the list, so no default-model change was needed.
 
-**Pending owner action 待辦:** set `GROK_API_KEY` if Grok is wanted in the hosted pane.
+**Superseded 2026-11-24 已取代:** Grok removed; no `GROK_API_KEY` is needed. The only pending owner actions are the live Excel retest and publishing this change.
 
-處理狀態（2026-11-22）：Qwen Token Plan key 已輪換。此 repo 的 Cloudflare Worker `excel-qwen-grok` 上，`QWEN_API_KEY` **已設定**，hosted pane 可直接使用 Qwen；`RELAY_TOKEN` 未動；`GROK_API_KEY` **仍未設定**，需要一把 xAI key，在此之前 **Auto** 只會用 Qwen。key 由環境變數經 wrangler stdin 推送，從未寫入 repo、指令列或對話。同一把 key 已驗證在兩個 Token Plan endpoint 回 HTTP 200，但其模型清單**不含** `qwen-max`／`qwen-turbo`／`qwen-plus`（回 `400 Model not exist`）；本 pane 的 Qwen 預設模型 `qwen4-max` 在清單內，故無需更改。待辦：如需 hosted pane 使用 Grok，請設定 `GROK_API_KEY`。
+處理狀態（2026-11-22）：Qwen Token Plan key 已輪換。此 repo 的 Cloudflare Worker `excel-qwen-grok` 上，`QWEN_API_KEY` **已設定**，hosted pane 可直接使用 Qwen；`RELAY_TOKEN` 未動；`GROK_API_KEY` **仍未設定**，需要一把 xAI key，在此之前 **Auto** 只會用 Qwen。key 由環境變數經 wrangler stdin 推送，從未寫入 repo、指令列或對話。同一把 key 已驗證在兩個 Token Plan endpoint 回 HTTP 200，但其模型清單**不含** `qwen-max`／`qwen-turbo`／`qwen-plus`（回 `400 Model not exist`）；本 pane 的 Qwen 預設模型 `qwen4-max` 在清單內，故無需更改。2026-11-24 起 Grok 已移除，pane 與 relay 僅用 Qwen，`GROK_API_KEY` 不再需要。
 
 ### 2026-11-22 (later) — local install, and the agent read-back fix
 
@@ -216,7 +221,7 @@ This is the Copilot-style revise. The earlier pane sent one prompt, attached a l
 - **Finance answers are traceable.** Finance prompts request bilingual fact, calculation, and assumption sections with exact sheet/cell or report-line citations. The evidence card lists the sources actually sent and flags citations outside them; a location match does not prove that the source supports a claim. Agent check results include the checked sheet and range; Chat arithmetic is not independently recalculated.
 - **財務答案可追溯。** 財務問題會要求以雙語列出事實、計算及假設，並引用確切工作表／儲存格或報表行數。證據卡列出實際傳送的來源，並標示超出來源範圍的引用；位置比對不代表來源一定支持結論。Agent 檢查結果會列明工作表及範圍；Chat 算術不會由增益集獨立重算。
 - **A failed check is a workpaper, not a silent fix.** The card states the issue, the evidence, a possible cause, the check, and the recommended action. A journal entry is a draft. The pane does not clear a reconciliation difference on its own.
-- **Auto** chooses Qwen or Grok only when that key is already loaded. A finance, Plan, or Agent request prefers Grok when that key is present and **Fast** is off. Otherwise it prefers Qwen. If the chosen provider errors, the pane tries the other loaded key once.
+- The pane runs on **Qwen only** (Grok removed 2026-11-24). It sends workbook data only when the Qwen key is already loaded in the relay.
 - **An audit card** closes each Chat, Plan, and Agent turn: request, mode, provider, plan, context sent, actions, blocked actions, and check results. API keys are left out. **New chat** clears the trail.
 - **Direct, Apply, and Undo.** With Direct on, Agent writes safe actions immediately. Deletes, clears, renames, and formulas that can reach the network wait for a click. With Direct off, you approve the plan and then press **Apply edits**. **Undo last apply** is on the card. **Stop** cancels model generation and prevents the next step. An Office edit already in progress may finish.
 
@@ -258,8 +263,8 @@ See **[Install](#install-安裝)** at the top for the short version. In full:
 2. Close Excel and Word.
 3. From the project folder run `npm run setup` (Node check + `npm install`), then `npm start`. This sideloads the add-in and starts the relay, and installs **no** auto-start.
 4. Prefer one double-click? `Setup and Start.bat` does the same **and** installs the Windows logon auto-start. By hand that is `npm install`, `npm run autostart`, then `npm start`.
-5. Open the pane from **Home > Add-ins**. The add-in name is **Qwen + Grok for Excel and Word**.
-6. Open Settings, pick Qwen or Grok, paste **your own** API key, leave **Remember key on this PC** ticked, and press **Use key**.
+5. Open the pane from **Home > Add-ins**. The add-in name is **Qwen for Excel and Word**.
+6. Open Settings, pick Qwen, paste **your own** API key, leave **Remember key on this PC** ticked, and press **Use key**.
 
 To open the same add-in in Word, run `npm run start:word` once with Word closed. `npm start` only launches Excel.
 
@@ -284,9 +289,9 @@ The context card shows what the next question will send.
 - Untick **Share Office file data with AI** to prevent open workbook/document data and Agent-requested ranges from being sent. Attached files are controlled separately.
 - Use **📎 Attach** to choose up to three HTML/HTM, TXT, MD, CSV, TSV, JSON, or XML files (5 MB each). HTML tables and readable text are extracted locally; scripts, CSS, chart images, and links are not run or interpreted. The pane shows a preview of extracted text before sending. It sends at most 18,000 characters per file and 26,000 characters from attachments per question. **New chat** clears attachments and conversation history.
 
-Ask in the box and press Enter. Shift+Enter adds a line. **Summarize**, **Explain**, **Write formula**, and **Revise** fill a starting prompt. Replies stream. The send button becomes **Stop** while a reply is running. **New chat** clears the conversation and the audit trail. **Fast** skips deep thinking: Qwen turns thinking off, and Grok uses low reasoning effort.
+Ask in the box and press Enter. Shift+Enter adds a line. **Summarize**, **Explain**, **Write formula**, and **Revise** fill a starting prompt. Replies stream. The send button becomes **Stop** while a reply is running. **New chat** clears the conversation and the audit trail. **Fast** skips deep thinking: Qwen turns thinking off.
 
-The footer pill sets Chat, Plan, or Agent, and Qwen, Grok, or Auto. Each provider needs its own key. The dot is green when that key is loaded, amber when the relay is up and the key is not, and red when the relay is down.
+The footer pill sets Chat, Plan, or Agent. The pane runs on Qwen. The dot is green when the Qwen key is loaded, amber when the relay is up and the key is not, and red when the relay is down.
 
 **↳ Insert last answer into selection** writes the last reply into the top-left cell of the Excel selection. One line that starts with `=` is written as a formula. Anything else is written as text.
 
@@ -298,9 +303,9 @@ History stays in memory. Reloading the pane clears it. Each request sends at mos
 
 **Plan** inspects metadata, then returns one plan: goal, steps, assumptions, required inputs, risks, and the checks it wants. Proposed actions sit on the same card. Nothing is written until you press **Approve**. If Direct is off, **Approve** is followed by **Apply edits**.
 
-**Agent** uses the same metadata. It can ask for one range, run the safe actions for that step, read those cells back, and calculate the checks. The composer shows `Agent 1/10` and the current activity. At the round limit, review the audit card and use **Continue Agent · 繼續** if offered. Use the review card for pending edits. With Direct off, a step that would write waits for **Approve**, then **Apply edits**.
+**Agent** uses the same metadata. It can ask for one range, run the safe actions for that step, read those cells back, and calculate the checks. The composer shows `Agent 1/25` and the current activity. At the round limit, review the audit card and use **Continue Agent · 繼續** if offered. Use the review card for pending edits. With Direct off, a step that would write waits for **Approve**, then **Apply edits**.
 
-**Auto**, next to the mode, picks Qwen or Grok only from keys already loaded in the relay. It will not send the workbook to a provider that has no key.
+The pane runs on Qwen only. It will not send the workbook until the Qwen key is loaded in the relay.
 
 The audit card lists the request, the provider, the context that was sent, the actions, and the check results.
 
@@ -347,7 +352,6 @@ The key is sent only to the relay on this computer. With **Remember key on this 
 |---|---|---|---|
 | Qwen, Token Plan | `https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` | Token Plan key, `sk-sp-…` | `qwen4-max` |
 | Qwen, pay as you go | `https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` | A regular QwenCloud key | Set in Settings |
-| Grok | `https://api.x.ai/v1/responses` | Your xAI key | `grok-4.7` |
 
 A Token Plan key works only on the Token Plan URL. A regular QwenCloud key works only on a regional QwenCloud chat-completions URL. Change the URL in Settings when you change key type. The relay refuses any Qwen URL that is not HTTPS chat-completions on `qwencloudapi.com` or `aliyuncs.com`, and it does not follow redirects.
 
@@ -363,26 +367,25 @@ The manifest to upload in Excel is `manifest.cloudflare.xml` (version 1.3.0.0). 
 
 The relay token is already stored as the Worker secret `RELAY_TOKEN`. In the hosted pane, open Settings, paste that token, and press **Use key**. The chat route rejects a request that does not carry it. A request from another site is rejected too. The Worker also refuses a pasted provider key and still allows only QwenCloud chat-completions URLs.
 
-Qwen and Grok keys are Worker secrets. They are not typed into the pane and they are not stored in this repository.
+The Qwen key is a Worker secret. It is not typed into the pane and it is not stored in this repository.
 
-`QWEN_API_KEY` is already set on the Worker (2026-11-22), so the hosted pane uses Qwen with no key entry. `GROK_API_KEY` is not set yet. To set or replace either one, from the project folder, after `npx wrangler login`:
+`QWEN_API_KEY` is already set on the Worker (2026-11-22), so the hosted pane uses Qwen with no key entry. To set or replace it, from the project folder, after `npx wrangler login`:
 
 ```bash
 npx wrangler secret put QWEN_API_KEY
-npx wrangler secret put GROK_API_KEY
 ```
 
 `npx wrangler secret list --name excel-qwen-grok` shows which ones exist. It prints names only, never values.
 
 To replace the relay token, run `npx wrangler secret put RELAY_TOKEN` with a passphrase of at least 16 characters, then paste the new value in Settings.
 
-A later code change is published with `npm run deploy:cloudflare` after `npx wrangler login`. Workbook text sent from the hosted pane goes to Cloudflare and then to Qwen or Grok.
+A later code change is published with `npm run deploy:cloudflare` after `npx wrangler login`. Workbook text sent from the hosted pane goes to Cloudflare and then to Qwen.
 
 ## Another computer
 
 Each computer runs its own relay and stores its own keys.
 
-1. Download `download/Qwen-Grok-for-Excel-and-Word.zip` and unzip it. Open the folder inside. It has no API keys. `npm run package` rebuilds that zip after a code change.
+1. Download `download/Qwen-for-Excel-and-Word.zip` and unzip it. Open the folder inside. It has no API keys. `npm run package` rebuilds that zip after a code change.
 2. Install Node.js 20 or newer, close Excel, and double-click `Setup and Start.bat`.
 3. Enter your own key. Do not use someone else’s Token Plan key. The plan and its quota belong to that person.
 
@@ -402,13 +405,13 @@ Each computer runs its own relay and stores its own keys.
 | `npm run check` | Syntax-check the relay, the Worker, the agent core, and the task pane |
 | `npm test` | Run the offline pane, agent, relay, and Worker tests |
 | `npm run deploy:cloudflare` | Publish the pane and relay to Cloudflare |
-| `npm run package` | Rebuild `download/Qwen-Grok-for-Excel-and-Word.zip` |
+| `npm run package` | Rebuild `download/Qwen-for-Excel-and-Word.zip` |
 
 Auto-start is Windows-only. It uses `%APPDATA%`.
 
 ## Tests
 
-`npm run check` and `npm test` need no API key. The pane tests stub the page, Excel, Word, and the stream. They cover context, the click-gated edit card, Direct revise, Undo, risky formulas, Word replace of the selection, Chat, Plan, Agent, a debit-and-credit stop, and Auto staying on a provider that has a key. The relay tests cover the loopback lock, the Qwen URL allowlist, Fast mode, the Agent mode note, and stream errors. The download-zip tests read the pack with a pure-Node reader (`readZipEntry`, `listZipEntries`) rather than the Unix `unzip` binary, so **the whole suite passes on Windows**; they assert the zip carries both SOPs, both manifests, a `package.json` with a `setup` script, and no `.env`, `node_modules` or `.git` content.
+`npm run check` and `npm test` need no API key. The pane tests stub the page, Excel, Word, and the stream. They cover context, the click-gated edit card, Direct revise, Undo, risky formulas, Word replace of the selection, Chat, Plan, Agent, a debit-and-credit stop, and Qwen-only routing that never sends without a key. The relay tests cover the loopback lock, the Qwen URL allowlist, Fast mode, the Agent mode note, and stream errors. The download-zip tests read the pack with a pure-Node reader (`readZipEntry`, `listZipEntries`) rather than the Unix `unzip` binary, so **the whole suite passes on Windows**; they assert the zip carries both SOPs, both manifests, a `package.json` with a `setup` script, and no `.env`, `node_modules` or `.git` content.
 
 Before trusting a change in the real app, start the relay, load a key, ask one question in Chat, and confirm the answer. For a revise, use Plan or Agent, confirm the card, and use Undo once.
 

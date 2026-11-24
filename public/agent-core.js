@@ -1,7 +1,7 @@
 (function (root) {
-  const MAX_LOOPS = 10;
+  const MAX_LOOPS = 25;
   const DECISIONS = ['COMPLETE', 'CONTINUE', 'REPLAN', 'NEEDS_USER', 'FAILED'];
-  const CHECKS = ['debitEqualsCredit', 'formulaErrors', 'blankRequired', 'duplicateKeys', 'rowCount', 'totalDelta'];
+  const CHECKS = ['debitEqualsCredit', 'formulaErrors', 'blankRequired', 'duplicateKeys', 'rowCount', 'totalDelta', 'groupBalance', 'crossCheck'];
   const DESTRUCTIVE = new Set(['clear', 'deleteRows', 'deleteColumns', 'renameSheet']);
 
   function cleanStrings(list, max) {
@@ -36,9 +36,17 @@
       check,
       sheet: typeof raw.sheet === 'string' ? raw.sheet.trim().slice(0, 31) : '',
       range: typeof raw.range === 'string' ? raw.range.trim().slice(0, 32) : '',
+      otherSheet: typeof raw.otherSheet === 'string' ? raw.otherSheet.trim().slice(0, 31) : '',
+      otherRange: typeof raw.otherRange === 'string' ? raw.otherRange.trim().slice(0, 32) : '',
       columns,
       tolerance: Number.isFinite(raw.tolerance) && raw.tolerance >= 0 ? raw.tolerance : null
     };
+  }
+
+  function normalizeScanRequest(raw) {
+    if (raw === true) return {};
+    if (!raw || typeof raw !== 'object') return null;
+    return {};
   }
 
   function normalizePlan(raw) {
@@ -62,7 +70,8 @@
     const sheet = raw.sheet.trim();
     const range = raw.range.trim();
     if (!sheet || !range || sheet.length > 31 || range.length > 32) return null;
-    return { sheet, range };
+    const offset = Number.isInteger(raw.offset) && raw.offset > 0 ? Math.min(raw.offset, 1_048_575) : 0;
+    return { sheet, range, offset };
   }
 
   // A profile asks for column statistics instead of raw cells, so a 753-row sheet
@@ -83,7 +92,7 @@
       try {
         const parsed = JSON.parse(blocks[i][1]);
         if (!parsed || typeof parsed !== 'object') continue;
-        if (!parsed.plan && !parsed.decision && !parsed.contextRequest && !parsed.profileRequest && !parsed.actions) continue;
+        if (!parsed.plan && !parsed.decision && !parsed.contextRequest && !parsed.profileRequest && !parsed.scanRequest && !parsed.actions) continue;
         const prose = (source.slice(0, blocks[i].index) + source.slice(blocks[i].index + blocks[i][0].length)).trim();
         return {
           prose,
@@ -91,31 +100,22 @@
           actions: Array.isArray(parsed.actions) ? parsed.actions : null,
           decision: normalizeDecision(parsed.decision),
           contextRequest: normalizeContextRequest(parsed.contextRequest),
-          profileRequest: normalizeProfileRequest(parsed.profileRequest)
+          profileRequest: normalizeProfileRequest(parsed.profileRequest),
+          scanRequest: normalizeScanRequest(parsed.scanRequest)
         };
       } catch { /* not this block */ }
     }
-    return { prose: source, plan: null, actions: null, decision: '', contextRequest: null, profileRequest: null };
+    return { prose: source, plan: null, actions: null, decision: '', contextRequest: null, profileRequest: null, scanRequest: null };
   }
 
   function isFinancePrompt(text) {
     return /\b(?:finance|financial|accounting|reconcil(?:e|iation|ing)|journal|ledger|subledger|trial balance|debit|credit|month[- ]end|accrual|cash flow|profit and loss|income statement|balance sheet|working capital|accounts receivable|accounts payable|inventory|depreciation|tax|audit|hkfrs|hkas|ifrs|ias)\b|\b(?:p&l|ar|ap|a\/r|a\/p)\b|財務|會計|對賬|對帳|月結|月尾|分錄|借方|貸方|應收|應付|試算表|總賬|總帳|現金流|損益|資產負債|利潤|收入|成本|費用|稅務|稅項|審計|存貨|固定資產|折舊|租賃|預算|預測/i.test(String(text || ''));
   }
 
-  function routeProvider({ selected, mode, fast, text, ready }) {
-    const available = name => Boolean(ready?.[name]);
-    if (selected === 'qwen' || selected === 'grok') {
-      if (!available(selected)) return { error: `Add your ${selected === 'qwen' ? 'Qwen' : 'Grok'} API key before sending.`, provider: selected };
-      return { provider: selected, reason: 'manual', fallback: '' };
-    }
-    if (selected !== 'auto') return { error: 'Choose Qwen, Grok, or Auto.', provider: '' };
-    const finance = isFinancePrompt(text);
-    const complex = mode === 'agent' || mode === 'plan' || finance || String(text || '').length > 500;
-    const prefer = complex && !fast ? ['grok', 'qwen'] : ['qwen', 'grok'];
-    const provider = prefer.find(available);
-    if (!provider) return { error: 'Add a Qwen or Grok API key before Auto can choose a model.', provider: '' };
-    const fallback = prefer.find(name => name !== provider && available(name)) || '';
-    return { provider, reason: `auto:${complex && !fast ? 'complex' : 'quick'}`, fallback };
+  function routeProvider({ selected, ready }) {
+    if (selected !== 'auto' && selected !== 'qwen') return { error: 'This pane runs on Qwen only.', provider: '' };
+    if (!ready?.qwen) return { error: 'Add your Qwen API key before sending.', provider: 'qwen' };
+    return { provider: 'qwen', reason: selected === 'qwen' ? 'manual' : 'auto:qwen', fallback: '' };
   }
 
   function isDestructive(action) {
@@ -266,6 +266,7 @@
     const header = values[0] || [];
     const rows = bodyRows(values, header);
     const base = { check: check.check, before: prior?.before ?? '', after: '', difference: '', details: [] };
+    if (grid?.readError) return needsUser(base, `The check range could not be fully read: ${grid.readError}. No pass or fail is claimed.`);
     if (check.check === 'formulaErrors') {
       const details = [];
       values.forEach((row, r) => (row || []).forEach((value, c) => {
@@ -311,6 +312,47 @@
         else seen.add(key);
       });
       return { ...base, status: details.length ? 'FAIL' : 'PASS', after: String(details.length), details };
+    }
+    if (check.check === 'groupBalance') {
+      const keyAliases = findAlias(header, HEADER_ALIASES.key);
+      const keyCol = profile.keyColumns.length ? resolveSpec(profile.keyColumns[0], header) : (check.columns?.length >= 3 ? check.columns[0] : (keyAliases.length === 1 ? keyAliases[0] : null));
+      const drCol = profile.debitColumn != null ? resolveSpec(profile.debitColumn, header) : (check.columns?.length >= 3 ? check.columns[1] : findAlias(header, HEADER_ALIASES.debit)[0]);
+      const crCol = profile.creditColumn != null ? resolveSpec(profile.creditColumn, header) : (check.columns?.length >= 3 ? check.columns[2] : findAlias(header, HEADER_ALIASES.credit)[0]);
+      if (!keyCol || !drCol || !crCol || drCol === crCol) return needsUser(base, 'Key, debit and credit columns were not identified.');
+      const groups = new Map();
+      for (const row of rows) {
+        const key = String(row?.[keyCol - 1] ?? '').trim();
+        if (!key) continue;
+        const group = groups.get(key) || { dr: 0, cr: 0 };
+        group.dr += asNumber(row?.[drCol - 1]) || 0;
+        group.cr += asNumber(row?.[crCol - 1]) || 0;
+        groups.set(key, group);
+      }
+      const tolerance = toleranceOf(check, profile);
+      const open = [...groups.entries()]
+        .filter(([, group]) => Math.abs(group.dr - group.cr) > tolerance)
+        .map(([key, group]) => `${key}: DR ${Math.round(group.dr * 100) / 100} CR ${Math.round(group.cr * 100) / 100} diff ${Math.round((group.dr - group.cr) * 100) / 100}`);
+      return { ...base, status: open.length ? 'FAIL' : 'PASS', after: String(open.length), details: open.length ? open : [`${groups.size} groups balanced`] };
+    }
+    if (check.check === 'crossCheck') {
+      if (!prior || prior.readError) return needsUser(base, 'The comparison range could not be read.');
+      const otherValues = prior.values || [];
+      const otherRows = bodyRows(otherValues, otherValues[0] || []);
+      const colSpec = profile.amountColumn != null ? profile.amountColumn : (check.columns?.length === 1 ? check.columns[0] : null);
+      const colA = colSpec != null ? resolveSpec(colSpec, header) : null;
+      const colB = colSpec != null ? resolveSpec(colSpec, otherValues[0] || []) : null;
+      const rowDiff = rows.length - otherRows.length;
+      const details = [`rows ${rows.length} vs ${otherRows.length}`];
+      let delta = 0;
+      let ok = rowDiff === 0;
+      if (colA && colB) {
+        const totalA = columnTotal(rows, colA).total;
+        const totalB = columnTotal(otherRows, colB).total;
+        delta = Math.round((totalA - totalB) * 100) / 100;
+        details.push(`total ${totalA} vs ${totalB}`);
+        ok = ok && Math.abs(delta) <= toleranceOf(check, profile);
+      }
+      return { ...base, status: ok ? 'PASS' : 'FAIL', before: String(otherRows.length), after: String(rows.length), difference: String(delta), details };
     }
     if (check.check === 'rowCount') {
       const after = rows.length;

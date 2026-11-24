@@ -1,4 +1,4 @@
-import { extractGrokText, prepareChat, providerDelta, providerErrorMessage, relayTokenOk, takeSseDataLines } from './relay-core.mjs';
+import { RELAY_BUILD, prepareChat, providerDelta, providerErrorMessage, relayTokenOk, takeSseDataLines } from './relay-core.mjs';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
 
@@ -98,12 +98,12 @@ export async function handleRelayRequest(request, env) {
   }
   if (!sameOrigin(request)) return json(403, { error: 'Relay only accepts requests from its own site.' });
   if (!relayTokenOk(bearer(request), env.RELAY_TOKEN || '')) return json(401, { error: 'Enter the Cloudflare relay token in Settings.' });
-  const secrets = { qwen: env.QWEN_API_KEY || '', grok: env.GROK_API_KEY || '' };
+  const secrets = { qwen: env.QWEN_API_KEY || '' };
   if (request.method === 'GET' && url.pathname === '/api/health') {
-    return json(200, { ok: true, hosted: true, configured: { qwen: Boolean(secrets.qwen), grok: Boolean(secrets.grok) } });
+    return json(200, { ok: true, hosted: true, build: RELAY_BUILD, configured: { qwen: Boolean(secrets.qwen) } });
   }
   if (request.method === 'POST' && (url.pathname === '/api/configure' || url.pathname === '/api/clear-key')) {
-    return json(400, { error: 'On Cloudflare, Qwen and Grok keys are Worker secrets. This pane stores only the relay token.' });
+    return json(400, { error: 'On Cloudflare, the Qwen key is a Worker secret. This pane stores only the relay token.' });
   }
   if (request.method === 'POST' && (url.pathname === '/api/chat' || url.pathname === '/api/chat-stream')) {
     try {
@@ -120,7 +120,7 @@ export async function handleRelayRequest(request, env) {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) return json(response.status, { error: providerErrorMessage(data, response.status) });
-      const text = prep.provider === 'qwen' ? data?.choices?.[0]?.message?.content : extractGrokText(data);
+      const text = data?.choices?.[0]?.message?.content;
       if (typeof text !== 'string' || !text.trim()) return json(502, { error: 'The provider returned no text answer.' });
       return json(200, { text, model: data.model || prep.model });
     } catch (error) {

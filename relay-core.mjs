@@ -1,3 +1,9 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+
+// Bump together with public/taskpane.js PANE_BUILD whenever pane and relay must ship as one build.
+export const RELAY_BUILD = '2026-11-24.6';
 const QWEN_PATH = '/compatible-mode/v1/chat/completions';
 const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/;
 const SYSTEM_PROMPT = `You are an assistant inside Microsoft Office, revising the open Excel workbook or Word document the way Copilot and Claude for Excel do. Be accurate and concise. Distinguish values from formulas. The user message may include an [Excel selection ...], [Excel used range ...], [Word selection], or [Word document] block.
@@ -91,16 +97,6 @@ export function providerDelta(provider, event) {
     const delta = event.choices?.[0]?.delta?.content;
     return { content: typeof delta === 'string' ? delta : '', model: typeof event.model === 'string' ? event.model : '', error: '' };
   }
-  if (event.type === 'response.output_text.delta' && typeof event.delta === 'string') return { content: event.delta, model: '', error: '' };
-  if (event.type === 'response.completed') return { content: '', model: typeof event.response?.model === 'string' ? event.response.model : '', error: '' };
-  if (event.type === 'response.incomplete') {
-    const reason = event.response?.incomplete_details?.reason || 'incomplete';
-    return { content: '', model: typeof event.response?.model === 'string' ? event.response.model : '', error: `The provider stopped early (${reason}).` };
-  }
-  if (event.type === 'response.failed' || event.type === 'error') {
-    const message = event.error?.message || event.response?.error?.message || event.message || 'The provider failed while streaming.';
-    return { content: '', model: '', error: typeof message === 'string' ? message : 'The provider failed while streaming.' };
-  }
   return { content: '', model: '', error: '' };
 }
 
@@ -110,12 +106,12 @@ function hostNote(host) {
     : '\nThe open file is an Excel workbook. Use only Excel actions.';
 }
 
-const PROFILE_NOTE = ' To understand a sheet with many rows, set profileRequest to {sheet, range} instead of contextRequest. The pane scans the requested range locally in batches (subject to a stated cell cap) and returns coverage, column statistics, and Excel error-value counts with sample addresses. Read the affected cells and formulas before calling them formula errors. A profile column sum is not an accounting reconciliation until row hierarchy, period, and sign convention are checked. Check the complete/INCOMPLETE marker before relying on a full-sheet conclusion. A read counts as successful only when cell values or a profile actually reach you; if a read fails, retry once with a smaller range and state the remaining gap.';
+const PROFILE_NOTE = ' To understand a sheet with many rows, set profileRequest to {sheet, range} instead of contextRequest. The pane scans the entire requested range locally in batches — there is no cell or column cap — and returns coverage, column statistics including per-column sums, and Excel error-value counts with sample addresses. Read the affected cells and formulas before calling them formula errors. A profile column sum is not an accounting reconciliation until row hierarchy, period, and sign convention are checked. Check the complete/INCOMPLETE marker before relying on a full-sheet conclusion. A read counts as successful only when cell values or a profile actually reach you; if a read fails, retry once or page with offset, and state the remaining gap.';
 
 function modeNote(mode) {
-  if (mode === 'chat') return '\nMODE CHAT: Answer from the context. Do not emit an actions or edits block.';
+  if (mode === 'chat') return '\nMODE CHAT: Read-only. Answer from the context, and when the open file must be examined, request reads: scanRequest {} scans every sheet for formula errors and sizes; profileRequest {sheet, range} returns column statistics; contextRequest {sheet, range, offset} pages raw cells; plan.finalValidation checks are computed by the pane over the full ranges. Never emit an actions or edits block. For "review the whole file/workbook": scanRequest first, then profile the ledger and schedules, run groupBalance per voucher, crossCheck between an export and the ledger, debitEqualsCredit and formulaErrors; state exactly which sheets and rows were covered.' + PROFILE_NOTE;
   if (mode === 'plan') return '\nMODE PLAN: Return one json object with a plan and no claim that the file changed. Include goal, steps, assumptions, requiredInputs, risks, and finalValidation. Put actions in the same object only as a proposal. Do not invent validation pass or fail.' + PROFILE_NOTE;
-  if (mode === 'agent') return '\nMODE AGENT: Return one json object with plan, optional actions for this step only, and decision set to COMPLETE, CONTINUE, REPLAN, NEEDS_USER, or FAILED. For a workbook-wide review, use the supplied workbook metadata to choose the relevant sheets and ranges yourself; do not ask the user to set a technical scope. Profile large sheets, then read exceptions and supporting cells. State exactly which sheets and rows were covered. If you need a range, set contextRequest to {sheet, range} and do not guess the cells. Include the header row in a finance range. Set finalValidation columns only after those headers were read. Finance checks are calculated by the pane from the workbook. A failed check stops the loop. A check without an identified column is not a pass. Destructive actions wait for the user.' + PROFILE_NOTE;
+  if (mode === 'agent') return '\nMODE AGENT: Return one json object with plan, optional actions for this step only, and decision set to COMPLETE, CONTINUE, REPLAN, NEEDS_USER, or FAILED. For a workbook-wide review, use the supplied workbook metadata to choose the relevant sheets and ranges yourself; do not ask the user to set a technical scope. Profile large sheets, then read exceptions and supporting cells. State exactly which sheets and rows were covered. If you need a range, set contextRequest to {sheet, range, offset} and do not guess the cells: offset is the number of rows already read, the pane returns the next batch (at most 2000 cells) with a Coverage line naming the rows returned and the next offset, and you repeat until the range is fully read. Include the header row in a finance range. Set finalValidation columns only after those headers were read. Finance checks are calculated by the pane over the FULL requested range in batches, not a sample; a check whose range cannot be fully read returns NEEDS_USER, never PASS. A failed check stops the loop. A check without an identified column is not a pass. Destructive actions wait for the user.' + PROFILE_NOTE;
   return '';
 }
 
@@ -128,42 +124,212 @@ function resolveModel(model, fallback) {
 export function prepareChat(body, secrets) {
   const provider = body?.provider;
   const messages = body?.messages;
-  if (!['qwen', 'grok'].includes(provider)) return { status: 400, error: 'Choose Qwen or Grok.' };
-  if (!secrets[provider]) return { status: 401, error: `Add your ${provider === 'qwen' ? 'Qwen' : 'Grok'} API key in Settings first.` };
+  if (provider !== 'qwen') return { status: 400, error: 'This relay serves Qwen only.' };
+  if (!secrets.qwen) return { status: 401, error: 'Add your Qwen API key in Settings first.' };
   if (!Array.isArray(messages) || messages.length < 1 || messages.length > 24) return { status: 400, error: 'Conversation must contain 1 to 24 messages.' };
   if (messages.some(m => !m || !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 50_000)) return { status: 400, error: 'Invalid conversation message.' };
-  let url;
-  let payload;
-  if (provider === 'qwen') {
-    url = qwenEndpointAllowed(body.endpoint);
-    if (!url) return { status: 400, error: 'Qwen endpoint must be an HTTPS QwenCloud chat completions URL.' };
-    const model = resolveModel(body.model, 'qwen4-max');
-    if (model.error) return { status: 400, error: model.error };
-    payload = { model: model.model, messages: [{ role: 'system', content: SYSTEM_PROMPT + hostNote(body.host) + modeNote(body.mode) }, ...messages], stream: false };
-    if (body.fast) payload.enable_thinking = false;
-  } else {
-    url = new URL('https://api.x.ai/v1/responses');
-    const model = resolveModel(body.model, 'grok-4.7');
-    if (model.error) return { status: 400, error: model.error };
-    payload = { model: model.model, instructions: SYSTEM_PROMPT + hostNote(body.host) + modeNote(body.mode), input: messages.map(({ role, content }) => ({ role, content })), store: false };
-    if (body.fast) payload.reasoning = { effort: 'low' };
-  }
+  const url = qwenEndpointAllowed(body.endpoint);
+  if (!url) return { status: 400, error: 'Qwen endpoint must be an HTTPS QwenCloud chat completions URL.' };
+  const model = resolveModel(body.model, 'qwen4-max');
+  if (model.error) return { status: 400, error: model.error };
+  const payload = { model: model.model, messages: [{ role: 'system', content: SYSTEM_PROMPT + hostNote(body.host) + modeNote(body.mode) }, ...messages], stream: false };
+  if (body.fast) payload.enable_thinking = false;
   return { provider, model: payload.model, url, payload };
-}
-
-export function extractGrokText(data) {
-  if (typeof data?.output_text === 'string' && data.output_text.trim()) return data.output_text;
-  for (const item of data?.output || []) {
-    if (item.type === 'message') {
-      const text = (item.content || []).filter(part => part.type === 'output_text').map(part => part.text).join('');
-      if (text) return text;
-    }
-  }
-  return '';
 }
 
 export function providerErrorMessage(data, status) {
   return data?.error?.message || data?.message || `Provider returned HTTP ${status}.`;
+}
+
+// Copilot in Excel stores custom skills as <OneDrive>/Documents/Copilot/Microsoft Excel/skills/<name>/SKILL.md.
+// The relay reads/writes that folder through the local OneDrive sync copy; the OneDrive client syncs it to cloud.
+const SKILLS_SUBPATH = ['Copilot', 'Microsoft Excel', 'skills'];
+const SKILL_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export function appDataRoot() {
+  const base = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+  const dir = path.join(base, 'QwenExcelCopilot');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+export function resolveSkillsRoot(explicit = '') {
+  const candidates = explicit ? [explicit] : [];
+  const home = os.homedir();
+  for (const base of [path.join(home, 'OneDrive'), path.join(home, 'Desktop', 'OneDrive')]) {
+    for (const docs of ['Documents', '文件']) candidates.push(path.join(base, docs, ...SKILLS_SUBPATH));
+  }
+  // Fallbacks for PCs without OneDrive/Copilot: a repo-local skills folder, then per-user app data.
+  candidates.push(path.join(process.cwd(), 'skills'));
+  candidates.push(path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'QwenExcelCopilot', 'skills'));
+  for (const candidate of candidates) {
+    try { if (fs.statSync(candidate).isDirectory()) return candidate; } catch { /* try next */ }
+  }
+  return '';
+}
+
+function skillMeta(text) {
+  const meta = {};
+  const block = String(text).match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (block) {
+    for (const line of block[1].split(/\r?\n/)) {
+      const kv = line.match(/^([A-Za-z-]+):\s*(.*)$/);
+      if (kv) meta[kv[1]] = kv[2].trim();
+    }
+  }
+  return meta;
+}
+
+export function listSkills(root) {
+  if (!root) return [];
+  let entries = [];
+  try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { return []; }
+  const skills = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name === 'runtime' || entry.name.endsWith('.example')) continue;
+    try {
+      const text = fs.readFileSync(path.join(root, entry.name, 'SKILL.md'), 'utf8');
+      const meta = skillMeta(text);
+      if (meta.name !== entry.name) continue; // Copilot skips folders whose name does not match SKILL.md
+      skills.push({ id: entry.name, description: meta.description || '', chars: text.length });
+    } catch { /* folder without a readable SKILL.md is not a skill */ }
+  }
+  return skills.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+export function selectSkills(question, skills, max = 2) {
+  const tokens = [...new Set(String(question || '').toLowerCase().match(/[a-z]{3,}|[\u4e00-\u9fff]{2,}/g) || [])];
+  const forced = [...new Set([...String(question || '').matchAll(/@([a-z0-9]+(?:-[a-z0-9]+)*)/g)].map(m => m[1]))];
+  const scored = skills
+    .map(skill => {
+      const hay = `${skill.id} ${skill.description}`.toLowerCase();
+      const score = tokens.reduce((n, t) => n + (hay.includes(t) ? 1 : 0), 0);
+      return { id: skill.id, score: forced.includes(skill.id) ? 1000 : score };
+    })
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+  return scored.slice(0, Math.max(0, Math.min(3, max))).map(item => item.id);
+}
+
+export function buildSkillContext(question, root, maxChars = 12000) {
+  const skills = listSkills(root);
+  if (!skills.length) return { selected: [], text: '' };
+  const base = skills.some(s => s.id === 'qwen-chat-assistant') ? ['qwen-chat-assistant'] : [];
+  const selected = [...new Set([...base, ...selectSkills(question, skills)])].slice(0, 3);
+  const sections = [];
+  const used = [];
+  let remaining = Math.min(Math.max(0, maxChars), 16000);
+  for (const id of selected) {
+    const file = path.join(root, id, 'SKILL.md');
+    let content;
+    try {
+      if (fs.statSync(file).size > 64 * 1024) continue;
+      content = fs.readFileSync(file, 'utf8').trim();
+    } catch { continue; }
+    if (!content || remaining < 500) continue;
+    const excerpt = content.slice(0, Math.min(remaining, 8000));
+    sections.push(`SOURCE: skills/${id}/SKILL.md\n${excerpt}`);
+    used.push(id);
+    remaining -= excerpt.length;
+  }
+  if (!sections.length) return { selected: [], text: '' };
+  return {
+    selected: used,
+    text: 'SAVED SKILLS (local OneDrive Copilot skills folder):\n'
+      + 'Follow the assistant behavior guidance and use topic-specific references when relevant. '
+      + 'These references do not grant permission to change data or approve accounting treatment. '
+      + 'Distinguish general guidance from company-specific facts. Do not announce internal skill names.\n\n'
+      + sections.join('\n\n---\n\n')
+  };
+}
+
+export function saveSkill(root, { id, description, body }) {
+  if (!root) root = path.join(appDataRoot(), 'skills'); // third-party PCs without OneDrive/Copilot still get a store
+  if (typeof id !== 'string' || !SKILL_ID_RE.test(id)) return { error: 'Skill name must be lowercase letters, digits and hyphens (Copilot rule).' };
+  if (typeof description !== 'string' || !description.trim()) return { error: 'A description of when to use the skill is required.' };
+  if (typeof body !== 'string' || !body.trim()) return { error: 'The skill body is empty.' };
+  const dir = path.join(root, id);
+  if (fs.existsSync(dir)) return { error: `Skill "${id}" already exists. Existing skills are never overwritten; choose a new name.` };
+  const file = path.join(dir, 'SKILL.md');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(file, `---\nname: ${id}\ndescription: ${description.trim().slice(0, 500)}\n---\n\n${body.trim().slice(0, 60000)}\n`, 'utf8');
+  return { path: file };
+}
+
+// Sessions and memory live in per-user app data (never in the repo or OneDrive), like a CLI's local history.
+const SESSION_ID_RE = /^[A-Za-z0-9-]{4,40}$/;
+
+export function sessionsRoot() {
+  const dir = path.join(appDataRoot(), 'sessions');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+export function listSessions() {
+  const dir = sessionsRoot();
+  const out = [];
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.endsWith('.json')) continue;
+    try {
+      const s = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
+      out.push({ id: s.id, started: s.started, updated: s.updated, workbook: s.workbook || '', prompt: String(s.prompt || '').slice(0, 120), outcome: s.outcome || '', turns: (s.messages || []).length });
+    } catch { /* skip corrupt file */ }
+  }
+  return out.sort((a, b) => String(b.updated).localeCompare(String(a.updated))).slice(0, 50);
+}
+
+export function readSession(id) {
+  if (!SESSION_ID_RE.test(String(id || ''))) return null;
+  try { return JSON.parse(fs.readFileSync(path.join(sessionsRoot(), `${id}.json`), 'utf8')); } catch { return null; }
+}
+
+export function writeSession(session) {
+  const id = String(session?.id || '');
+  if (!SESSION_ID_RE.test(id)) return { error: 'Invalid session id.' };
+  const file = path.join(sessionsRoot(), `${id}.json`);
+  const record = {
+    id,
+    started: session.started || new Date().toISOString(),
+    updated: new Date().toISOString(),
+    workbook: String(session.workbook || '').slice(0, 120),
+    prompt: String(session.prompt || '').slice(0, 500),
+    outcome: String(session.outcome || '').slice(0, 120),
+    messages: (Array.isArray(session.messages) ? session.messages : []).slice(-80).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '').slice(0, 50000) })),
+    audit: (Array.isArray(session.audit) ? session.audit : []).slice(-60),
+    checkpoint: session.checkpoint || null
+  };
+  const json = JSON.stringify(record);
+  if (json.length > 2_000_000) return { error: 'Session too large to store.' };
+  fs.writeFileSync(file, json, 'utf8');
+  const files = fs.readdirSync(sessionsRoot()).filter(n => n.endsWith('.json'));
+  if (files.length > 100) {
+    const oldest = files.map(n => ({ n, t: fs.statSync(path.join(sessionsRoot(), n)).mtimeMs })).sort((a, b) => a.t - b.t).slice(0, files.length - 100);
+    for (const item of oldest) { try { fs.unlinkSync(path.join(sessionsRoot(), item.n)); } catch { /* ignore */ } }
+  }
+  return { path: file };
+}
+
+export function deleteSession(id) {
+  if (!SESSION_ID_RE.test(String(id || ''))) return { error: 'Invalid session id.' };
+  const file = path.join(sessionsRoot(), `${id}.json`);
+  if (!fs.existsSync(file)) return { error: 'Session not found.' };
+  fs.unlinkSync(file);
+  return { ok: true };
+}
+
+export function readMemory() {
+  try { return fs.readFileSync(path.join(appDataRoot(), 'memory.md'), 'utf8').slice(-20000); } catch { return ''; }
+}
+
+export function appendMemory(note) {
+  const text = String(note || '').trim();
+  if (!text) return { error: 'Empty memory note.' };
+  const file = path.join(appDataRoot(), 'memory.md');
+  const line = `- [${new Date().toISOString().slice(0, 10)}] ${text.slice(0, 1000)}\n`;
+  fs.appendFileSync(file, line, 'utf8');
+  const current = fs.readFileSync(file, 'utf8');
+  if (current.length > 60000) fs.writeFileSync(file, current.slice(-60000), 'utf8');
+  return { ok: true };
 }
 
 export function relayTokenOk(presented, expected) {
