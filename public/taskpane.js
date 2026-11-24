@@ -1,5 +1,5 @@
 const API = '';
-const PANE_BUILD = '2026-11-24.9'; // Must match relay-core RELAY_BUILD; a stale relay process is detected and reported.
+const PANE_BUILD = '2026-11-24.10'; // Must match relay-core RELAY_BUILD; a stale relay process is detected and reported.
 const CONTEXT_CAP = 45_000; // Relay rejects messages over 50,000 chars; leave room for the prompt itself.
 const ATTACHMENT_CAP = 26_000;
 const ATTACHMENT_FILE_CAP = 18_000;
@@ -15,6 +15,7 @@ const PROFILE_DISTINCT_CAP = 5000;
 const CELL_CHAR_LIMIT = 32767;
 const FINANCE_EVIDENCE_INSTRUCTION = `\n\n[Finance evidence rules — apply only when the request or supplied data is finance/accounting related. Keep the response in English and Traditional Chinese, with aligned concise sections: Conclusion / 結論; Verified facts / 已核實資料; Calculation checks / 計算檢查; Assumptions and missing information / 假設及缺漏。 Cite each material claim and amount to an exact supplied location: Excel [Sheet!A1] or [Sheet!A1:C8], Word [Selection:L0001-L0005], or report [filename:L0001-L0005]. Excel context identifies column letters and row numbers; attached text identifies line numbers and preserves HTML headings. Never invent a cell, line, period, currency, or value. If only workbook metadata was supplied, request the exact range before claiming a value is verified. Show calculation inputs, formula, result, and rounding/tolerance. Say when a calculation is model-generated and has not been independently recalculated by the add-in. Only call an add-in check PASS when its validation card says PASS; report FAIL, WARNING, or NEEDS_USER as shown. Keep assumptions separate from source facts and state when evidence is insufficient. For a whole-workbook review, structure the answer as: Conclusion / 結論; Passed checks / 已通過 (table); Exceptions by priority / 需處理 (issue, likely cause, recommended action, exact cells); Earlier open items / 原有未結事項; Suggested formulas / 建議公式; Next steps / 下一步 (offer fixes only after the user confirms). State which sheets and rows were covered. Do not change the required Agent JSON envelope.`;
 const KEY_STORE = 'eqgc.keys.v1';
+const HOSTED_KEY_STORE = 'eqgc.hosted.qwen-key.v1';
 const RISKY_FORMULA = /^=.*\b(?:WEBSERVICE|FILTERXML|RTD|REGISTER\.ID|CALL|DDE|INFO|HYPERLINK)\s*\(/i;
 const state = { messages: [], lastAnswer: '', lastPrompt: '', busy: false, officeReady: false, forceSheet: false, turn: 0, host: '', audit: [], attachments: [], attachmentErrors: [], sessionId: null, sessionStarted: null, workbookName: '' };
 let activeAgent = null;
@@ -33,11 +34,16 @@ function storedKeys() {
 function rememberKey(provider, key) {
   const all = storedKeys();
   if (key) all[provider] = key; else delete all[provider];
-  try { localStorage.setItem(KEY_STORE, JSON.stringify(all)); return true; }
+  try {
+    localStorage.setItem(KEY_STORE, JSON.stringify(all));
+    return localStorage.getItem(KEY_STORE) === JSON.stringify(all);
+  }
   catch { storageOk = false; return false; }
 }
 let keysReady = null;
 let sessionByoKey = '';
+let hostedKeyReady = null;
+let hostedKeyStore = 'session';
 function hostedRelay() {
   const host = globalThis.location?.hostname || '';
   return host !== '' && host !== '127.0.0.1' && host !== 'localhost';
@@ -47,8 +53,63 @@ function byoKey() {
   if (sessionByoKey) return sessionByoKey;
   return storedKeys().qwen || '';
 }
+function officeKeyStorage() {
+  const storage = globalThis.OfficeRuntime?.storage;
+  return storage && typeof storage.getItem === 'function' && typeof storage.setItem === 'function' && typeof storage.removeItem === 'function' ? storage : null;
+}
+async function loadHostedKey() {
+  if (!hostedRelay()) return;
+  if (!hostedKeyReady) hostedKeyReady = (async () => {
+    const storage = officeKeyStorage();
+    if (storage) {
+      try {
+        const key = await storage.getItem(HOSTED_KEY_STORE);
+        if (typeof key === 'string' && key.startsWith('sk-')) {
+          sessionByoKey = key;
+          hostedKeyStore = 'office';
+          return;
+        }
+      } catch { /* Fall back to browser storage. */ }
+    }
+    const key = storedKeys().qwen;
+    if (typeof key === 'string' && key.startsWith('sk-')) {
+      sessionByoKey = key;
+      hostedKeyStore = 'browser';
+    }
+  })();
+  return hostedKeyReady;
+}
+async function persistHostedKey(key) {
+  const storage = officeKeyStorage();
+  if (storage) {
+    try {
+      await storage.setItem(HOSTED_KEY_STORE, key);
+      if (await storage.getItem(HOSTED_KEY_STORE) === key) {
+        rememberKey('qwen', ''); // Remove any older browser copy when accessible.
+        hostedKeyStore = 'office';
+        return true;
+      }
+    } catch { /* Fall back to browser storage. */ }
+  }
+  if (rememberKey('qwen', key)) { hostedKeyStore = 'browser'; return true; }
+  hostedKeyStore = 'session';
+  return false;
+}
+async function clearHostedKey() {
+  let cleared = true;
+  const storage = officeKeyStorage();
+  if (storage) {
+    try { await storage.removeItem(HOSTED_KEY_STORE); }
+    catch { cleared = false; }
+  }
+  const oldBrowserKey = storedKeys().qwen;
+  if (!rememberKey('qwen', '') && oldBrowserKey) cleared = false;
+  sessionByoKey = '';
+  hostedKeyStore = 'session';
+  return cleared;
+}
 function ensureKeys() {
-  if (hostedRelay()) return Promise.resolve();
+  if (hostedRelay()) return loadHostedKey();
   if (!keysReady) keysReady = (async () => {
     const stored = storedKeys();
     let allOk = true;
@@ -1894,10 +1955,16 @@ async function streamChat(payload) {
     const headers = { 'Content-Type': 'application/json' };
     if (hostedRelay() && !byoKey()) throw new Error('Add your Qwen key in Settings. The hosted pane sends it per request and never stores it server-side.');
     const wire = hostedRelay() ? { ...payload, apiKey: byoKey() } : payload;
-    const response = await fetch(`${API}/api/chat-stream`, { method: 'POST', headers, body: JSON.stringify(wire), signal: controller.signal });
+    let response;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      response = await fetch(`${API}/api/chat-stream`, { method: 'POST', headers, body: JSON.stringify(wire), signal: controller.signal });
+      if (![500, 502, 503, 504].includes(response.status) || attempt === 1) break;
+      await new Promise(resolve => setTimeout(resolve, 700));
+    }
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
-      throw new Error(data.error || `Request failed (${response.status})`);
+      const detail = typeof data.error === 'string' ? data.error : data.error?.message;
+      throw new Error(detail || `Cloud relay returned HTTP ${response.status}. Please retry; if it repeats, report the time and status to support. 雲端中繼回傳 HTTP ${response.status}；若持續出現，請提供時間和狀態碼。`);
     }
     bubble = renderMessage('assistant', '');
     const bodyEl = bubble.children[bubble.children.length - 1]; // HTMLCollection has no .at()
@@ -3051,18 +3118,19 @@ function applyHostedChrome() {
   $('relayFields')?.classList.add('hidden');
   $('localKeyFields')?.classList.remove('hidden');
   const hint = $('keyHint');
-  if (hint) hint.textContent = 'Hosted pane (BYO): your own Qwen key stays in this browser and is sent per request to the Worker, which forwards it to QwenCloud and never stores it. Remember keeps it in this pane only. 託管 pane（自備金鑰）：您的 Qwen key 只存此瀏覽器、每請求傳送；Worker 轉發 QwenCloud、絕不儲存。';
-  if (hint && !storageOk) hint.textContent += ' NOTE: this browser blocks add-in storage, so the key lasts one session only. 注意：此瀏覽器封鎖增益集儲存，key 只效一個 session。';
+  if (hint) hint.textContent = 'Hosted pane (BYO): your Qwen key is sent per request to QwenCloud through this Worker. The Worker never saves it. Remember uses Office storage when available, or this browser’s storage. If both are blocked, the key works for this session only. 託管版（自備金鑰）：每次請求會經 Worker 將您的 key 傳給 QwenCloud；Worker 不會儲存。記住功能優先使用 Office 儲存，其次是瀏覽器儲存；兩者均不可用時，只限本次使用。';
   $('saveKey').textContent = 'Save key · 儲存金鑰';
   $('clearKey').textContent = 'Clear key · 清除';
 }
 
 async function refreshSettings() {
   if (hostedRelay()) {
+    await loadHostedKey();
     const active = Boolean(byoKey());
     const status = $('keyStatus');
     if (status) {
-      status.textContent = active ? 'Your key · sent per request, never stored server-side' : 'Add your own Qwen key (BYO)';
+      const place = hostedKeyStore === 'office' ? 'remembered in Office' : hostedKeyStore === 'browser' ? 'remembered in this browser' : 'this session only';
+      status.textContent = active ? `Your key · ${place} · sent per request` : 'Add your own Qwen key (BYO)';
       status.style.color = active ? '#168251' : '#777';
     }
     setRelayDot(active ? 'ok' : 'warn');
@@ -3132,16 +3200,20 @@ $('saveKey').addEventListener('click', async () => {
   if (hostedRelay()) {
     const key = $('apiKey').value.trim();
     if (!key.startsWith('sk-') || key.length < 8) return toast(explainError('Add your Qwen key in Settings. It must be your own sk-… key.'));
-    sessionByoKey = key;
-    // Cross-site iframe storage may be blocked; the Storage Access API can unlock it inside this click gesture.
-    if (!storageOk && typeof document.requestStorageAccess === 'function') {
-      try { await document.requestStorageAccess(); storageOk = true; } catch { /* denied: session-only */ }
+    // Ask during the click gesture; awaiting Office storage first can consume it.
+    if ($('rememberKey').checked && !storageOk && typeof document.requestStorageAccess === 'function') {
+      try { await document.requestStorageAccess(); storageOk = true; } catch { /* Office storage may still work. */ }
     }
-    const persisted = rememberKey('qwen', $('rememberKey').checked ? key : '');
+    await loadHostedKey();
+    sessionByoKey = key;
+    const persisted = $('rememberKey').checked ? await persistHostedKey(key) : false;
+    const cleared = $('rememberKey').checked ? true : await clearHostedKey();
+    if (!$('rememberKey').checked) sessionByoKey = key;
     $('apiKey').value = '';
     await refreshSettings();
-    if ($('rememberKey').checked && !persisted) toast(explainError('Browser blocks add-in storage: the key works for this session but cannot be remembered. Re-enter after reload, or allow third-party storage for workers.dev. 瀏覽器封鎖增益集儲存：key 本 session 可用但無法記住；重載後重輸，或允許 workers.dev 第三方儲存。'));
-    else toast($('rememberKey').checked ? 'Your key remembered in this pane only.' : 'Your key kept for this session only.');
+    if ($('rememberKey').checked && !persisted) toast(explainError('Office and browser storage are unavailable. Key works for this session only. Office 及瀏覽器儲存均不可用；金鑰只限本次使用。'));
+    else if (!cleared) toast('Key works now, but an older saved copy could not be cleared. Try Clear key again.');
+    else toast($('rememberKey').checked ? `Key saved in ${hostedKeyStore === 'office' ? 'Office storage' : 'this browser'}.` : 'Key kept for this session only.');
     return;
   }
   const apiKey = $('apiKey').value.trim(); if (!apiKey) return toast('Enter an API key first.');
@@ -3157,10 +3229,10 @@ $('saveKey').addEventListener('click', async () => {
 });
 $('clearKey').addEventListener('click', async () => {
   if (hostedRelay()) {
-    sessionByoKey = '';
-    rememberKey('qwen', '');
+    await loadHostedKey();
+    const cleared = await clearHostedKey();
     await refreshSettings();
-    toast('Your key cleared from this pane.');
+    toast(cleared ? 'Your key cleared from this pane.' : 'Key cleared from this session; saved storage may still contain it. Try Clear again.');
     return;
   }
   const provider = $('provider').value;

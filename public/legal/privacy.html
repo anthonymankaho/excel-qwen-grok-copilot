@@ -18,7 +18,7 @@
 </ul>
 <h2>2. Your API key (BYO) · 您的金鑰</h2>
 <ul>
-<li>You supply your own Qwen (Alibaba Cloud Model Studio / QwenCloud) key. Local mode: it is held by the loopback relay on this PC (127.0.0.1) and optionally in this browser's local storage. Hosted mode: it stays in this browser and is sent per request; the Worker forwards it to QwenCloud and <strong>never stores or logs it</strong>. 自備金鑰；本機存於 loopback relay；託管每請求傳送、Worker 絕不儲存或記錄。</li>
+<li>You supply your own Qwen (Alibaba Cloud Model Studio / QwenCloud) key. Local mode: it is held by the loopback relay on this PC (127.0.0.1) and optionally in local browser storage. Hosted mode: Remember saves it in Office storage when available, otherwise in browser storage; if both are unavailable, it lasts only for this pane session. Each request sends the key through the Worker to QwenCloud; the Worker <strong>never stores or logs it</strong>. 自備金鑰；本機存於 loopback relay；託管版優先使用 Office 儲存，其次是瀏覽器儲存，兩者不可用則只限本次使用。每次請求經 Worker 傳至 QwenCloud；Worker 絕不儲存或記錄。</li>
 <li>Keys are never written to the repository, the audit card, or logs. 金鑰不入 repo、audit 卡或記錄。</li>
 </ul>
 <h2>3. Where data goes · 資料去向</h2>

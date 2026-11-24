@@ -30,6 +30,8 @@ The October close trial showed that asking the user to pick technical read range
 **2026-11-24（manifest 1.5.0.0）—** 兩個 manifest 升 1.5.0.0（cloud＋本機品牌／ProviderName 同步、本機法律 URL）。提醒：`wrangler deploy` 不更新 manifest；Excel web 快取上傳副本——manifest 變更後须移除舊我的增益集項目再上傳。
 **2026-11-24 (deploy live) —** Anthony ran `npx wrangler deploy` (Version `54752ffa-e235-4dfd-99e6-9c85758165f7`); live-verified: health `byo:true` + `configured.qwen:false`, legal pages 200, served pane .9, no-key chat 401 with readable fix. G1 closed live. On Anthony's order the owner `QWEN_API_KEY` Worker secret was then deleted (`wrangler secret delete`); only the unused `RELAY_TOKEN` remains. Remaining: D2 publisher name, Partner Center + submission.
 **2026-11-24（deploy 上線）—** Anthony 執行 `npx wrangler deploy`（Version `54752ffa-e235-4dfd-99e6-9c85758165f7`）；實機驗證：health `byo:true`＋`configured.qwen:false`、法律頁 200、pane .9、無 key chat 401 附解法。G1 上線關閉。依 Anthony 指示已刪除 owner `QWEN_API_KEY` Worker secret（`wrangler secret delete`）；僅餘未使用之 `RELAY_TOKEN`。餘：D2 發行者名稱、Partner Center＋提交。
+**2026-11-24 (Excel web key + HTTP 500 repair) —** Build .10 prefers `OfficeRuntime.storage` for the hosted BYO key, then browser storage; Save verifies the stored value and reports session-only use if neither works. Clear removes saved copies. A stream request retries one HTTP 500/502/503/504 before showing a bilingual error with the status. The user's repeat `hi` reached Qwen and returned NEEDS_USER, so the earlier HTTP 500 was intermittent; its exact upstream cause was not captured. Local checks pass 106/106; live Excel web retest after deployment is pending.
+**2026-11-24（Excel 網頁版 key 與 HTTP 500 修正）—** .10 版託管增益集優先使用 `OfficeRuntime.storage` 記住自備 key，其次是瀏覽器儲存；Save 會讀回確認，兩者均不可用則清楚標示僅限本次使用。Clear 會清除已保存的副本。串流遇到 HTTP 500/502/503/504 時重試一次，仍失敗則顯示雙語狀態碼。使用者重送 `hi` 已到達 Qwen 並回傳 NEEDS_USER，先前 500 屬間歇性；尚未取得確切上游原因。本機檢查 106/106 通過，部署後仍待 Excel 網頁版實測。
 **2026-11-24（Marketplace Phase 1＋2 草稿）—** Worker 改 BYO-key pass-through：每請求自帶用户 key、服務路徑無 owner key／共用 relay token、每 key 60 req/min、不儲存不記錄；hosted pane 金鑰只存瀏覽器。上架包草稿：manifest v1.4.0.0 含 Privacy/Terms/Support URLs、`public/legal/` 雙語法律頁、`STORE_LISTING.md`＋`STORE_REVIEWER_NOTES.md`。`wrangler deploy`、owner-secret 清理、Partner Center 註冊與提交仍屬 Anthony。98/98 測試。
 **2026-11-24 — Qwen in Excel，無範圍限制。** Grok 區塊已移除（UI、路由、relay、文件），pane 僅用 Qwen。`contextRequest` 接受 `offset`，任何範圍皆可分頁讀完；160 格財務檢查上限與 200 萬格／60 欄摘要上限已移除——檢查與摘要覆蓋完整請求範圍，無法完整讀取的檢查回傳 NEEDS_USER，絕不 PASS。輪數上限 10 → 25。`npm run check` 與 `npm test` 75/75 通過；實機 Excel 重測待擁有者重新載入 pane。
 **2026-11-24（較後）— Chat 整本覆核（Copilot 看齊）。** Chat 具唯讀工具迴圈：`scanRequest` 全表公式錯誤掃描、`groupBalance` 每批次借貸、`crossCheck` 匯出對總帳、profile／分頁讀取；報告含已通過表、分優先級例外、建議公式與下一步（修改須確認）。Chat 絕不寫入。`npm test` 78/78。
@@ -371,21 +373,11 @@ The relay listens on `127.0.0.1` only and rejects any other Host or Origin.
 
 The same pane is published at `https://excel-qwen-grok.anthonym-354.workers.dev` so Excel on the web can open it. The local server stays the way to run it on this PC.
 
-The manifest to upload in Excel is `manifest.cloudflare.xml` (version 1.3.0.0). It has its own add-in id, so it can sit beside the local sideload. With Microsoft 365 Premium, add it from **Home → Add-ins → Upload My Add-in**.
+The manifest to upload in Excel is `manifest.cloudflare.xml` (version 1.5.0.0). It has its own add-in id, so it can sit beside the local sideload. With Microsoft 365 Premium, add it from **Home → Add-ins → Upload My Add-in**.
 
-The relay token is already stored as the Worker secret `RELAY_TOKEN`. In the hosted pane, open Settings, paste that token, and press **Use key**. The chat route rejects a request that does not carry it. A request from another site is rejected too. The Worker also refuses a pasted provider key and still allows only QwenCloud chat-completions URLs.
+In the hosted pane, open Settings, paste **your own Qwen API key**, leave **Remember** ticked, and press **Save key · 儲存金鑰**. The pane confirms whether Office storage or browser storage remembered it. If both are unavailable, the key works for that session only. Each request carries the key through the Worker to QwenCloud; the Worker does not store it. **Clear key** removes saved copies. No key is stored in this repository or workbook.
 
-The Qwen key is a Worker secret. It is not typed into the pane and it is not stored in this repository.
-
-`QWEN_API_KEY` is already set on the Worker (2026-11-22), so the hosted pane uses Qwen with no key entry. To set or replace it, from the project folder, after `npx wrangler login`:
-
-```bash
-npx wrangler secret put QWEN_API_KEY
-```
-
-`npx wrangler secret list --name excel-qwen-grok` shows which ones exist. It prints names only, never values.
-
-To replace the relay token, run `npx wrangler secret put RELAY_TOKEN` with a passphrase of at least 16 characters, then paste the new value in Settings.
+在託管版 Settings 輸入**您自己的 Qwen API key**，保持 **Remember** 勾選並按 **Save key · 儲存金鑰**。增益集會確認 Office 或瀏覽器儲存是否成功；兩者均不可用則只限本次使用。每次請求經 Worker 傳至 QwenCloud，Worker 不會保存 key。**Clear key** 會清除已保存的副本；repo 及工作簿均不存 key。
 
 A later code change is published with `npm run deploy:cloudflare` after `npx wrangler login`. Workbook text sent from the hosted pane goes to Cloudflare and then to Qwen.
 

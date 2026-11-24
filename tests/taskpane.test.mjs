@@ -43,7 +43,7 @@ function fire(el, type, ev = {}) {
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, location, sheetNames, usedRanges, healthBuild, blockStorage, allowStorageAccess }) {
+function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, location, sheetNames, usedRanges, healthBuild, blockStorage, allowStorageAccess, officeStore, streamFailures = 0 }) {
   const els = new Map();
   const defaults = { provider: 'qwen', qwenModel: 'qwen4-max', qwenEndpoint: 'https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions' };
   const get = id => { if (!els.has(id)) { const el = makeElement(id); if (defaults[id]) el.value = defaults[id]; if (id === 'includeContext' || id === 'rememberKey') el.checked = true; els.set(id, el); } return els.get(id); };
@@ -301,11 +301,12 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
   }
   const wordDoc = { selectionText: 'Hello team', bodyText: 'Hello team. More text.', style: 'Normal', font: wordFont };
   let storageBlocked = !!blockStorage;
+  const officeValues = officeStore || null;
   const sandbox = {
     console, JSON, Math, String, Array, Object, Promise, RegExp, Number, TextEncoder, TextDecoder, AbortController,
     btoa: s => Buffer.from(s, 'binary').toString('base64'),
     atob: s => Buffer.from(s, 'base64').toString('binary'),
-    setTimeout: () => 0, clearTimeout: () => {},
+    setTimeout: (fn, delay) => { if (delay === 700) queueMicrotask(fn); return 0; }, clearTimeout: () => {},
     localStorage: {
       getItem: k => (k in store ? store[k] : null),
       setItem: (k, v) => { if (storageBlocked) throw new Error('SecurityError: third-party storage blocked'); store[k] = String(v); },
@@ -313,6 +314,11 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
     },
     document: { getElementById: get, createElement: tag => makeElement(tag), querySelectorAll: () => [], addEventListener() {}, requestStorageAccess: allowStorageAccess ? async () => { storageBlocked = false; } : undefined },
     Office: { HostType: { Excel: 'Excel', Word: 'Word' }, onReady(cb) { sandbox.officeCb = cb; } },
+    OfficeRuntime: officeValues ? { storage: {
+      getItem: async key => officeValues[key] ?? null,
+      setItem: async (key, value) => { officeValues[key] = value; },
+      removeItem: async key => { delete officeValues[key]; }
+    } } : undefined,
     Excel: {
       run: fn => fn({
         workbook: {
@@ -362,7 +368,7 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
     fetch: async (url, opts) => {
       const body = opts?.body ? JSON.parse(opts.body) : null;
       calls.push({ url, body, headers: opts?.headers || {} });
-      if (url.endsWith('/api/health')) return { ok: true, status: 200, json: async () => ({ ok: true, build: healthBuild || '2026-11-24.9', configured: { qwen: true } }) };
+      if (url.endsWith('/api/health')) return { ok: true, status: 200, json: async () => ({ ok: true, build: healthBuild || '2026-11-24.10', configured: { qwen: true } }) };
       if (url.endsWith('/api/extract')) return { ok: true, status: 200, json: async () => ({ text: '[Sheet: Data]\nL1: Voucher | Debit\nL2: GJ001 | 100', kind: 'XLSX' }) };
       if (url.endsWith('/api/sessions/delete')) return { ok: true, status: 200, json: async () => ({ ok: true }) };
       if (url.includes('/api/sessions/read')) return { ok: true, status: 200, json: async () => ({ id: 's-old-1', started: '2026-11-24T09:00:00Z', prompt: 'review whole file', messages: [{ role: 'user', content: 'review whole file' }, { role: 'assistant', content: 'Old report.' }], audit: [], checkpoint: { prompt: 'review whole file', progress: [], observation: '' } }) };
@@ -377,6 +383,7 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
       const data = turnText != null ? { text: turnText, model: reply.model || 'test-model' } : (reply || { text: 'mock answer', model: 'test-model' });
       if (url.endsWith('/api/chat-stream')) {
         streamTurn += 1;
+        if (streamTurn <= streamFailures) return { ok: false, status: 500, json: async () => { throw new Error('non-JSON error'); } };
         const frames = `data: ${JSON.stringify({ model: data.model || 'test-model', choices: [{ delta: { content: data.text } }] })}\n\ndata: [DONE]\n\n`;
         let sent = false;
         return {
@@ -1193,7 +1200,7 @@ test('When the browser blocks add-in storage, the hosted key stays session-only 
   sb.els('apiKey').value = 'sk-sp-byo-user-key-001';
   sb.els('rememberKey').checked = true;
   await fire(sb.els('saveKey'), 'click'); await flush();
-  assert.match(sb.els('toast').textContent, /blocks add-in storage/);
+  assert.match(sb.els('toast').textContent, /Office and browser storage are unavailable/);
   await ask(sb, 'hello from cloud');
   assert.equal(chatCalls(sb).at(-1).body.apiKey, 'sk-sp-byo-user-key-001');
 });
@@ -1220,7 +1227,34 @@ test('Save key in hosted pane requests storage access and persists when granted'
   sb.els('rememberKey').checked = true;
   await fire(sb.els('saveKey'), 'click'); await flush();
   assert.match(sb.store['eqgc.keys.v1'], /sk-sp-byo-user-key-001/);
-  assert.match(sb.els('toast').textContent, /remembered in this pane only/);
+  assert.match(sb.els('toast').textContent, /saved in this browser/);
+});
+
+test('Hosted key survives a blocked browser store using Office storage and Clear removes it', async () => {
+  const officeStore = {};
+  const options = { selection: singleEmpty, used: usedSmall, location: { hostname: 'excel-qwen-grok.example.workers.dev' }, blockStorage: true, officeStore };
+  const first = makeSandbox(options);
+  await boot(first);
+  first.els('apiKey').value = 'sk-sp-byo-user-key-001';
+  await fire(first.els('saveKey'), 'click'); await flush();
+  assert.equal(officeStore['eqgc.hosted.qwen-key.v1'], 'sk-sp-byo-user-key-001');
+  assert.match(first.els('keyStatus').textContent, /remembered in Office/);
+  const reopened = makeSandbox(options);
+  await boot(reopened);
+  await ask(reopened, 'hi');
+  assert.equal(chatCalls(reopened).at(-1).body.apiKey, 'sk-sp-byo-user-key-001');
+  await fire(reopened.els('clearKey'), 'click'); await flush();
+  assert.equal(officeStore['eqgc.hosted.qwen-key.v1'], undefined);
+});
+
+test('Hosted stream retries one transient HTTP 500 before a successful answer', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, location: { hostname: 'excel-qwen-grok.example.workers.dev' }, streamFailures: 1, reply: { text: 'Recovered.', model: 'm' } });
+  await boot(sb);
+  sb.els('apiKey').value = 'sk-sp-byo-user-key-001';
+  await fire(sb.els('saveKey'), 'click'); await flush();
+  await ask(sb, 'hi');
+  assert.equal(chatCalls(sb).length, 2);
+  assert.match(visible(sb.els('conversation')), /Recovered\./);
 });
 
 test('every pane element id exists in index.html (removed controls cannot break the pane silently)', () => {
