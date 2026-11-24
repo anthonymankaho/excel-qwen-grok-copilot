@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Support · 支援 — Qwen for Excel and Word</title>
+<style>body{font:14px/1.6 "Segoe UI",Arial,sans-serif;max-width:760px;margin:24px auto;padding:0 16px;color:#242424}h1{font-size:20px}h2{font-size:15px;margin-top:22px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:6px 8px;font-size:13px;text-align:left}</style>
+</head>
+<body>
+<h1>Support · 支援</h1>
+<p>Qwen for Excel and Word · last updated 2026-11-24.</p>
+<h2>Get help · 取得協助</h2>
+<ul>
+<li>In the pane: open the ☰ sidebar → <strong>Guide · 說明</strong> for the SOP and troubleshooting. pane 内 ☰ → Guide。</li>
+<li>Issues and questions: <a href="https://github.com/anthonymankaho/excel-qwen-grok-copilot/issues">GitHub Issues</a>. 問題回報：GitHub Issues。</li>
+<li>Every error message ends with "→" and a bilingual fix. 每個錯誤訊息結尾附雙語解法。</li>
+</ul>
+<h2>Common issues · 常見問題</h2>
+<table>
+<tr><th>Symptom 症狀</th><th>Fix 解法</th></tr>
+<tr><td>Build mismatch / 版本不符</td><td>Local: <code>npm run relay-stop</code> then <code>npm run relay-ensure</code>, reload pane. 重啟 relay 再重載 pane。</td></tr>
+<tr><td>Relay down / Failed to fetch</td><td>Local: <code>npm start</code>. Hosted: check your network. 本機執行 npm start。</td></tr>
+<tr><td>401 / key rejected</td><td>Settings → paste your own current Qwen key → Use key. 重新套用您的 key。</td></tr>
+<tr><td>429 / rate limit</td><td>Wait a minute (60 req/min per key hosted); check Token Plan balance in the QwenCloud console. 稍候；餘額只可在 console 查。</td></tr>
+<tr><td>PDF "no extractable text layer"</td><td>Scanned PDF: add your key for vision transcription, or attach a text-based export. 掃描檔：加 key 視覺轉錄或改文字匯出。</td></tr>
+<tr><td>Nothing sent / 沒有傳送</td><td>Tick <strong>Share</strong> (consent gate). 勾選 Share。</td></tr>
+</table>
+<h2>Requirements · 需求</h2>
+<ul>
+<li>Desktop Excel/Word with add-in sideload or store install; local mode needs Node.js 20+ on your PC. 桌面 Excel/Word；本機模式需 Node 20+。</li>
+<li>Your own QwenCloud API key (BYO). 自備 Qwen key。</li>
+<li>Optional local PDF tools: poppler (pdftotext/pdftoppm). 選配 poppler。</li>
+</ul>
+</body>
+</html>

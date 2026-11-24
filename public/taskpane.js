@@ -15,7 +15,6 @@ const PROFILE_DISTINCT_CAP = 5000;
 const CELL_CHAR_LIMIT = 32767;
 const FINANCE_EVIDENCE_INSTRUCTION = `\n\n[Finance evidence rules — apply only when the request or supplied data is finance/accounting related. Keep the response in English and Traditional Chinese, with aligned concise sections: Conclusion / 結論; Verified facts / 已核實資料; Calculation checks / 計算檢查; Assumptions and missing information / 假設及缺漏。 Cite each material claim and amount to an exact supplied location: Excel [Sheet!A1] or [Sheet!A1:C8], Word [Selection:L0001-L0005], or report [filename:L0001-L0005]. Excel context identifies column letters and row numbers; attached text identifies line numbers and preserves HTML headings. Never invent a cell, line, period, currency, or value. If only workbook metadata was supplied, request the exact range before claiming a value is verified. Show calculation inputs, formula, result, and rounding/tolerance. Say when a calculation is model-generated and has not been independently recalculated by the add-in. Only call an add-in check PASS when its validation card says PASS; report FAIL, WARNING, or NEEDS_USER as shown. Keep assumptions separate from source facts and state when evidence is insufficient. For a whole-workbook review, structure the answer as: Conclusion / 結論; Passed checks / 已通過 (table); Exceptions by priority / 需處理 (issue, likely cause, recommended action, exact cells); Earlier open items / 原有未結事項; Suggested formulas / 建議公式; Next steps / 下一步 (offer fixes only after the user confirms). State which sheets and rows were covered. Do not change the required Agent JSON envelope.`;
 const KEY_STORE = 'eqgc.keys.v1';
-const RELAY_STORE = 'eqgc.relay.v1';
 const RISKY_FORMULA = /^=.*\b(?:WEBSERVICE|FILTERXML|RTD|REGISTER\.ID|CALL|DDE|INFO|HYPERLINK)\s*\(/i;
 const state = { messages: [], lastAnswer: '', lastPrompt: '', busy: false, officeReady: false, forceSheet: false, turn: 0, host: '', audit: [], attachments: [], attachmentErrors: [], sessionId: null, sessionStarted: null, workbookName: '' };
 let activeAgent = null;
@@ -34,21 +33,15 @@ function rememberKey(provider, key) {
   try { localStorage.setItem(KEY_STORE, JSON.stringify(all)); } catch { /* storage unavailable: session-only */ }
 }
 let keysReady = null;
-let sessionRelayToken = '';
+let sessionByoKey = '';
 function hostedRelay() {
   const host = globalThis.location?.hostname || '';
   return host !== '' && host !== '127.0.0.1' && host !== 'localhost';
 }
-function relayToken() {
-  if (sessionRelayToken) return sessionRelayToken;
-  try { return localStorage.getItem(RELAY_STORE) || ''; } catch { return ''; }
-}
-function rememberRelay(token) {
-  sessionRelayToken = token || '';
-  try {
-    if (token) localStorage.setItem(RELAY_STORE, token);
-    else localStorage.removeItem(RELAY_STORE);
-  } catch { /* storage unavailable: the token stays for this pane session */ }
+// Hosted (Marketplace) pane: the user's OWN key, kept in this browser only, sent per request.
+function byoKey() {
+  if (sessionByoKey) return sessionByoKey;
+  return storedKeys().qwen || '';
 }
 function ensureKeys() {
   if (hostedRelay()) return Promise.resolve();
@@ -66,8 +59,6 @@ function ensureKeys() {
 async function api(path, body) {
   const headers = {};
   if (body) headers['Content-Type'] = 'application/json';
-  const token = relayToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(`${API}/api/${path}`, { method: body ? 'POST' : 'GET', headers, body: body ? JSON.stringify(body) : undefined });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
@@ -1897,9 +1888,9 @@ async function streamChat(payload) {
   let text = '';
   try {
     const headers = { 'Content-Type': 'application/json' };
-    const token = relayToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
-    const response = await fetch(`${API}/api/chat-stream`, { method: 'POST', headers, body: JSON.stringify(payload), signal: controller.signal });
+    if (hostedRelay() && !byoKey()) throw new Error('Add your Qwen key in Settings. The hosted pane sends it per request and never stores it server-side.');
+    const wire = hostedRelay() ? { ...payload, apiKey: byoKey() } : payload;
+    const response = await fetch(`${API}/api/chat-stream`, { method: 'POST', headers, body: JSON.stringify(wire), signal: controller.signal });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new Error(data.error || `Request failed (${response.status})`);
@@ -3046,34 +3037,25 @@ function applyHostedChrome() {
   showExecutionPath();
   if (!hostedRelay()) return;
   $('cloudSources')?.classList.add('hidden');
-  $('relayFields')?.classList.remove('hidden');
-  $('localKeyFields')?.classList.add('hidden');
+  $('relayFields')?.classList.add('hidden');
+  $('localKeyFields')?.classList.remove('hidden');
   const hint = $('keyHint');
-  if (hint) hint.textContent = 'This pane is served by Cloudflare. The relay token unlocks it. The Qwen key stays in Cloudflare secrets and is not typed here. Remember keeps the token in this pane only.';
-  const saved = relayToken();
-  if (saved) sessionRelayToken = saved;
+  if (hint) hint.textContent = 'Hosted pane (BYO): your own Qwen key stays in this browser and is sent per request to the Worker, which forwards it to QwenCloud and never stores it. Remember keeps it in this pane only. 託管 pane（自備金鑰）：您的 Qwen key 只存此瀏覽器、每請求傳送；Worker 轉發 QwenCloud、絕不儲存。';
 }
 
 async function refreshSettings() {
-  if (hostedRelay() && !relayToken()) {
-    const status = $('keyStatusHosted');
-    if (status) { status.textContent = 'Add the Cloudflare relay token'; status.style.color = '#777'; }
-    setRelayDot('warn');
+  if (hostedRelay()) {
+    const active = Boolean(byoKey());
+    const status = $('keyStatus');
+    if (status) {
+      status.textContent = active ? 'Your key · sent per request, never stored server-side' : 'Add your own Qwen key (BYO)';
+      status.style.color = active ? '#168251' : '#777';
+    }
+    setRelayDot(active ? 'ok' : 'warn');
     return;
   }
   try {
     const data = await api('health');
-    if (hostedRelay()) {
-      const provider = 'qwen';
-      const active = Boolean(data.configured?.[provider]);
-      const status = $('keyStatusHosted');
-      if (status) {
-        status.textContent = active ? 'Relay token accepted · provider key is on Cloudflare' : 'Relay token accepted · add the provider key in Cloudflare';
-        status.style.color = active ? '#168251' : '#777';
-      }
-      setRelayDot(active ? 'ok' : 'warn');
-      return;
-    }
     const provider = $('provider').value;
     const remembered = Boolean(storedKeys()[provider]);
     const active = Boolean(data.configured[provider]);
@@ -3134,13 +3116,13 @@ $('newChatSide').addEventListener('click', () => { newChat(); setSidebar(false);
 $('addUsedRange').addEventListener('click', () => { state.forceSheet = true; refreshContextCard(); toast('Next question will use the whole active sheet.'); });
 $('saveKey').addEventListener('click', async () => {
   if (hostedRelay()) {
-    const token = $('relayToken').value.trim();
-    if (token.length < 16) return toast('Enter the Cloudflare relay token.');
-    rememberRelay($('rememberKey').checked ? token : '');
-    if (!$('rememberKey').checked) sessionRelayToken = token;
-    $('relayToken').value = '';
+    const key = $('apiKey').value.trim();
+    if (!key.startsWith('sk-') || key.length < 8) return toast(explainError('Add your Qwen key in Settings. It must be your own sk-… key.'));
+    sessionByoKey = key;
+    rememberKey('qwen', $('rememberKey').checked ? key : '');
+    $('apiKey').value = '';
     await refreshSettings();
-    toast($('rememberKey').checked ? 'Relay token remembered in this pane.' : 'Relay token kept for this session.');
+    toast($('rememberKey').checked ? 'Your key remembered in this pane only.' : 'Your key kept for this session only.');
     return;
   }
   const apiKey = $('apiKey').value.trim(); if (!apiKey) return toast('Enter an API key first.');
@@ -3156,9 +3138,10 @@ $('saveKey').addEventListener('click', async () => {
 });
 $('clearKey').addEventListener('click', async () => {
   if (hostedRelay()) {
-    rememberRelay('');
+    sessionByoKey = '';
+    rememberKey('qwen', '');
     await refreshSettings();
-    toast('Relay token cleared from this pane.');
+    toast('Your key cleared from this pane.');
     return;
   }
   const provider = $('provider').value;

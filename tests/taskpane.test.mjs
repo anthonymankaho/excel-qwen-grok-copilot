@@ -884,17 +884,19 @@ test('Agent and chat route to Qwen only', async () => {
   assert.match(visible(sb.els('conversation')), /via qwen/);
 });
 
-test('A hosted pane sends the relay token and does not upload a provider key', async () => {
+test('A hosted pane sends the user own key per request (BYO) and never configures the server', async () => {
   const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Noted.', model: 'qwen4-max' }, location: { hostname: 'excel-qwen-grok.example.workers.dev' } });
   await boot(sb);
-  sb.els('relayToken').value = 'relay-token-0123456789';
+  sb.els('apiKey').value = 'sk-sp-byo-user-key-001';
   sb.els('rememberKey').checked = true;
   await fire(sb.els('saveKey'), 'click');
   await flush();
-  assert.equal(sb.store['eqgc.relay.v1'], 'relay-token-0123456789');
+  assert.match(sb.store['eqgc.keys.v1'], /sk-sp-byo-user-key-001/);
   assert.equal(sb.calls.some(call => String(call.url).includes('/api/configure')), false);
   await ask(sb, 'hello from cloud');
-  assert.equal(chatCalls(sb).at(-1).headers.Authorization, 'Bearer relay-token-0123456789');
+  const wire = chatCalls(sb).at(-1);
+  assert.equal(wire.body.apiKey, 'sk-sp-byo-user-key-001');
+  assert.equal(wire.headers.Authorization, undefined);
 });
 
 test('Agent read-back delivers every column of a wide sheet, not just A to H', async () => {

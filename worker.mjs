@@ -1,15 +1,38 @@
-import { RELAY_BUILD, prepareChat, providerDelta, providerErrorMessage, relayTokenOk, takeSseDataLines } from './relay-core.mjs';
+import { RELAY_BUILD, prepareChat, providerDelta, providerErrorMessage, takeSseDataLines } from './relay-core.mjs';
+
+// Marketplace v1 is BYO-key: the caller's own Qwen key travels per request, is forwarded to QwenCloud,
+// and is never stored, logged, or substituted with an owner key. Rate limits are per isolate (best effort).
+const RATE_WINDOW_MS = 60_000;
+const RATE_PER_KEY = 60;
+const RATE_GLOBAL = 240;
+const rateBuckets = new Map();
+
+function rateLimited(key) {
+  const now = Date.now();
+  const prune = bucket => { while (bucket.length && now - bucket[0] > RATE_WINDOW_MS) bucket.shift(); };
+  const global = rateBuckets.get('*') || [];
+  prune(global);
+  if (global.length >= RATE_GLOBAL) return true;
+  const bucket = rateBuckets.get(key) || [];
+  prune(bucket);
+  if (bucket.length >= RATE_PER_KEY) return true;
+  bucket.push(now);
+  global.push(now);
+  rateBuckets.set(key, bucket);
+  rateBuckets.set('*', global);
+  return false;
+}
+
+function byoKey(body) {
+  const key = typeof body?.apiKey === 'string' ? body.apiKey.trim() : '';
+  if (!key || key.length < 8 || key.length > 500 || !key.startsWith('sk-')) return '';
+  return key;
+}
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
 
 function json(status, data) {
   return new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
-}
-
-function bearer(request) {
-  const header = request.headers.get('authorization') || '';
-  const match = header.match(/^Bearer\s+(\S+)\s*$/i);
-  return match ? match[1] : '';
 }
 
 function sameOrigin(request) {
@@ -97,23 +120,25 @@ export async function handleRelayRequest(request, env) {
     return env.ASSETS.fetch(request);
   }
   if (!sameOrigin(request)) return json(403, { error: 'Relay only accepts requests from its own site.' });
-  if (!relayTokenOk(bearer(request), env.RELAY_TOKEN || '')) return json(401, { error: 'Enter the Cloudflare relay token in Settings.' });
-  const secrets = { qwen: env.QWEN_API_KEY || '' };
   if (request.method === 'GET' && url.pathname === '/api/health') {
-    return json(200, { ok: true, hosted: true, build: RELAY_BUILD, configured: { qwen: Boolean(secrets.qwen) } });
+    return json(200, { ok: true, hosted: true, byo: true, build: RELAY_BUILD, configured: { qwen: false } });
   }
   if (request.method === 'POST' && (url.pathname === '/api/configure' || url.pathname === '/api/clear-key')) {
-    return json(400, { error: 'On Cloudflare, the Qwen key is a Worker secret. This pane stores only the relay token.' });
+    return json(400, { error: 'On the hosted pane your Qwen key stays in this browser and is sent per request; the server never stores it.' });
   }
   if (request.method === 'POST' && (url.pathname === '/api/chat' || url.pathname === '/api/chat-stream')) {
     try {
       const body = await readJson(request);
+      const key = byoKey(body);
+      if (!key) return json(401, { error: 'Add your Qwen key in Settings. The hosted pane sends it per request and never stores it server-side.' });
+      if (rateLimited(key)) return json(429, { error: 'Rate limit: 60 requests per minute per key. Wait a minute and retry.' });
+      const secrets = { qwen: key };
       const prep = prepareChat(body, secrets);
       if (prep.error) return json(prep.status, { error: prep.error });
-      if (url.pathname === '/api/chat-stream') return relaySse(prep, secrets[prep.provider]);
+      if (url.pathname === '/api/chat-stream') return relaySse(prep, key);
       const response = await fetch(prep.url, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${secrets[prep.provider]}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(prep.payload),
         redirect: 'error',
         signal: AbortSignal.timeout(180_000)

@@ -30,6 +30,21 @@ test('a packed file round-trips through the zip', async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
+test('store pack: legal pages disclose BYO and the manifest points at them', async () => {
+  const privacy = await readFile(path.join(projectRoot, 'public', 'legal', 'privacy.html'), 'utf8');
+  assert.match(privacy, /never stores or logs it/);
+  assert.match(privacy, /Share/);
+  const eula = await readFile(path.join(projectRoot, 'public', 'legal', 'eula.html'), 'utf8');
+  assert.match(eula, /your own/);
+  const support = await readFile(path.join(projectRoot, 'public', 'legal', 'support.html'), 'utf8');
+  assert.match(support, /GitHub Issues/);
+  const manifest = await readFile(path.join(projectRoot, 'manifest.cloudflare.xml'), 'utf8');
+  assert.match(manifest, /<Version>1\.4\.0\.0<\/Version>/);
+  assert.match(manifest, /<SupportUrl DefaultValue="https:\/\/excel-qwen-grok\.anthonym-354\.workers\.dev\/legal\/support\.html"\/>/);
+  assert.match(manifest, /<PrivacyUrl DefaultValue="https:\/\/excel-qwen-grok\.anthonym-354\.workers\.dev\/legal\/privacy\.html"\/>/);
+  assert.match(manifest, /<TermsOfUseUrl DefaultValue="https:\/\/excel-qwen-grok\.anthonym-354\.workers\.dev\/legal\/eula\.html"\/>/);
+});
+
 test('the project zip has the installer and leaves secrets out', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'eqgc-pack-'));
   const outFile = path.join(dir, 'Qwen-for-Excel-and-Word.zip');
@@ -37,7 +52,8 @@ test('the project zip has the installer and leaves secrets out', async () => {
     const names = await makeDownloadZip(projectRoot, outFile);
     for (const expected of [
       'START-HERE.txt', 'Setup and Start.bat', 'manifest.xml', 'manifest.cloudflare.xml',
-      'public/index.html', 'package.json', 'SOP-INSTALL.md', 'SOP-USER-GUIDE.md', 'README.md'
+      'public/index.html', 'package.json', 'SOP-INSTALL.md', 'SOP-USER-GUIDE.md', 'README.md',
+      'public/legal/privacy.html', 'public/legal/eula.html', 'public/legal/support.html'
     ]) {
       assert.ok(names.includes(`Qwen-for-Excel-and-Word/${expected}`), `${expected} is packed`);
     }
