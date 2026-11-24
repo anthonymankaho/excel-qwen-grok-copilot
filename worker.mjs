@@ -63,9 +63,10 @@ async function relaySse(prep, secret) {
     method: 'POST',
     headers: { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
-    redirect: 'error',
+    redirect: 'manual', // Workers rejects redirect:'error'; treat 3xx as a failure below
     signal: AbortSignal.timeout(180_000)
   });
+  if (response.status >= 300 && response.status < 400) return json(502, { error: 'Provider redirect is not allowed.' });
   if (!response.ok || !response.body) {
     const data = await response.json().catch(() => ({}));
     return json(response.ok ? 502 : response.status, { error: response.ok ? 'The provider returned an empty stream.' : providerErrorMessage(data, response.status) });
@@ -135,14 +136,15 @@ export async function handleRelayRequest(request, env) {
       const secrets = { qwen: key };
       const prep = prepareChat(body, secrets);
       if (prep.error) return json(prep.status, { error: prep.error });
-      if (url.pathname === '/api/chat-stream') return relaySse(prep, key);
+      if (url.pathname === '/api/chat-stream') return await relaySse(prep, key);
       const response = await fetch(prep.url, {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(prep.payload),
-        redirect: 'error',
+        redirect: 'manual', // Workers rejects redirect:'error'; treat 3xx as a failure below
         signal: AbortSignal.timeout(180_000)
       });
+      if (response.status >= 300 && response.status < 400) return json(502, { error: 'Provider redirect is not allowed.' });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) return json(response.status, { error: providerErrorMessage(data, response.status) });
       const text = data?.choices?.[0]?.message?.content;

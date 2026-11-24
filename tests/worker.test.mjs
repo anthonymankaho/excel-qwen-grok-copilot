@@ -21,7 +21,7 @@ function stubFetch(handler) {
   const original = globalThis.fetch;
   const seen = [];
   globalThis.fetch = async (url, options) => {
-    seen.push({ url: String(url), headers: options?.headers || {} });
+    seen.push({ url: String(url), headers: options?.headers || {}, redirect: options?.redirect });
     return handler(url, options);
   };
   return { seen, restore: () => { globalThis.fetch = original; } };
@@ -57,6 +57,7 @@ test('chat forwards the caller key verbatim and never the owner key', async () =
     assert.match(await res.text(), /Answer\./);
     assert.equal(stub.seen.length, 1);
     assert.equal(stub.seen[0].headers.Authorization, `Bearer ${OWN_KEY}`);
+    assert.equal(stub.seen[0].redirect, 'manual', 'Workers forbids redirect:error');
     assert.equal(JSON.stringify(stub.seen).includes('owner-key'), false);
   } finally { stub.restore(); }
 });
@@ -76,6 +77,21 @@ test('a non-Qwen endpoint is still rejected even with a valid own key', async ()
   const evil = await call('/api/chat', { method: 'POST', body: { provider: 'qwen', apiKey: OWN_KEY, endpoint: 'https://evil.example/compatible-mode/v1/chat/completions', messages: [{ role: 'user', content: 'hi' }] } });
   assert.equal(evil.status, 400);
   assert.match(await evil.text(), /QwenCloud/);
+});
+
+test('provider redirects and stream fetch failures become readable 502s, never unhandled throws', async () => {
+  const redirectStub = stubFetch(() => new Response('', { status: 302, headers: { Location: 'https://evil.example' } }));
+  try {
+    const res = await call('/api/chat', { method: 'POST', body: { provider: 'qwen', apiKey: OWN_KEY, endpoint: ENDPOINT, messages: [{ role: 'user', content: 'hi' }] } });
+    assert.equal(res.status, 502);
+    assert.match(await res.text(), /redirect is not allowed/);
+  } finally { redirectStub.restore(); }
+  const failStub = stubFetch(() => { throw new Error('network down'); });
+  try {
+    const res = await call('/api/chat-stream', { method: 'POST', body: { provider: 'qwen', apiKey: OWN_KEY, endpoint: ENDPOINT, messages: [{ role: 'user', content: 'hi' }] } });
+    assert.equal(res.status, 502);
+    assert.match(await res.text(), /network down/);
+  } finally { failStub.restore(); }
 });
 
 test('per-key rate limit returns 429 after 60 requests in a minute', async () => {
