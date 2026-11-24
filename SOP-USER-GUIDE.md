@@ -30,16 +30,16 @@ The composer shows the current **Agent round out of 10** and what Agent is doing
 ## 2. Asking and controlling context 發問與控制上下文
 
 - **Chat in Excel** sends a multi-cell selection. A single cell sends the used range of the active sheet. Formulas appear as `value [=formula]`.
-- **Plan and Agent** send workbook *metadata* first — workbook name, sheet names, used-range sizes, table names, selection address. Cell values are pulled only when a step asks for a range.
-- **Profile a big sheet.** On a sheet with hundreds of rows the model can request a *profile* instead of raw cells: each column's header, filled/blank counts, distinct count, sample values with counts, and numeric sum/min/max. This is how it chooses pivot fields correctly on a 753-row sheet.
+- **Plan and Agent** send workbook *metadata* first — workbook name, sheet names, used-range sizes, table names, selection address. Agent chooses the relevant sheets and ranges; the user does not set a technical scope.
+- **Profile a big sheet.** Agent can scan up to 2 million requested cells locally in 20,000-cell batches and send a compact profile: covered rows/columns, column counts, sample values, numeric sum/min/max and Excel error-value counts with sample addresses. The profile says **INCOMPLETE** if it reaches the cap. A column sum alone does not prove an accounting reconciliation; inspect the relevant rows and formulas.
 - **Word Chat** sends the selection; an empty selection sends the document body.
 - The **context card** shows the exact text being sent. **↻ Refresh** re-reads it.
-- **Untick Send workbook context** when the open sheet or document must not leave the computer. Attached files are controlled separately.
+- **Share Office file data with AI** is a data-sharing switch, not a sheet-scope setting. Turn it off to prevent workbook/document metadata and Agent-requested ranges from being sent to Qwen/Grok. The add-in will stop a requested read and show **File sharing off**. Attachments are controlled separately.
 - **Attach HTML reports or text files** with **📎 Attach**. Supported types: HTML/HTM, TXT, MD, CSV, TSV, JSON, and XML. Choose up to 3 files, each at most 5 MB. The pane extracts up to 18,000 characters per file and includes at most 26,000 attachment characters in a question.
 - HTML is parsed as text and tables. Scripts, CSS, embedded charts/images, and links are not executed or interpreted. The extracted text and selected workbook context are sent to the chosen Qwen/Grok provider when you send a question. Review the context card before sending. Remove files to omit them from the next question; **New chat** clears the conversation and attachments.
 - **Cloud sources** (desktop/local relay only): press **Connect** for Personal OneDrive; the system browser opens so you can sign in to your own personal Microsoft account and approve read-only access. The app owner configures the public Microsoft OAuth app ID once; colleagues do not enter it in Settings. Search results and snippets stay in the pane. **Review and add to chat** fetches the selected item as text and adds it to the attachment list; it is sent to Qwen/Grok only with your next question. The connector does not edit OneDrive files. No account email address is hardcoded or saved by the add-in. OneDrive text review supports XLSX/XLSM, DOCX, HTML, TXT, MD, CSV, TSV, JSON, and XML. The hosted Excel-on-the-web pane does not support this connector.
 - OAuth access tokens are held in local relay memory, used in HTTPS requests to the selected source, and cleared when the relay stops; reconnect after a restart.
-- **＋ Whole sheet** forces the active Excel sheet for the next question only.
+- **＋ Active sheet** is a Chat shortcut for the active Excel sheet on the next question only; it does not review every sheet in the workbook.
 - A truncation note means the read stopped at 150 rows × 30 columns, or 45,000 characters. Ask about a smaller range.
 - **Enter** sends; **Shift+Enter** adds a line. Quick actions: **Summarize**, **Explain**, **Write formula**, **Revise**.
 - The send button becomes **Stop** while streaming. **New chat** clears history and the audit trail.

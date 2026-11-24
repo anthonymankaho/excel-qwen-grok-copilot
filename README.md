@@ -15,6 +15,12 @@ A local task pane for desktop Excel and Word. You ask in plain language. Qwen or
 | 5 | Test realistic workflows with month-end workbooks and HTML reports, including reconciliation, large inputs and provider interruptions. | 用實際月結工作簿及 HTML 報表測試對帳、大量資料及模型服務中斷。 |
 | 6 | Deploy the production add-in and publish it in Microsoft Marketplace, where users can install it from Office. | 正式部署增益集並上架 Microsoft Marketplace，讓使用者可在 Office 內安裝。 |
 
+### Step 5 progress — 2026-11-24 / 第 5 步進度
+
+The October close trial showed that asking the user to pick technical read ranges is not a usable workbook-review flow. Agent now receives a workbook inventory and chooses the sheets and ranges itself. A large `profileRequest` scans up to 2 million cells locally in 20,000-cell batches, then sends compact column statistics, Excel error-value counts and explicit coverage to the model. A failed range read is reported as unread evidence so Agent can retry. **Share Office file data with AI** controls whether metadata and requested workbook reads can be sent; it is a data-sharing choice, not a sheet-scope setting. Raw range replies still have a 2,000-cell cap, Agent pauses at 10 model rounds, and a complete live Excel retest is pending.
+
+10 月月結試用顯示，不應要求使用者自行設定技術性的讀取範圍。現在 Agent 先取得活頁簿清單，再自行選擇工作表及範圍。大型 `profileRequest` 會在本機以每批 20,000 格掃描最多 200 萬格，向模型回傳精簡欄位統計、Excel 錯誤值數目及明確覆蓋範圍。範圍讀取失敗會標示為未讀取，供 Agent 重試。**Share Office file data with AI** 是資料分享選項，不是工作表範圍設定。原始範圍回覆仍限 2,000 格，Agent 每 10 輪會暫停，而完整 Excel 實機重測尚待進行。
+
 ### Step 6 — Microsoft Marketplace launch 正式上架
 
 **Planned after Step 5 · 計劃於第 5 步完成後進行**
@@ -154,6 +160,8 @@ Copilot-parity work, stage 1 of 3. Two capabilities added, both verified against
 - **`pivot` action — a real native PivotTable.** `worksheet.pivotTables.add(name, source, destination)`, then `rowHierarchies` / `columnHierarchies` / `filterHierarchies` / `dataHierarchies`, `layout.layoutType`, grand totals, and `refresh()`. The destination sheet is created when missing. Undo deletes the pivot, and deletes the sheet too when this action created it. This replaces the earlier "pivots are out of scope" limitation — it was a product choice, not a platform one.
 - **`profileRequest` — column statistics instead of raw cells.** The pane reads a whole range in one batch (bounded at 2,000 rows × 60 columns) and returns each column's header, filled/blank counts, distinct count, sample values with counts, and numeric sum/min/max. This is what lets the model choose pivot fields on a sheet far larger than the context window.
 
+The 2,000-row profile limit above describes the 2026-11-22 version; the 2026-11-24 Step 5 update replaced it with batched scanning. 上述 2,000 列限制屬 2026-11-22 版本；2026-11-24 的第 5 步更新已改為分批掃描。
+
 **Verified end-to-end with the real model:** asked to draft a pivot for `Combined Aging (USD)`, `qwen4-max` replied that it would build a *native PivotTable* and emitted `profileRequest {sheet:"Combined Aging (USD)", range:"A1:Q753"}` — 12,801 cells that the previous 160-cell cap silently dropped. Its prose `plan` string is now retained rather than discarded.
 
 `npm run check` passes. `npm test` → **55 pass / 2 fail**, the same two pre-existing Windows `spawn unzip ENOENT` packaging failures. Three new tests cover profiling output, native pivot creation with fields and aggregation, and rejection of malformed pivot payloads.
@@ -270,10 +278,10 @@ After a code change, restart the relay (`npm run relay-stop`, then `npm run rela
 The context card shows what the next question will send.
 
 - In Chat, a multi-cell Excel selection is sent. A single cell falls back to the used range of the active sheet. Formulas appear as `value [=formula]`. The read stops at the first 150 rows and 30 columns, then at 45,000 characters. A truncation note says so.
-- In Plan and Agent, the next question sends workbook metadata: the workbook name, up to 30 sheet names, each used range’s address and size, table names when Excel exposes them, and the selection address. Tick **＋ Whole sheet** when that question should include the active sheet’s grid.
+- In Plan and Agent, the next question sends workbook metadata: the workbook name, sheet names within an 8,000-character metadata cap (up to 30 with used-range sizes and table names), and the selection address. Agent chooses which sheet to inspect and can profile a large sheet in local batches. **＋ Active sheet** is a Chat shortcut and does not mean the whole workbook.
 - In Word Chat, the selection is sent. An empty selection sends the document body, with the same character cap. Plan and Agent send a short document outline and wait to be asked for the selection.
 - The card refreshes when the selection changes. **↻ Refresh** reads it again.
-- Untick **Send workbook context** to ask without the open workbook/document data. Attached files are controlled separately.
+- Untick **Share Office file data with AI** to prevent open workbook/document data and Agent-requested ranges from being sent. Attached files are controlled separately.
 - Use **📎 Attach** to choose up to three HTML/HTM, TXT, MD, CSV, TSV, JSON, or XML files (5 MB each). HTML tables and readable text are extracted locally; scripts, CSS, chart images, and links are not run or interpreted. The pane shows a preview of extracted text before sending. It sends at most 18,000 characters per file and 26,000 characters from attachments per question. **New chat** clears attachments and conversation history.
 
 Ask in the box and press Enter. Shift+Enter adds a line. **Summarize**, **Explain**, **Write formula**, and **Revise** fill a starting prompt. Replies stream. The send button becomes **Stop** while a reply is running. **New chat** clears the conversation and the audit trail. **Fast** skips deep thinking: Qwen turns thinking off, and Grok uses low reasoning effort.

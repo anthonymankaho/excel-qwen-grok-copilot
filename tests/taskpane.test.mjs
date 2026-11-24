@@ -947,11 +947,95 @@ test('A profile request returns column statistics, not raw cells', async () => {
   await ask(sb, 'build an ageing pivot');
   assert.equal(chatCalls(sb).length, 2);
   const fed = lastContent(sb);
-  assert.match(fed, /\[Excel profile Aging!A1:C4 — 3 data rows sampled, 3 columns\]/);
+  assert.match(fed, /\[Excel profile Aging!A1:C4 — 3 data rows profiled; 4\/4 requested rows, 3\/3 columns; complete/);
   assert.match(fed, /A \| Entity \| filled 3 \| distinct 2/);
   assert.match(fed, /MUK \(2\)/);
   assert.match(fed, /C \| Total USD \| filled 3 \| distinct 3 \| numeric 3 \| sum 350 \| min 50 \| max 200/);
   assert.match(visible(sb.els('conversation')), /Context Aging!A1:C4 \(profile\)/);
+});
+
+test('a large profile scans a later batch and reports Excel error values with full coverage', async () => {
+  const cells = {
+    'Ledger!A1': { value: 'Date' }, 'Ledger!B1': { value: 'Account' }, 'Ledger!C1': { value: 'Net' },
+    'Ledger!C2': { value: 100 }, 'Ledger!C399': { value: '#VALUE!' }
+  };
+  const reply = { turns: [
+    'Read the ledger.\n```json\n{"actions":[],"profileRequest":{"sheet":"Ledger","range":"A1:BH400"},"decision":"CONTINUE"}\n```',
+    'Reviewed.\n```json\n{"actions":[],"decision":"COMPLETE"}\n```'
+  ] };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, cells });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  await ask(sb, 'review the whole ledger');
+  const fed = lastContent(sb);
+  assert.match(fed, /400\/400 requested rows, 60\/60 columns; complete/);
+  assert.match(fed, /C \| Net .*errors 1 \| at C399/);
+  assert.equal(chatCalls(sb).length, 2);
+});
+
+test('a failed later profile batch reports partial coverage', async () => {
+  const reply = { turns: [
+    'Profile it.\n```json\n{"actions":[],"profileRequest":{"sheet":"Ledger","range":"A1:BH400"},"decision":"CONTINUE"}\n```',
+    'The profile is incomplete.\n```json\n{"actions":[],"decision":"COMPLETE"}\n```'
+  ] };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, cells: { 'Ledger!A1': { value: 'Date' } } });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  const run = sb.Excel.run;
+  sb.Excel.run = callback => run(context => {
+    if (/Reading sheet profile/.test(sb.els('agentStatus').textContent)) {
+      const sync = context.sync;
+      let batches = 0;
+      context.sync = async () => {
+        batches += 1;
+        if (batches === 2) throw new Error('The requested resource does not exist.');
+        return sync();
+      };
+    }
+    return callback(context);
+  });
+  await ask(sb, 'review the ledger');
+  assert.match(lastContent(sb), /333\/400 requested rows, 60\/60 columns; INCOMPLETE/);
+  assert.match(lastContent(sb), /Excel error: The requested resource does not exist/);
+});
+
+test('Agent cannot send a requested workbook range while file sharing is off', async () => {
+  const reply = { text: 'Read it.\n```json\n{"actions":[],"contextRequest":{"sheet":"Sheet1","range":"A1:B2"},"decision":"CONTINUE"}\n```' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  sb.els('includeContext').checked = false;
+  let reads = 0;
+  sb.Excel.run = async () => { reads += 1; throw new Error('Workbook read must be blocked'); };
+  await ask(sb, 'review this workbook');
+  assert.equal(reads, 0);
+  assert.equal(chatCalls(sb).length, 1);
+  assert.match(sb.els('agentStatus').textContent, /File sharing off/);
+});
+
+test('Agent reports a failed range read and continues without claiming success', async () => {
+  const reply = { turns: [
+    'Read it.\n```json\n{"actions":[],"contextRequest":{"sheet":"Workbook Review","range":"A40:C69"},"decision":"CONTINUE"}\n```',
+    'The range remains unverified.\n```json\n{"actions":[],"decision":"COMPLETE"}\n```'
+  ] };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  const run = sb.Excel.run;
+  let failed = false;
+  sb.Excel.run = callback => {
+    if (!failed && /Reading workbook/.test(sb.els('agentStatus').textContent)) {
+      failed = true;
+      return Promise.reject(new Error('The requested resource does not exist.'));
+    }
+    return run(callback);
+  };
+  await ask(sb, 'review Workbook Review');
+  assert.equal(failed, true);
+  assert.equal(chatCalls(sb).length, 2);
+  assert.match(lastContent(sb), /Workbook Review!A40:C69 could not be read/);
+  assert.match(lastContent(sb), /Nothing was read/);
+  assert.equal(/Observed: SUCCESS/.test(lastContent(sb)), false);
 });
 
 test('A pivot action creates a real native PivotTable with fields and aggregation', async () => {

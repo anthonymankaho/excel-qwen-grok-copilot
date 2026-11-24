@@ -53,11 +53,11 @@
     <section class="context-card card">
       <div class="context-top"><span id="contextEyebrow" class="eyebrow">WORKBOOK CONTEXT · AUTO</span><button id="refreshSelection" class="text-button">↻ Refresh</button></div>
       <div id="selectionName" class="selection-name">Open Excel to read context</div>
-      <div id="selectionPreview" class="selection-preview">Your selection (or the active sheet) is sent with each question, formulas included.</div>
+      <div id="selectionPreview" class="selection-preview">Agent discovers sheets and reads relevant ranges. Chat uses the selected range or active sheet.</div>
       <div id="attachmentList" class="attachment-list" aria-live="polite"></div>
       <details id="attachmentPreview" class="attachment-preview hidden"><summary>Preview extracted attachment text</summary><pre id="attachmentTextPreview"></pre></details>
       <div id="executionPath" class="hint">Local · the relay stays on this PC</div>
-      <div class="context-actions"><label class="context-toggle"><input type="checkbox" id="includeContext" checked> Send workbook context</label><button id="addUsedRange" class="chip">＋ Whole sheet</button><span id="contextHint">Nothing sent yet</span></div>
+      <div class="context-actions"><label class="context-toggle"><input type="checkbox" id="includeContext" checked> Share Office file data with AI</label><button id="addUsedRange" class="chip">＋ Active sheet</button><span id="contextHint">Nothing sent yet</span></div>
     </section>
 
     <details id="cloudSources" class="card cloud-sources">

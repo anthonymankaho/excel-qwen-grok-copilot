@@ -7,9 +7,11 @@ const ATTACHMENT_MAX_FILES = 3;
 const MAX_CONTEXT_ROWS = 150;
 const MAX_CONTEXT_COLS = 30;
 const READ_MAX_CELLS = 2000; // One read-back batch. Full column width is kept; rows are trimmed to fit.
-const PROFILE_MAX_ROWS = 2000; // Profiling reads whole ranges, so it is bounded separately from READ_MAX_CELLS.
+const PROFILE_MAX_CELLS = 2_000_000; // Scan large sheets locally in batches; never claim more coverage than was read.
+const PROFILE_BATCH_CELLS = 20_000;
 const PROFILE_MAX_COLS = 60;
 const PROFILE_DISTINCT = 12; // Sample values shown per column; enough to identify a grouping field.
+const PROFILE_DISTINCT_CAP = 5000;
 const CELL_CHAR_LIMIT = 32767;
 const FINANCE_EVIDENCE_INSTRUCTION = `\n\n[Finance evidence rules — apply only when the request or supplied data is finance/accounting related. Keep the response in English and Traditional Chinese, with aligned concise sections: Conclusion / 結論; Verified facts / 已核實資料; Calculation checks / 計算檢查; Assumptions and missing information / 假設及缺漏。 Cite each material claim and amount to an exact supplied location: Excel [Sheet!A1] or [Sheet!A1:C8], Word [Selection:L0001-L0005], or report [filename:L0001-L0005]. Excel context identifies column letters and row numbers; attached text identifies line numbers and preserves HTML headings. Never invent a cell, line, period, currency, or value. If only workbook metadata was supplied, request the exact range before claiming a value is verified. Show calculation inputs, formula, result, and rounding/tolerance. Say when a calculation is model-generated and has not been independently recalculated by the add-in. Only call an add-in check PASS when its validation card says PASS; report FAIL, WARNING, or NEEDS_USER as shown. Keep assumptions separate from source facts and state when evidence is insufficient. Do not change the required Agent JSON envelope.`;
 const KEY_STORE = 'eqgc.keys.v1';
@@ -454,7 +456,7 @@ async function addAttachments(files) {
 async function refreshContextCard() {
   renderAttachments();
   try {
-    const ctx = state.officeReady && $('includeContext').checked ? await buildContext(Math.min(CONTEXT_CAP, Math.max(1, CONTEXT_CAP - attachmentContext().length))) : null;
+    const ctx = state.officeReady && $('includeContext').checked ? await contextForMode(operatingMode(), Math.min(CONTEXT_CAP, Math.max(1, CONTEXT_CAP - attachmentContext().length))) : null;
     const fileNames = state.attachments.map(file => file.name);
     const fileNote = fileNames.length ? ` · ${fileNames.length} file(s): ${fileNames.join(', ')}` : '';
     if (!state.officeReady) {
@@ -464,11 +466,13 @@ async function refreshContextCard() {
       return;
     }
     if (!$('includeContext').checked) {
-      $('selectionName').textContent = fileNames.length ? `${fileNames.length} attached file(s) ready` : 'Workbook context off';
-      $('selectionPreview').textContent = fileNames.length ? 'Workbook data is off; selected file text is still included.' : 'Questions are sent without workbook data.';
-      $('contextHint').textContent = `Workbook context off${fileNote}`;
+      const fileKind = state.host === 'Word' ? 'Document' : 'Workbook';
+      $('selectionName').textContent = fileNames.length ? `${fileNames.length} attached file(s) ready` : `${fileKind} sharing off`;
+      $('selectionPreview').textContent = `${fileKind} data will not be sent to AI. Selected attachment text is controlled separately.`;
+      $('contextHint').textContent = `${fileKind} sharing off${fileNote}`;
       return;
     }
+    $('contextEyebrow').textContent = operatingMode() === 'agent' ? 'WORKBOOK ACCESS · AGENT AUTO' : 'WORKBOOK CONTEXT · AUTO';
     if (!ctx) {
       $('selectionName').textContent = fileNames.length ? `${fileNames.length} attached file(s) ready` : 'No workbook data';
       $('selectionPreview').textContent = fileNames.length ? 'Selected file text will be sent with your next question.' : '(The active sheet and selection are empty)';
@@ -477,7 +481,7 @@ async function refreshContextCard() {
     }
     $('selectionName').textContent = ctx.address;
     $('selectionPreview').textContent = ctx.text;
-    $('contextHint').textContent = `Next question sends ${ctx.kind} · ${ctx.chars.toLocaleString()} chars${ctx.truncated ? ' · truncated' : ''} · formulas included${fileNote}`;
+    $('contextHint').textContent = `Next question sends ${ctx.kind} · ${ctx.chars.toLocaleString()} chars${ctx.truncated ? ' · truncated' : ''}${ctx.kind === 'metadata' ? ' · Agent chooses ranges as needed' : ' · formulas included'}${fileNote}`;
   } catch (error) { toast(`Could not read workbook context: ${error.message}`); }
 }
 
@@ -1785,6 +1789,7 @@ function syncAgentControls() {
   if (!controls) return;
   controls.classList.toggle('hidden', !$('agentStatus').textContent || (!activeAgent && operatingMode() !== 'agent'));
   $('continueAgent').classList.toggle('hidden', !agentCheckpoint || state.busy);
+  $('addUsedRange').classList.toggle('hidden', operatingMode() === 'agent' || operatingMode() === 'plan');
 }
 
 function stopGeneration() {
@@ -1816,8 +1821,9 @@ async function readWorkbookMeta() {
     const sheets = book.worksheets;
     sheets.load?.('items/name');
     await context.sync();
-    const lines = [`workbook: ${book.name || '(unsaved)'}`];
-    for (const sheet of (sheets.items || []).slice(0, 30)) {
+    const sheetItems = sheets.items || [];
+    const lines = [`workbook: ${book.name || '(unsaved)'}`, `sheets: ${sheetItems.length}`];
+    for (const sheet of sheetItems.slice(0, 30)) {
       let extra = '';
       try {
         const used = sheet.getUsedRangeOrNullObject?.();
@@ -1836,20 +1842,21 @@ async function readWorkbookMeta() {
       } catch { /* tables are not available here */ }
       lines.push(`sheet: ${sheet.name || 'Sheet'}${extra}`);
     }
+    for (const sheet of sheetItems.slice(30)) lines.push(`sheet: ${sheet.name || 'Sheet'} (size not inventoried; request a profile)`);
     const selected = book.getSelectedRange?.();
     if (selected) {
       selected.load?.(['address', 'rowCount', 'columnCount']);
       await context.sync();
       if (selected.address) lines.push(`selection: ${selected.address} rows ${selected.rowCount || ''} cols ${selected.columnCount || ''}`);
     }
-    const text = lines.join('\n').slice(0, 4000);
-    return { header: '[Excel workbook metadata]', text, address: 'Workbook', kind: 'metadata', truncated: false, chars: text.length };
+    const clipped = trimContext(lines.join('\n'), 8000);
+    return { header: '[Excel workbook metadata]', text: clipped.text, address: 'Workbook', kind: 'metadata', truncated: clipped.truncated, chars: clipped.text.length };
   });
 }
 
 async function contextForMode(mode, limit = CONTEXT_CAP) {
   if (!state.officeReady || !$('includeContext').checked) return null;
-  if (mode === 'chat' || state.forceSheet) return buildContext(limit);
+  if (mode === 'chat' || mode === 'legacy' || state.forceSheet) return buildContext(limit);
   let ctx;
   try { ctx = await readWorkbookMeta(); }
   catch { ctx = await buildContext(limit); }
@@ -1862,26 +1869,16 @@ async function contextForMode(mode, limit = CONTEXT_CAP) {
 
 async function readGrid(sheet, range) {
   const size = rangeSize(range);
-  // Keep the full column width. Trimming to 8 columns hid the bucket and amount
-  // columns of wide sheets, so the model never saw the fields it was asked about.
   const cols = Math.min(size.cols, READ_MAX_CELLS);
   const rows = Math.max(1, Math.min(size.rows, Math.floor(READ_MAX_CELLS / cols)));
   return Excel.run(async context => {
     const worksheet = context.workbook.worksheets.getItem(sheet);
-    const cells = [];
-    for (let r = 0; r < rows; r++) {
-      const row = [];
-      for (let c = 0; c < cols; c++) {
-        const cell = worksheet.getRange(cellAddress(range, r, c));
-        cell.load(['values', 'formulas']);
-        row.push(cell);
-      }
-      cells.push(row);
-    }
+    const cells = worksheet.getRange(clampRange(range, rows, cols));
+    cells.load(['values', 'formulas']);
     await context.sync();
     return {
-      values: cells.map(row => row.map(cell => cell.values?.[0]?.[0] ?? '')),
-      formulas: cells.map(row => row.map(cell => cell.formulas?.[0]?.[0] ?? ''))
+      values: cells.values || [],
+      formulas: cells.formulas || []
     };
   });
 }
@@ -1899,68 +1896,128 @@ function clampRange(addr, maxRows, maxCols) {
   return `${top[1]}${top[2]}:${indexToColumn(columnIndex(top[1]) + cols - 1)}${Number(top[2]) + rows - 1}`;
 }
 
-// Column statistics rather than raw cells, so a sheet far larger than the context
-// window can still be understood well enough to choose pivot fields.
-async function profileSheet(sheetName, requested) {
+// Read large ranges in local batches and return compact statistics to the model.
+async function profileSheet(sheetName, requested, onProgress = () => {}) {
   return Excel.run(async context => {
     const worksheet = context.workbook.worksheets.getItem(sheetName);
-    const asked = normalizeRange(requested || '');
-    let addr = asked ? clampRange(asked, PROFILE_MAX_ROWS, PROFILE_MAX_COLS) : '';
-    let totalRows = 0;
+    let addr = normalizeRange(requested || '');
     if (!addr) {
       const used = worksheet.getUsedRangeOrNullObject();
       used.load(['isNullObject', 'address', 'rowCount', 'columnCount']);
       await context.sync();
       if (used.isNullObject) return null;
-      const full = plainRange(used.address);
-      if (!full) return null;
-      totalRows = rangeSize(full).rows;
-      addr = clampRange(full, PROFILE_MAX_ROWS, PROFILE_MAX_COLS);
+      addr = plainRange(used.address);
+      if (!addr) return null;
     }
-    const target = worksheet.getRange(addr);
-    target.load('values');
-    await context.sync();
-    const values = target.values || [];
-    if (!values.length) return null;
-    const header = (values[0] || []).map(value => String(value ?? '').trim());
-    const body = values.slice(1);
-    const columns = header.map((name, c) => {
-      const seen = new Map();
-      let numeric = 0, sum = 0, min = null, max = null, blank = 0;
-      for (const row of body) {
-        const value = row?.[c];
-        if (value == null || value === '') { blank += 1; continue; }
-        const key = String(value);
-        seen.set(key, (seen.get(key) || 0) + 1);
-        const n = typeof value === 'number' ? value : Number(key);
-        if (Number.isFinite(n) && key.trim() !== '') {
-          numeric += 1; sum += n;
-          min = min == null ? n : Math.min(min, n);
-          max = max == null ? n : Math.max(max, n);
+    const size = rangeSize(addr);
+    const start = addr.split(':')[0].match(/^([A-Z]+)(\d+)$/);
+    const firstColumn = columnIndex(start[1]);
+    const firstRow = Number(start[2]);
+    const cols = Math.min(size.cols, PROFILE_MAX_COLS);
+    const rows = Math.min(size.rows, Math.max(1, Math.floor(PROFILE_MAX_CELLS / cols)));
+    const firstLetter = indexToColumn(firstColumn);
+    const lastLetter = indexToColumn(firstColumn + cols - 1);
+    const batchRows = Math.max(1, Math.floor(PROFILE_BATCH_CELLS / cols));
+    let header = null;
+    let headerSource = '';
+    if (firstRow > 1) {
+      const titleRow = worksheet.getRange(`${firstLetter}1:${lastLetter}1`);
+      titleRow.load('values');
+      await context.sync();
+      const candidate = titleRow.values?.[0] || [];
+      if (candidate.filter(value => typeof value === 'string' && value.trim()).length >= Math.min(2, cols)) {
+        header = candidate.map(value => String(value ?? '').trim());
+        headerSource = 'row 1';
+      }
+    }
+    const stats = Array.from({ length: cols }, () => ({ seen: new Map(), distinctCapped: false, filled: 0, blank: 0, numeric: 0, sum: 0, correction: 0, min: null, max: null, errors: 0, errorCells: [] }));
+    let sampledRows = 0;
+    let scannedRows = 0;
+    let scanError = '';
+    for (let offset = 0; offset < rows; offset += batchRows) {
+      const count = Math.min(batchRows, rows - offset);
+      const top = firstRow + offset;
+      const target = worksheet.getRange(`${firstLetter}${top}:${lastLetter}${top + count - 1}`);
+      target.load('values');
+      try { await context.sync(); }
+      catch (error) {
+        if (!scannedRows) throw error;
+        scanError = String(error?.message || error).slice(0, 300);
+        break;
+      }
+      const values = target.values || [];
+      if (values.length !== count) {
+        if (!scannedRows) throw new Error('Excel returned an incomplete profile batch.');
+        scanError = `Excel returned ${values.length} of ${count} rows in a profile batch`;
+        break;
+      }
+      if (!header) {
+        header = (values[0] || []).map(value => String(value ?? '').trim());
+        headerSource = `row ${top}`;
+      }
+      for (let r = headerSource === `row ${top}` ? 1 : 0; r < values.length; r++) {
+        sampledRows += 1;
+        for (let c = 0; c < cols; c++) {
+          const value = values[r]?.[c];
+          const stat = stats[c];
+          if (value == null || value === '') { stat.blank += 1; continue; }
+          stat.filled += 1;
+          const key = String(value);
+          if (stat.seen.has(key)) stat.seen.set(key, stat.seen.get(key) + 1);
+          else if (stat.seen.size < PROFILE_DISTINCT_CAP) stat.seen.set(key, 1);
+          else stat.distinctCapped = true;
+          if (AgentCore.isExcelError(value)) {
+            stat.errors += 1;
+            if (stat.errorCells.length < PROFILE_DISTINCT) stat.errorCells.push(`${indexToColumn(firstColumn + c)}${top + r}`);
+          }
+          const n = typeof value === 'number' ? value : Number(key);
+          if (Number.isFinite(n) && key.trim() !== '') {
+            stat.numeric += 1;
+            const y = n - stat.correction;
+            const next = stat.sum + y;
+            stat.correction = (next - stat.sum) - y;
+            stat.sum = next;
+            stat.min = stat.min == null ? n : Math.min(stat.min, n);
+            stat.max = stat.max == null ? n : Math.max(stat.max, n);
+          }
         }
       }
-      const ranked = [...seen.entries()].sort((a, b) => b[1] - a[1]);
+      scannedRows += count;
+      onProgress(scannedRows, size.rows);
+    }
+    const columns = stats.map((stat, c) => {
+      const ranked = [...stat.seen.entries()].sort((a, b) => b[1] - a[1]);
       return {
-        letter: indexToColumn(c + 1), header: name || '(blank header)',
-        filled: body.length - blank, blank, distinct: seen.size, numeric,
-        sum: numeric ? Math.round(sum * 100) / 100 : null, min, max,
+        letter: indexToColumn(firstColumn + c), header: header?.[c] || '(blank header)',
+        filled: stat.filled, blank: stat.blank,
+        distinct: stat.distinctCapped ? `at least ${stat.seen.size}` : stat.seen.size,
+        numeric: stat.numeric, sum: stat.numeric ? stat.sum : null,
+        min: stat.min, max: stat.max, errors: stat.errors, errorCells: stat.errorCells,
         samples: ranked.slice(0, PROFILE_DISTINCT).map(([value, count]) => `${value} (${count})`)
       };
     });
-    return { address: addr, columns, sampledRows: body.length, totalRows: totalRows || body.length };
+    return {
+      address: `${firstLetter}${firstRow}:${lastLetter}${firstRow + scannedRows - 1}`,
+      requestedAddress: addr, columns, headerSource, sampledRows,
+      scannedRows, totalRows: size.rows, scannedCols: cols, totalCols: size.cols,
+      complete: !scanError && scannedRows === size.rows && cols === size.cols,
+      scanError
+    };
   });
 }
 
 function formatProfile(sheetName, profile) {
-  const head = `[Excel profile ${sheetName}!${profile.address} — ${profile.sampledRows} data rows sampled${profile.totalRows > profile.sampledRows ? ` of ${profile.totalRows}` : ''}, ${profile.columns.length} columns]`;
+  const coverage = `${profile.scannedRows}/${profile.totalRows} requested rows, ${profile.scannedCols}/${profile.totalCols} columns`;
+  const head = `[Excel profile ${sheetName}!${profile.address} — ${profile.sampledRows} data rows profiled; ${coverage}; ${profile.complete ? 'complete' : 'INCOMPLETE'}; headers from ${profile.headerSource}]`;
   const lines = profile.columns.map(column => {
     const parts = [`${column.letter} | ${column.header}`, `filled ${column.filled}`, `distinct ${column.distinct}`];
     if (column.blank) parts.push(`blank ${column.blank}`);
     if (column.numeric) parts.push(`numeric ${column.numeric}`, `sum ${column.sum}`, `min ${column.min}`, `max ${column.max}`);
+    if (column.errors) parts.push(`errors ${column.errors}`, `at ${column.errorCells.join(', ')}`);
     if (column.samples.length) parts.push(`e.g. ${column.samples.join(', ')}`);
     return parts.join(' | ');
   });
-  return `${head}\n${lines.join('\n')}`;
+  return `${head}\n${lines.join('\n')}${profile.complete ? '' : `\n[INCOMPLETE: ${sheetName}!${profile.requestedAddress} was requested; only the displayed profile range was read.${profile.scanError ? ` Excel error: ${profile.scanError}.` : ''}]`}`;
 }
 
 async function gridsForChecks(checks) {
@@ -2329,6 +2386,12 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
         }
         break;
       }
+      if (!$('includeContext').checked && (envelope.profileRequest || envelope.contextRequest || usableChecks(envelope.plan).length)) {
+        observe('Office file sharing is off. No workbook or document range was read or sent to AI. Turn on Share Office file data with AI to review the open file.');
+        state.audit.push(AgentCore.audit({ kind: 'blocked', reason: 'Office file sharing is off' }));
+        outcome = 'File sharing off · 檔案分享已關閉';
+        break;
+      }
       if (mode === 'plan' || envelope.decision === 'NEEDS_USER' || (mode === 'agent' && !$('directRevise').checked && normalized.actions.length)) {
         renderModePlan(envelope.plan, normalized.actions, normalized.skipped);
         outcome = normalized.actions.length ? 'Review required · 等候審批' : 'Input required · 等候輸入';
@@ -2341,15 +2404,21 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
         let failure = '';
         if (!sheet) failure = `sheet "${envelope.profileRequest.sheet}" is not a usable sheet name`;
         else {
-          try { profile = await profileSheet(sheet, envelope.profileRequest.range); }
+          try {
+            profile = await profileSheet(sheet, envelope.profileRequest.range, (done, total) => {
+              if (interrupted()) { const stopped = new Error('Stopped'); stopped.name = 'AbortError'; throw stopped; }
+              showAgentStatus(run?.round || 1, `Profiling ${done}/${total} rows · 掃描工作表`);
+            });
+          }
           catch (error) { failure = error.message; }
           if (!profile && !failure) failure = 'the sheet or range is empty';
         }
         if (interrupted()) return;
         if (profile) {
-          const text = formatProfile(sheet, profile).slice(0, 8000);
+          const clipped = trimContext(formatProfile(sheet, profile), 8000);
+          const text = clipped.text;
           const address = `${sheet}!${profile.address}`;
-          const source = `${address} · profile statistics`;
+          const source = `${address} · profile statistics${profile.complete ? '' : ' · incomplete'}${clipped.truncated ? ' · output truncated' : ''}`;
           observe(`Requested profile.\n\n${text}`, source);
           evidenceSources.push(source);
           state.audit.push(AgentCore.audit({ kind: 'context', address: `${address} (profile)`, chars: text.length }));
@@ -2366,7 +2435,16 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
         const asked = normalizeRange(envelope.contextRequest.range);
         const range = boundedRange(envelope.contextRequest.range, READ_MAX_CELLS);
         if (sheet && range) {
-          const grid = await readGrid(sheet, range);
+          let grid;
+          try { grid = await readGrid(sheet, range); }
+          catch (error) {
+            if (interrupted()) return;
+            const reason = String(error?.message || error).slice(0, 300);
+            observe(`The requested range ${sheet}!${range} could not be read: ${reason}. Nothing was read. Retry the range once or use a smaller range; report any remaining gap explicitly.`);
+            state.audit.push(AgentCore.audit({ kind: 'blocked', reason: `context read failed: ${reason}` }));
+            guard += 1;
+            continue;
+          }
           if (interrupted()) return;
           const full = annotateRows(grid.values, grid.formulas, `${sheet}!${range}`);
           const text = full.slice(0, 8000);
@@ -2784,7 +2862,7 @@ $('disconnectOneDrive').addEventListener('click', () => disconnectSource('onedri
 $('searchSources').addEventListener('click', searchCloudSource);
 $('sourceQuery').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); searchCloudSource(); } });
 $('newChat').addEventListener('click', newChat);
-$('workMode')?.addEventListener('change', syncAgentControls);
+$('workMode')?.addEventListener('change', () => { state.forceSheet = false; syncAgentControls(); refreshContextCard(); });
 $('continueAgent')?.addEventListener('click', async () => {
   if (state.busy || operatingMode() !== 'agent' || !agentCheckpoint) return;
   await sendAgentPrompt(agentCheckpoint.prompt, agentCheckpoint);
