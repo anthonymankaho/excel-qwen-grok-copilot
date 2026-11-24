@@ -43,7 +43,7 @@ function fire(el, type, ev = {}) {
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, location, sheetNames, usedRanges, healthBuild, blockStorage }) {
+function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, location, sheetNames, usedRanges, healthBuild, blockStorage, allowStorageAccess }) {
   const els = new Map();
   const defaults = { provider: 'qwen', qwenModel: 'qwen4-max', qwenEndpoint: 'https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions' };
   const get = id => { if (!els.has(id)) { const el = makeElement(id); if (defaults[id]) el.value = defaults[id]; if (id === 'includeContext' || id === 'rememberKey') el.checked = true; els.set(id, el); } return els.get(id); };
@@ -300,6 +300,7 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
     Object.defineProperty(wordFont, key, { get() { return current; }, set(v) { current = v; writes.push({ kind: 'wordFont', key, value: v }); } });
   }
   const wordDoc = { selectionText: 'Hello team', bodyText: 'Hello team. More text.', style: 'Normal', font: wordFont };
+  let storageBlocked = !!blockStorage;
   const sandbox = {
     console, JSON, Math, String, Array, Object, Promise, RegExp, Number, TextEncoder, TextDecoder, AbortController,
     btoa: s => Buffer.from(s, 'binary').toString('base64'),
@@ -307,10 +308,10 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
     setTimeout: () => 0, clearTimeout: () => {},
     localStorage: {
       getItem: k => (k in store ? store[k] : null),
-      setItem: (k, v) => { if (blockStorage) throw new Error('SecurityError: third-party storage blocked'); store[k] = String(v); },
+      setItem: (k, v) => { if (storageBlocked) throw new Error('SecurityError: third-party storage blocked'); store[k] = String(v); },
       removeItem: k => { delete store[k]; }
     },
-    document: { getElementById: get, createElement: tag => makeElement(tag), querySelectorAll: () => [], addEventListener() {} },
+    document: { getElementById: get, createElement: tag => makeElement(tag), querySelectorAll: () => [], addEventListener() {}, requestStorageAccess: allowStorageAccess ? async () => { storageBlocked = false; } : undefined },
     Office: { HostType: { Excel: 'Excel', Word: 'Word' }, onReady(cb) { sandbox.officeCb = cb; } },
     Excel: {
       run: fn => fn({
@@ -1195,6 +1196,17 @@ test('When the browser blocks add-in storage, the hosted key stays session-only 
   assert.match(sb.els('toast').textContent, /blocks add-in storage/);
   await ask(sb, 'hello from cloud');
   assert.equal(chatCalls(sb).at(-1).body.apiKey, 'sk-sp-byo-user-key-001');
+});
+
+test('Save key in hosted pane requests storage access and persists when granted', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Noted.', model: 'm' }, location: { hostname: 'excel-qwen-grok.example.workers.dev' }, blockStorage: true, allowStorageAccess: true });
+  await boot(sb);
+  assert.match(sb.els('saveKey').textContent, /Save key · 儲存金鑰/);
+  sb.els('apiKey').value = 'sk-sp-byo-user-key-001';
+  sb.els('rememberKey').checked = true;
+  await fire(sb.els('saveKey'), 'click'); await flush();
+  assert.match(sb.store['eqgc.keys.v1'], /sk-sp-byo-user-key-001/);
+  assert.match(sb.els('toast').textContent, /remembered in this pane only/);
 });
 
 test('every pane element id exists in index.html (removed controls cannot break the pane silently)', () => {

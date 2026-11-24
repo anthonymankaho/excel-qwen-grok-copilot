@@ -13,7 +13,7 @@ At each 🚦 gate, send me the result (screenshot or text) and I'll handle the n
 4. **Capture 3 Office-in-context screenshots** (Microsoft wants the add-in running inside Office, ≥1280×800):
    a. Open https://www.office.com → Excel → blank workbook (Excel on the web).
    b. Insert → 插入 → Add-ins/增益集 → the right pane opens → click **其他增益集 (More add-ins)** at its bottom → dialog tab **我的增益集 (My Add-ins)** → **上傳我的增益集 (Upload My Add-in)** → choose `manifest.cloudflare.xml` from this repo. The hosted pane opens. (zh-TW UI labels verified against owner screenshot 2026-11-24; if the upload button is absent, use the desktop-Excel catalog sideload fallback.)
-   c. Settings → paste YOUR Qwen key → Use key (hosted = BYO). [DONE code]
+   c. Settings → paste YOUR Qwen key → **Save key · 儲存金鑰** (hosted = BYO). If the browser shows a storage-access prompt, accept it so the key persists; otherwise it lasts one session. [DONE code]
    d. Type a question on a small table → wait for answer → resize window to ≥1280×800 → **Win+Shift+S** full-window shot #1 (chat answer).
    e. Ask "Please review the whole file" on a journal-like sheet → shot #2 (review/coverage or validation card).
    f. Open ☰ sidebar → shot #3 (Guide + cards).

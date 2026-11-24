@@ -3046,6 +3046,8 @@ function applyHostedChrome() {
   const hint = $('keyHint');
   if (hint) hint.textContent = 'Hosted pane (BYO): your own Qwen key stays in this browser and is sent per request to the Worker, which forwards it to QwenCloud and never stores it. Remember keeps it in this pane only. 託管 pane（自備金鑰）：您的 Qwen key 只存此瀏覽器、每請求傳送；Worker 轉發 QwenCloud、絕不儲存。';
   if (hint && !storageOk) hint.textContent += ' NOTE: this browser blocks add-in storage, so the key lasts one session only. 注意：此瀏覽器封鎖增益集儲存，key 只效一個 session。';
+  $('saveKey').textContent = 'Save key · 儲存金鑰';
+  $('clearKey').textContent = 'Clear key · 清除';
 }
 
 async function refreshSettings() {
@@ -3124,6 +3126,10 @@ $('saveKey').addEventListener('click', async () => {
     const key = $('apiKey').value.trim();
     if (!key.startsWith('sk-') || key.length < 8) return toast(explainError('Add your Qwen key in Settings. It must be your own sk-… key.'));
     sessionByoKey = key;
+    // Cross-site iframe storage may be blocked; the Storage Access API can unlock it inside this click gesture.
+    if (!storageOk && typeof document.requestStorageAccess === 'function') {
+      try { await document.requestStorageAccess(); storageOk = true; } catch { /* denied: session-only */ }
+    }
     const persisted = rememberKey('qwen', $('rememberKey').checked ? key : '');
     $('apiKey').value = '';
     await refreshSettings();
