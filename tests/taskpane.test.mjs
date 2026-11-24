@@ -1198,6 +1198,20 @@ test('When the browser blocks add-in storage, the hosted key stays session-only 
   assert.equal(chatCalls(sb).at(-1).body.apiKey, 'sk-sp-byo-user-key-001');
 });
 
+test('Hosted routing uses the in-browser key, not the server configured flag', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Noted.', model: 'm' }, location: { hostname: 'excel-qwen-grok.example.workers.dev' } });
+  await boot(sb);
+  sb.els('workMode').value = 'chat';
+  await ask(sb, 'hello before key');
+  assert.match(visible(sb.els('conversation')), /Add your Qwen API key/);
+  assert.equal(sb.els('settings').classList.contains('hidden'), false);
+  sb.els('apiKey').value = 'sk-sp-byo-user-key-001';
+  await fire(sb.els('saveKey'), 'click'); await flush();
+  await ask(sb, 'hello after key');
+  assert.equal(chatCalls(sb).at(-1).body.apiKey, 'sk-sp-byo-user-key-001');
+  assert.match(visible(sb.els('conversation')), /Noted\./);
+});
+
 test('Save key in hosted pane requests storage access and persists when granted', async () => {
   const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Noted.', model: 'm' }, location: { hostname: 'excel-qwen-grok.example.workers.dev' }, blockStorage: true, allowStorageAccess: true });
   await boot(sb);

@@ -2299,6 +2299,8 @@ async function routeForPrompt(text, mode) {
     configured = health.configured || configured;
     relayBuild = typeof health.build === 'string' ? health.build : '';
   } catch { /* the send path reports a down relay */ }
+  // Hosted is BYO: readiness is the in-browser key, not the server's (always empty) configured flag.
+  if (hostedRelay()) configured = { qwen: Boolean(byoKey()) };
   const routed = AgentCore.routeProvider({ selected: 'qwen', ready: configured });
   if (routed.error) return routed;
   return { ...routed, model: $('qwenModel').value.trim(), endpoint: $('qwenEndpoint').value.trim(), relayBuild, buildMismatch: Boolean(relayBuild) && relayBuild !== PANE_BUILD };
@@ -2571,6 +2573,11 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
     toast(explainError(reason));
     state.audit.push(AgentCore.audit({ kind: 'blocked', reason }));
     renderAuditCard();
+    if (hostedRelay() && /Qwen API key|Qwen key/.test(reason)) {
+      $('settings').classList.remove('hidden');
+      refreshSettings();
+      $('apiKey').focus();
+    }
   };
   try {
     await ensureKeys();
