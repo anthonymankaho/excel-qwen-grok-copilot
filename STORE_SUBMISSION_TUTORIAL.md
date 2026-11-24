@@ -13,6 +13,7 @@ At each 🚦 gate, send me the result (screenshot or text) and I'll handle the n
 4. **Capture 3 Office-in-context screenshots** (Microsoft wants the add-in running inside Office, ≥1280×800):
    a. Open https://www.office.com → Excel → blank workbook (Excel on the web).
    b. Insert → 插入 → Add-ins/增益集 → the right pane opens → click **其他增益集 (More add-ins)** at its bottom → dialog tab **我的增益集 (My Add-ins)** → **上傳我的增益集 (Upload My Add-in)** → choose `manifest.cloudflare.xml` from this repo. The hosted pane opens. (zh-TW UI labels verified against owner screenshot 2026-11-24; if the upload button is absent, use the desktop-Excel catalog sideload fallback.)
+   b2. **Excel web caches the uploaded manifest.** After any manifest change (e.g. version bump), remove the old entry under 我的增益集 (… → 移除) and upload the file again; `wrangler deploy` does NOT update the manifest — it only uploads public/ assets and the Worker.
    c. Settings → paste YOUR Qwen key → **Save key · 儲存金鑰** (hosted = BYO). If the browser shows a storage-access prompt, accept it so the key persists; otherwise it lasts one session. [DONE code]
    d. Type a question on a small table → wait for answer → resize window to ≥1280×800 → **Win+Shift+S** full-window shot #1 (chat answer).
    e. Ask "Please review the whole file" on a journal-like sheet → shot #2 (review/coverage or validation card).
@@ -49,7 +50,7 @@ At each 🚦 gate, send me the result (screenshot or text) and I'll handle the n
    貼文案＋披露句（勿改）；三個法律 URL；Free；注明自備 key 與費用。
 
 ## Step 5 — Upload manifest 上傳 manifest [YOU, ~5 min] 🚦
-1. Packages/Upload page → upload `manifest.cloudflare.xml` (v1.4.0.0). [DONE file]
+1. Packages/Upload page → upload `manifest.cloudflare.xml` (v1.5.0.0). [DONE file]
 2. Read the validation report. **If any error: copy the exact message to me** — I fix and you re-upload. Common ones: ProviderName mismatch (Step 1), unreachable icon/URL, version format.
 3. Success shows the add-in Id `7f3a9c2e-…` and hosts Workbook+Document.
    上傳 manifest；驗證錯誤原文傳我修。

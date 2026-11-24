@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0" xsi:type="TaskPaneApp">
   <Id>c42d1d4e-bce1-4efe-9f70-66f64889f4cc</Id>
-  <Version>1.2.0.0</Version>
-  <ProviderName>Local Office AI Assistant</ProviderName>
+  <Version>1.5.0.0</Version>
+  <ProviderName>Anthony Man</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Qwen for Excel and Word"/>
   <Description DefaultValue="Revise an Excel workbook or Word document with Qwen."/>
   <IconUrl DefaultValue="http://127.0.0.1:3000/icon-32.png"/>
   <HighResolutionIconUrl DefaultValue="http://127.0.0.1:3000/icon-64.png"/>
-  <SupportUrl DefaultValue="http://127.0.0.1:3000/"/>
+  <SupportUrl DefaultValue="http://127.0.0.1:3000/legal/support.html"/>
+  <PrivacyUrl DefaultValue="http://127.0.0.1:3000/legal/privacy.html"/>
+  <TermsOfUseUrl DefaultValue="http://127.0.0.1:3000/legal/eula.html"/>
   <AppDomains><AppDomain>http://127.0.0.1:3000</AppDomain></AppDomains>
   <Hosts><Host Name="Workbook"/><Host Name="Document"/></Hosts>
   <DefaultSettings><SourceLocation DefaultValue="http://127.0.0.1:3000/"/></DefaultSettings>

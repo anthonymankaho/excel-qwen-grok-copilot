@@ -3,7 +3,7 @@
 **Full click-by-click teaching version: `STORE_SUBMISSION_TUTORIAL.md` (Steps 0–9, 🚦 gates, pitfalls).** 完整逐步教學見該檔。
 
 Prepared 2026-11-24. Everything below the line is account/outbound work reserved to Anthony.
-Pre-requisites already DONE: BYO Worker live (Version 54752ffa), owner key secret deleted, legal pages live, manifest v1.4.0.0 (ProviderName "Anthony Man"), listing copy + reviewer notes + logos/pane screenshots in repo.
+Pre-requisites already DONE: BYO Worker live (Version 9ad85130), owner key secret deleted, legal pages live, manifest v1.5.0.0 (ProviderName "Anthony Man"), listing copy + reviewer notes + logos/pane screenshots in repo.
 
 ## 1. Enroll 註冊
 1. https://partner.microsoft.com → sign in with the Microsoft account you want as publisher.
@@ -13,7 +13,7 @@ Pre-requisites already DONE: BYO Worker live (Version 54752ffa), owner key secre
 ## 2. Create the offer 建立 offer
 1. New offer → **Office Add-in** (AppSource).
 2. Offer ID e.g. `qwen-for-excel-and-word`; alias/name per STORE_LISTING.md title.
-3. Upload `manifest.cloudflare.xml` (v1.4.0.0). Validation must pass; fix any schema findings before continuing.
+3. Upload `manifest.cloudflare.xml` (v1.5.0.0). Validation must pass; fix any schema findings before continuing.
    上傳 manifest；驗證须過。
 
 ## 3. Properties / listing 屬性與上架頁

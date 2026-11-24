@@ -1,7 +1,7 @@
 # Store listing draft · 上架文案草稿 (Marketplace / AppSource)
 
 Status 狀態: SUBMISSION-READY DRAFT 2026-11-24 — D2 decided: **Anthony Man** (must equal the verified Partner Center publisher name exactly). Legal pages live; Worker BYO live (Version 54752ffa). Nothing submitted yet — submission is Anthony's.
-App Id: `7f3a9c2e-6b14-4e8d-a1f0-9c5d2e8b6a40` · manifest `manifest.cloudflare.xml` v1.4.0.0 · ProviderName `Anthony Man`.
+App Id: `7f3a9c2e-6b14-4e8d-a1f0-9c5d2e8b6a40` · manifest `manifest.cloudflare.xml` v1.5.0.0 · ProviderName `Anthony Man`.
 
 ## Title 標題
 - EN: Qwen for Excel and Word — your own AI copilot for workbooks and documents

@@ -47,7 +47,7 @@ test('store pack: legal pages disclose BYO and the manifest points at them', asy
   const support = await readFile(path.join(projectRoot, 'public', 'legal', 'support.html'), 'utf8');
   assert.match(support, /GitHub Issues/);
   const manifest = await readFile(path.join(projectRoot, 'manifest.cloudflare.xml'), 'utf8');
-  assert.match(manifest, /<Version>1\.4\.0\.0<\/Version>/);
+  assert.match(manifest, /<Version>1\.5\.0\.0<\/Version>/);
   assert.match(manifest, /<SupportUrl DefaultValue="https:\/\/excel-qwen-grok\.anthonym-354\.workers\.dev\/legal\/support\.html"\/>/);
   assert.match(manifest, /<PrivacyUrl DefaultValue="https:\/\/excel-qwen-grok\.anthonym-354\.workers\.dev\/legal\/privacy\.html"\/>/);
   assert.match(manifest, /<TermsOfUseUrl DefaultValue="https:\/\/excel-qwen-grok\.anthonym-354\.workers\.dev\/legal\/eula\.html"\/>/);
