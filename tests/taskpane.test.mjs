@@ -32,7 +32,7 @@ function makeElement(id) {
     remove() { if (this.parent) this.parent.children = this.parent.children.filter(c => c !== this); this.parent = null; },
     setAttribute(k, v) { (this.attributes ||= {})[k] = String(v); },
     getAttribute(k) { return this.attributes?.[k] ?? null; },
-    focus() {}, requestSubmit() { return fire(el, 'submit'); }
+    focus() {}, click() { return fire(el, 'click'); }, requestSubmit() { return fire(el, 'submit'); }
   };
   // Real DOM children is an HTMLCollection without .at(); keep it undefined so regressions fail here.
   Object.defineProperty(el.children, 'at', { value: undefined });
@@ -310,7 +310,7 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
       setItem: (k, v) => { store[k] = String(v); },
       removeItem: k => { delete store[k]; }
     },
-    document: { getElementById: get, createElement: tag => makeElement(tag), querySelectorAll: () => [] },
+    document: { getElementById: get, createElement: tag => makeElement(tag), querySelectorAll: () => [], addEventListener() {} },
     Office: { HostType: { Excel: 'Excel', Word: 'Word' }, onReady(cb) { sandbox.officeCb = cb; } },
     Excel: {
       run: fn => fn({
@@ -361,7 +361,7 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
     fetch: async (url, opts) => {
       const body = opts?.body ? JSON.parse(opts.body) : null;
       calls.push({ url, body, headers: opts?.headers || {} });
-      if (url.endsWith('/api/health')) return { ok: true, status: 200, json: async () => ({ ok: true, build: healthBuild || '2026-11-24.6', configured: { qwen: true } }) };
+      if (url.endsWith('/api/health')) return { ok: true, status: 200, json: async () => ({ ok: true, build: healthBuild || '2026-11-24.9', configured: { qwen: true } }) };
       if (url.endsWith('/api/extract')) return { ok: true, status: 200, json: async () => ({ text: '[Sheet: Data]\nL1: Voucher | Debit\nL2: GJ001 | 100', kind: 'XLSX' }) };
       if (url.endsWith('/api/sessions/delete')) return { ok: true, status: 200, json: async () => ({ ok: true }) };
       if (url.includes('/api/sessions/read')) return { ok: true, status: 200, json: async () => ({ id: 's-old-1', started: '2026-11-24T09:00:00Z', prompt: 'review whole file', messages: [{ role: 'user', content: 'review whole file' }, { role: 'assistant', content: 'Old report.' }], audit: [], checkpoint: { prompt: 'review whole file', progress: [], observation: '' } }) };
@@ -1137,6 +1137,51 @@ test('History delete arms once, then deletes the session on confirm', async () =
   const call = sb.calls.find(c => String(c.url).endsWith('/api/sessions/delete'));
   assert.ok(call);
   assert.equal(call.body.id, 's-old-1');
+});
+
+test('Hosted pane hides local-data cards but keeps the guide', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Ok.', model: 'm' }, location: { hostname: 'excel-qwen-grok.example.workers.dev' } });
+  await boot(sb); await flush();
+  for (const id of ['skillsCard', 'historyCard', 'memoryCard', 'cloudSources']) {
+    assert.equal(sb.els(id).classList.contains('hidden'), true, `${id} hidden on hosted`);
+  }
+  assert.equal(sb.els('guideCard').classList.contains('hidden'), false);
+});
+
+test('Relay-extracted attachments allow 20 MB while text files stay at 5 MB', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Ok.', model: 'm' } });
+  await boot(sb);
+  const picker = sb.els('attachmentPicker');
+  picker.files = [{ name: 'big.xlsx', size: 6 * 1024 * 1024, arrayBuffer: async () => new Uint8Array([80, 75]).buffer }];
+  await fire(picker, 'change', { target: picker }); await flush();
+  assert.equal(sb.calls.filter(c => String(c.url).endsWith('/api/extract')).length, 1);
+  picker.files = [{ name: 'huge.xlsx', size: 21 * 1024 * 1024, arrayBuffer: async () => new Uint8Array([80, 75]).buffer }];
+  await fire(picker, 'change', { target: picker }); await flush();
+  assert.equal(sb.calls.filter(c => String(c.url).endsWith('/api/extract')).length, 1);
+  const inline = sb.els('attachmentList').children.map(c => c.textContent).join(' ');
+  assert.match(inline, /over the 20 MB limit/);
+  assert.match(inline, /→ .*split\/compress/);
+});
+
+test('Copilot-style attach menu opens and attached files render as removable chips', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Ok.', model: 'm' } });
+  await boot(sb);
+  const initial = sb.els('attachMenu').classList.contains('hidden');
+  await fire(sb.els('attachFiles'), 'click');
+  assert.equal(sb.els('attachMenu').classList.contains('hidden'), !initial);
+  if (sb.els('attachMenu').classList.contains('hidden')) await fire(sb.els('attachFiles'), 'click');
+  assert.equal(sb.els('attachMenu').classList.contains('hidden'), false);
+  await fire(sb.els('menuUpload'), 'click');
+  assert.equal(sb.els('attachMenu').classList.contains('hidden'), true);
+  const picker = sb.els('attachmentPicker');
+  picker.files = [{ name: 'book.xlsx', size: 1000, arrayBuffer: async () => new Uint8Array([80, 75]).buffer }];
+  await fire(picker, 'change', { target: picker }); await flush();
+  const chips = sb.els('attachmentChips').children;
+  assert.equal(chips.length, 1);
+  assert.match(chips[0].children.map(c => c.textContent).join(''), /book\.xlsx/);
+  const remove = chips[0].children.find(c => c.textContent === '×');
+  await fire(remove, 'click'); await flush();
+  assert.equal(sb.els('attachmentChips').children.length, 0);
 });
 
 test('every pane element id exists in index.html (removed controls cannot break the pane silently)', () => {

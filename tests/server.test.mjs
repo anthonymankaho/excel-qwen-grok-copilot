@@ -127,6 +127,23 @@ test('sessions and memory persist in per-user app data and round-trip for resume
   }
 });
 
+function minimalPdf(text) {
+  const objs = [];
+  objs[1] = '<< /Type /Catalog /Pages 2 0 R >>';
+  objs[2] = '<< /Type /Pages /Kids [3 0 R] /Count 1 >>';
+  objs[3] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>';
+  const stream = text ? `BT /F1 24 Tf 72 720 Td (${text}) Tj ET` : '';
+  objs[4] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
+  objs[5] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+  for (let i = 1; i <= 5; i++) { offsets[i] = pdf.length; pdf += `${i} 0 obj\n${objs[i]}\nendobj\n`; }
+  const xref = pdf.length;
+  pdf += 'xref\n0 6\n0000000000 65535 f \n' + offsets.slice(1).map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('');
+  pdf += `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  return Buffer.from(pdf, 'binary');
+}
+
 test('extract turns XLSX into sheet text and rejects unsupported types', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eqgc-extract-'));
   process.env.LOCALAPPDATA = dir;
@@ -146,8 +163,21 @@ test('extract turns XLSX into sheet text and rejects unsupported types', async (
     assert.match(ok.body, /GJ001 \| 100/);
     const bad = await rawRequest(port, { method: 'POST', path: '/api/extract', body: { name: 'tool.exe', data: 'AA==' } });
     assert.equal(bad.status, 400);
+    const img = await rawRequest(port, { method: 'POST', path: '/api/extract', body: { name: 'scan.png', data: 'iVBORw0KGgo=' } });
+    assert.equal(img.status, 400);
+    assert.match(img.body, /Qwen key/);
     const empty = await rawRequest(port, { method: 'POST', path: '/api/extract', body: { name: 'book.xlsx', data: '' } });
     assert.equal(empty.status, 400);
+    const { spawnSync } = await import('node:child_process');
+    const hasPoppler = !spawnSync('pdftotext', ['-v'], { windowsHide: true }).error;
+    if (hasPoppler) {
+      const scan = await rawRequest(port, { method: 'POST', path: '/api/extract', body: { name: 'scan.pdf', data: minimalPdf('').toString('base64') } });
+      assert.equal(scan.status, 400);
+      assert.match(scan.body, /no extractable text layer/);
+      const texted = await rawRequest(port, { method: 'POST', path: '/api/extract', body: { name: 'text.pdf', data: minimalPdf('Hello PDF attach test').toString('base64') } });
+      assert.equal(texted.status, 200);
+      assert.match(texted.body, /Hello PDF attach test/);
+    }
   } finally {
     await new Promise(resolve => server.close(resolve));
     delete process.env.LOCALAPPDATA;

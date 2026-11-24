@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 
 // Bump together with public/taskpane.js PANE_BUILD whenever pane and relay must ship as one build.
-export const RELAY_BUILD = '2026-11-24.6';
+export const RELAY_BUILD = '2026-11-24.9';
 const QWEN_PATH = '/compatible-mode/v1/chat/completions';
 const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/;
 const SYSTEM_PROMPT = `You are an assistant inside Microsoft Office, revising the open Excel workbook or Word document the way Copilot and Claude for Excel do. Be accurate and concise. Distinguish values from formulas. The user message may include an [Excel selection ...], [Excel used range ...], [Word selection], or [Word document] block.

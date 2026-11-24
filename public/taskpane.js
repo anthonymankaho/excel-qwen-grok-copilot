@@ -1,9 +1,10 @@
 const API = '';
-const PANE_BUILD = '2026-11-24.6'; // Must match relay-core RELAY_BUILD; a stale relay process is detected and reported.
+const PANE_BUILD = '2026-11-24.9'; // Must match relay-core RELAY_BUILD; a stale relay process is detected and reported.
 const CONTEXT_CAP = 45_000; // Relay rejects messages over 50,000 chars; leave room for the prompt itself.
 const ATTACHMENT_CAP = 26_000;
 const ATTACHMENT_FILE_CAP = 18_000;
 const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
+const ATTACHMENT_RELAY_MAX_BYTES = 20 * 1024 * 1024; // binary types: only extracted text enters context, so the raw file may be larger
 const ATTACHMENT_MAX_FILES = 3;
 const MAX_CONTEXT_ROWS = 150;
 const MAX_CONTEXT_COLS = 30;
@@ -16,7 +17,7 @@ const FINANCE_EVIDENCE_INSTRUCTION = `\n\n[Finance evidence rules — apply only
 const KEY_STORE = 'eqgc.keys.v1';
 const RELAY_STORE = 'eqgc.relay.v1';
 const RISKY_FORMULA = /^=.*\b(?:WEBSERVICE|FILTERXML|RTD|REGISTER\.ID|CALL|DDE|INFO|HYPERLINK)\s*\(/i;
-const state = { messages: [], lastAnswer: '', lastPrompt: '', busy: false, officeReady: false, forceSheet: false, turn: 0, host: '', audit: [], attachments: [], sessionId: null, sessionStarted: null, workbookName: '' };
+const state = { messages: [], lastAnswer: '', lastPrompt: '', busy: false, officeReady: false, forceSheet: false, turn: 0, host: '', audit: [], attachments: [], attachmentErrors: [], sessionId: null, sessionStarted: null, workbookName: '' };
 let activeAgent = null;
 let agentCheckpoint = null;
 const $ = id => document.getElementById(id);
@@ -86,6 +87,7 @@ function setSourceStatus(id, value, connected = false) {
 }
 
 async function refreshCloudSources() {
+  $('cloudSources').classList.toggle('hidden', hostedRelay());
   if (hostedRelay()) return;
   try {
     const status = await api('connectors/status');
@@ -97,7 +99,7 @@ async function refreshCloudSources() {
     if (onedrive.connecting) startSourcePolling();
     else stopSourcePolling();
   } catch (error) {
-    setSourceStatus('onedriveSourceStatus', error.message || 'Local relay unavailable');
+    setSourceStatus('onedriveSourceStatus', explainError(error.message || 'Local relay unavailable'));
   }
 }
 
@@ -118,7 +120,7 @@ function setSidebar(open) {
 }
 
 function persistSession(outcome) {
-  if (!state.sessionId) return;
+  if (!state.sessionId || hostedRelay()) return;
   api('sessions/save', { id: state.sessionId, started: state.sessionStarted, workbook: state.workbookName, prompt: state.lastPrompt, outcome, messages: state.messages, audit: state.audit, checkpoint: agentCheckpoint }).catch(() => {});
 }
 
@@ -149,12 +151,12 @@ async function refreshHistory() {
           await api('sessions/delete', { id: s.id });
           await refreshHistory();
           toast('Session deleted.');
-        } catch (error) { toast(error.message); }
+        } catch (error) { toast(explainError(error.message)); }
       });
       row.append(info, resume, del);
       host.append(row);
     }
-  } catch (error) { $('historyCount').textContent = error.message || 'Local relay unavailable'; }
+  } catch (error) { $('historyCount').textContent = explainError(error.message || 'Local relay unavailable'); }
 }
 
 async function resumeSession(id) {
@@ -177,7 +179,7 @@ async function resumeSession(id) {
     showAgentStatus(0, 'Resumed · 已恢復');
     syncAgentControls();
     toast(`Resumed session ${s.id}`);
-  } catch (error) { toast(error.message); }
+  } catch (error) { toast(explainError(error.message)); }
 }
 
 async function refreshMemory() {
@@ -189,7 +191,7 @@ async function refreshMemory() {
     const text = String(data.text || '');
     $('memoryText').textContent = text || '(empty)';
     $('memoryCount').textContent = `${text.trim() ? text.trim().split('\n').length : 0} notes`;
-  } catch (error) { $('memoryCount').textContent = error.message || 'Local relay unavailable'; }
+  } catch (error) { $('memoryCount').textContent = explainError(error.message || 'Local relay unavailable'); }
 }
 
 async function addMemoryNote() {
@@ -200,7 +202,7 @@ async function addMemoryNote() {
     $('memoryNote').value = '';
     await refreshMemory();
     toast('Memory note saved on this PC.');
-  } catch (error) { toast(error.message); }
+  } catch (error) { toast(explainError(error.message)); }
 }
 
 async function refreshSkills() {
@@ -226,7 +228,7 @@ async function refreshSkills() {
       row.append(info, use);
       host.append(row);
     }
-  } catch (error) { $('skillsCount').textContent = error.message || 'Local relay unavailable'; }
+  } catch (error) { $('skillsCount').textContent = explainError(error.message || 'Local relay unavailable'); }
 }
 
 async function saveCurrentSkill() {
@@ -242,7 +244,7 @@ async function saveCurrentSkill() {
     $('skillId').value = ''; $('skillDescription').value = '';
     await refreshSkills();
     toast(`Skill saved: ${result.path}`);
-  } catch (error) { toast(error.message); }
+  } catch (error) { toast(explainError(error.message)); }
 }
 
 function renderCloudResults(items) {
@@ -263,7 +265,7 @@ function renderCloudResults(items) {
         const result = await api('connectors/read', { source: 'onedrive', item: { id: item.id, name: item.name } });
         addSourceAttachment(result.name || item.name, result.kind || item.kind || 'OneDrive', result.text || '');
         add.textContent = 'Added';
-      } catch (error) { add.disabled = false; add.textContent = 'Review and add to chat'; toast(error.message); }
+      } catch (error) { add.disabled = false; add.textContent = 'Review and add to chat'; toast(explainError(error.message)); }
     });
     row.append(add); host.append(row);
   });
@@ -514,6 +516,19 @@ function renderAttachments() {
     remove.addEventListener('click', () => { state.attachments.splice(index, 1); renderAttachments(); refreshContextCard(); });
     row.append(name, remove); host.append(row);
   });
+  for (const message of state.attachmentErrors || []) {
+    const note = document.createElement('div'); note.className = 'edit-note'; note.textContent = message; host.append(note);
+  }
+  const chips = $('attachmentChips');
+  chips.replaceChildren();
+  state.attachments.forEach((file, index) => {
+    const chip = document.createElement('div'); chip.className = 'attachment-chip';
+    const icon = document.createElement('span'); icon.textContent = ({ PDF: '📄', XLSX: '📊', XLSM: '📊', PNG: '🖼', JPG: '🖼', JPEG: '🖼', WEBP: '🖼' })[file.kind] || '📃';
+    const name = document.createElement('span'); name.textContent = file.name; name.title = file.name;
+    const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×'; remove.setAttribute('aria-label', `Remove ${file.name}`);
+    remove.addEventListener('click', () => { state.attachments.splice(index, 1); renderAttachments(); refreshContextCard(); });
+    chip.append(icon, name, remove); chips.append(chip);
+  });
   const preview = $('attachmentPreview');
   preview.classList.toggle('hidden', !state.attachments.length);
   $('attachmentTextPreview').textContent = attachmentContext().trim();
@@ -563,9 +578,10 @@ function htmlAttachmentText(source) {
 async function readAttachment(file) {
   const ext = file.name.split('.').pop().toLowerCase();
   const local = new Set(['html', 'htm', 'txt', 'md', 'csv', 'tsv', 'json', 'xml']);
-  const relayed = new Set(['pdf', 'xlsx', 'xlsm']);
-  if (!local.has(ext) && !relayed.has(ext)) throw new Error(`${file.name}: supported files are HTML, TXT, MD, CSV, TSV, JSON, XML, PDF, XLSX and XLSM.`);
-  if (file.size > ATTACHMENT_MAX_BYTES) throw new Error(`${file.name}: file is over the 5 MB limit.`);
+  const relayed = new Set(['pdf', 'xlsx', 'xlsm', 'png', 'jpg', 'jpeg', 'webp']);
+  if (!local.has(ext) && !relayed.has(ext)) throw new Error(`${file.name}: supported files are HTML, TXT, MD, CSV, TSV, JSON, XML, PDF, XLSX, XLSM, PNG, JPG and WEBP.`);
+  const cap = relayed.has(ext) ? ATTACHMENT_RELAY_MAX_BYTES : ATTACHMENT_MAX_BYTES;
+  if (file.size > cap) throw new Error(`${file.name}: file is over the ${Math.round(cap / 1024 / 1024)} MB limit.`);
   let extracted;
   if (relayed.has(ext)) {
     // Binary formats are extracted by the local relay (exceljs / pdftotext); the pane never parses them.
@@ -588,9 +604,13 @@ async function addAttachments(files) {
   const incoming = [...files];
   if (state.attachments.length + incoming.length > ATTACHMENT_MAX_FILES) { toast(`Attach up to ${ATTACHMENT_MAX_FILES} files per chat.`); return; }
   const added = [];
+  state.attachmentErrors = [];
   for (const file of incoming) {
     try { added.push(await readAttachment(file)); }
-    catch (error) { toast(error.message); }
+    catch (error) {
+      toast(explainError(error.message));
+      state.attachmentErrors.push(explainError(error.message));
+    }
   }
   state.attachments.push(...added);
   renderAttachments();
@@ -2553,7 +2573,7 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
   };
   const failEarly = reason => {
     outcome = reason;
-    toast(reason);
+    toast(explainError(reason));
     state.audit.push(AgentCore.audit({ kind: 'blocked', reason }));
     renderAuditCard();
   };
@@ -2839,12 +2859,13 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
     }
     if (turn !== state.turn) return;
     if (!state.lastAnswer) $('insertAnswer').disabled = true;
+    const explained = explainError(error.message);
     if (bodyEl) {
-      bodyEl.textContent = error.partial ? `${error.partial}\n\n(${error.message})` : `Error: ${error.message}`;
-      toast(error.message);
+      bodyEl.textContent = error.partial ? `${error.partial}\n\n(${explained})` : `Error: ${explained}`;
+      toast(explained);
     } else {
-      renderMessage('assistant', `Error: ${error.message}`);
-      toast(error.message);
+      renderMessage('assistant', `Error: ${explained}`);
+      toast(explained);
     }
     outcome = 'Error · 錯誤';
     state.audit.push(AgentCore.audit({ kind: 'stopped', reason: String(error.message || error).slice(0, 300) }));
@@ -2926,11 +2947,11 @@ async function sendPrompt(prompt) {
     if (turn !== state.turn) return;
     if (!state.lastAnswer) $('insertAnswer').disabled = true;
     if (bodyEl) {
-      bodyEl.textContent = error.partial ? `${error.partial}\n\n(${error.message})` : `Error: ${error.message}`;
-      toast(error.message);
+      bodyEl.textContent = error.partial ? `${error.partial}\n\n(${explainError(error.message)})` : `Error: ${explainError(error.message)}`;
+      toast(explainError(error.message));
     } else {
-      renderMessage('assistant', `Error: ${error.message}`);
-      toast(error.message);
+      renderMessage('assistant', `Error: ${explainError(error.message)}`);
+      toast(explainError(error.message));
     }
   } finally {
     if (turn === state.turn) { resetComposer(); persistSession('Completed · 已完成'); refreshHistory(); }
@@ -2955,6 +2976,7 @@ function newChat() {
   showAgentStatus(0, '');
   state.messages = [];
   state.attachments = [];
+  state.attachmentErrors = [];
   $('attachmentPicker').value = '';
   renderAttachments();
   refreshContextCard();
@@ -3071,7 +3093,7 @@ async function connectOneDrive() {
     toast('Complete Microsoft sign-in in the browser window.');
     startSourcePolling();
     await refreshCloudSources();
-  } catch (error) { toast(error.message); }
+  } catch (error) { toast(explainError(error.message)); }
 }
 
 async function disconnectSource(source) {
@@ -3080,7 +3102,7 @@ async function disconnectSource(source) {
     $('sourceResults').replaceChildren();
     await refreshCloudSources();
     toast('OneDrive disconnected from this relay.');
-  } catch (error) { toast(error.message); }
+  } catch (error) { toast(explainError(error.message)); }
 }
 
 async function insertAnswer() {
@@ -3130,7 +3152,7 @@ $('saveKey').addEventListener('click', async () => {
     $('apiKey').value = ''; await refreshSettings();
     toast($('rememberKey').checked ? 'Key loaded and remembered on this PC.' : 'Key loaded into local relay memory.');
   }
-  catch (error) { toast(error.message); }
+  catch (error) { toast(explainError(error.message)); }
 });
 $('clearKey').addEventListener('click', async () => {
   if (hostedRelay()) {
@@ -3141,7 +3163,7 @@ $('clearKey').addEventListener('click', async () => {
   }
   const provider = $('provider').value;
   try { await api('clear-key', { provider }); rememberKey(provider, ''); keysReady = null; await refreshSettings(); toast('Key cleared.'); }
-  catch (error) { toast(error.message); }
+  catch (error) { toast(explainError(error.message)); }
 });
 $('connectOneDrive').addEventListener('click', connectOneDrive);
 $('disconnectOneDrive').addEventListener('click', () => disconnectSource('onedrive'));
@@ -3155,7 +3177,41 @@ $('continueAgent')?.addEventListener('click', async () => {
   if (state.busy || operatingMode() !== 'agent' || !agentCheckpoint) return;
   await sendAgentPrompt(agentCheckpoint.prompt, agentCheckpoint);
 });
-$('attachFiles').addEventListener('click', () => $('attachmentPicker').click());
+// Errors must be readable and problem-solving: keep the raw reason, append a bilingual cause + next step.
+const ERROR_GUIDE = [
+  [/relay is running build (\S+) but this pane is (\S+)/, m => `版本不符：relay ${m[1]}、pane ${m[2]}。解法：npm run relay-stop → npm run relay-ensure，再重載 pane。 Build mismatch: restart the relay, then reload the pane.`],
+  [/no extractable text layer/, () => '掃描 PDF（無文字層）。解法：Settings 輸入您的 Qwen key 启用視覺轉錄，或改附文字版 PDF 匯出。 Scanned PDF: add your Qwen key in Settings for vision transcription, or attach a text-based export.'],
+  [/needs your Qwen key|Add your Qwen API key/, () => '未載入 Qwen key。解法：Settings → 貼上您的 key → Use key。 No Qwen key loaded: Settings → paste your key → Use key.'],
+  [/relay unavailable|Failed to fetch|ECONNREFUSED|fetch failed/, () => '本機 relay 未啟動或斷線。解法：npm start（或 npm run relay-ensure）。 Local relay down: run npm start or npm run relay-ensure.'],
+  [/401|Incorrect API key|invalid.*api key/i, () => 'key 被拒（401）。解法：確認 key 正確且未輪換；Settings 重新 Use key。 Key rejected (401): verify the key is current and re-apply it in Settings.'],
+  [/429|quota|rate limit/i, () => '配額或速率限制（429）。解法：稍後再試；Token Plan 餘額只可在 console 查看。 Quota/rate limit (429): retry later; Token Plan balance is console-only.'],
+  [/Model not exist|model_not_found/i, () => '模型名稱不存在。解法：Settings 改用 qwen4-max。 Model not found: switch to qwen4-max in Settings.'],
+  [/over the (\d+) MB limit/, m => `檔案超過 ${m[1]} MB。解法：分頁／壓縮，或改匯出文字版。 File over ${m[1]} MB: split/compress it or export a text version.`],
+  [/no readable text was found/, () => '檔內無可讀文字（純圖片或空檔）。解法：掃描 PDF 會自动試視覺轉錄（需 key）；影像附件需 key。 No readable text (image-only or empty): scanned PDFs auto-try vision (key required).'],
+  [/pdftotext is not available|pdftoppm is not available/, () => '缺 poppler 工具。解法：安裝 poppler（winget install oschwartz10612.Poppler），或改附文字版。 poppler missing: install it via winget or attach a text export.'],
+  [/Session not found/, () => 'session 已刪或不存在。解法：重新整理 History 清單。 Session deleted or missing: refresh the History list.'],
+  [/Office file sharing is off/, () => 'Share 開關關閉。解法：footer 或側欄勾選 Share。 Share gate is off: tick Share in the footer or sidebar.']
+];
+
+function explainError(message) {
+  const text = String(message || 'Unknown error');
+  for (const [pattern, remedy] of ERROR_GUIDE) {
+    const match = text.match(pattern);
+    if (match) return `${text}\n→ ${remedy(match)}`;
+  }
+  return text;
+}
+
+function setAttachMenu(open) {
+  $('attachMenu').classList.toggle('hidden', !open);
+  $('attachFiles').setAttribute('aria-expanded', String(open));
+}
+$('attachFiles').addEventListener('click', () => setAttachMenu($('attachMenu').classList.contains('hidden')));
+$('menuUpload').addEventListener('click', () => { setAttachMenu(false); $('attachmentPicker').click(); });
+$('menuCloud').addEventListener('click', () => { setAttachMenu(false); setSidebar(true); $('cloudSources').open = true; $('sourceQuery').focus(); });
+$('menuSkill').addEventListener('click', () => { setAttachMenu(false); setSidebar(true); $('skillsCard').open = true; $('skillId').focus(); });
+$('menuSource').addEventListener('click', () => { setAttachMenu(false); setSidebar(true); });
+document.addEventListener('click', event => { if (!event.target.closest?.('.attach-menu-wrap')) setAttachMenu(false); });
 $('attachmentPicker').addEventListener('change', async event => {
   await addAttachments(event.target.files || []);
   event.target.value = '';
