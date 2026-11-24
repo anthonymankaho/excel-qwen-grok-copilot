@@ -23,6 +23,9 @@ const $ = id => document.getElementById(id);
 let abortChat = null;
 let sourcePollTimer = null;
 try { localStorage.removeItem('eqgc.cloud-sources.v1'); } catch { /* obsolete connector secrets are not retained */ }
+// Excel web embeds the pane cross-site; tracking prevention can block iframe storage entirely.
+let storageOk = true;
+try { localStorage.setItem('eqgc.probe', '1'); localStorage.removeItem('eqgc.probe'); } catch { storageOk = false; }
 
 function storedKeys() {
   try { return JSON.parse(localStorage.getItem(KEY_STORE) || '{}'); } catch { return {}; }
@@ -30,7 +33,8 @@ function storedKeys() {
 function rememberKey(provider, key) {
   const all = storedKeys();
   if (key) all[provider] = key; else delete all[provider];
-  try { localStorage.setItem(KEY_STORE, JSON.stringify(all)); } catch { /* storage unavailable: session-only */ }
+  try { localStorage.setItem(KEY_STORE, JSON.stringify(all)); return true; }
+  catch { storageOk = false; return false; }
 }
 let keysReady = null;
 let sessionByoKey = '';
@@ -3041,6 +3045,7 @@ function applyHostedChrome() {
   $('localKeyFields')?.classList.remove('hidden');
   const hint = $('keyHint');
   if (hint) hint.textContent = 'Hosted pane (BYO): your own Qwen key stays in this browser and is sent per request to the Worker, which forwards it to QwenCloud and never stores it. Remember keeps it in this pane only. 託管 pane（自備金鑰）：您的 Qwen key 只存此瀏覽器、每請求傳送；Worker 轉發 QwenCloud、絕不儲存。';
+  if (hint && !storageOk) hint.textContent += ' NOTE: this browser blocks add-in storage, so the key lasts one session only. 注意：此瀏覽器封鎖增益集儲存，key 只效一個 session。';
 }
 
 async function refreshSettings() {
@@ -3119,10 +3124,11 @@ $('saveKey').addEventListener('click', async () => {
     const key = $('apiKey').value.trim();
     if (!key.startsWith('sk-') || key.length < 8) return toast(explainError('Add your Qwen key in Settings. It must be your own sk-… key.'));
     sessionByoKey = key;
-    rememberKey('qwen', $('rememberKey').checked ? key : '');
+    const persisted = rememberKey('qwen', $('rememberKey').checked ? key : '');
     $('apiKey').value = '';
     await refreshSettings();
-    toast($('rememberKey').checked ? 'Your key remembered in this pane only.' : 'Your key kept for this session only.');
+    if ($('rememberKey').checked && !persisted) toast(explainError('Browser blocks add-in storage: the key works for this session but cannot be remembered. Re-enter after reload, or allow third-party storage for workers.dev. 瀏覽器封鎖增益集儲存：key 本 session 可用但無法記住；重載後重輸，或允許 workers.dev 第三方儲存。'));
+    else toast($('rememberKey').checked ? 'Your key remembered in this pane only.' : 'Your key kept for this session only.');
     return;
   }
   const apiKey = $('apiKey').value.trim(); if (!apiKey) return toast('Enter an API key first.');

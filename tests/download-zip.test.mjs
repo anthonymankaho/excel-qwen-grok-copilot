@@ -30,6 +30,14 @@ test('a packed file round-trips through the zip', async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
+test('store assets exist as PNGs and stay out of the install zip', async () => {
+  assert.equal(shouldSkip('store-assets/logo-96.png'), true);
+  for (const name of ['logo-96.png', 'logo-64.png', 'logo-32.png', 'screenshot-1-sidebar-guide.png', 'screenshot-2-attach-menu.png', 'screenshot-3-settings-byo.png']) {
+    const bytes = await readFile(path.join(projectRoot, 'store-assets', name));
+    assert.equal(bytes.readUInt32BE(0), 0x89504e47, `${name} is a PNG`);
+  }
+});
+
 test('store pack: legal pages disclose BYO and the manifest points at them', async () => {
   const privacy = await readFile(path.join(projectRoot, 'public', 'legal', 'privacy.html'), 'utf8');
   assert.match(privacy, /never stores or logs it/);

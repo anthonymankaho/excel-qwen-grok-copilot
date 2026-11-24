@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { deflateRawSync, inflateRawSync, crc32 } from 'node:zlib';
 
 const ROOT_NAME = 'Qwen-for-Excel-and-Word';
-const SKIP_DIRS = new Set(['node_modules', '.git', '.wrangler', 'download']);
+const SKIP_DIRS = new Set(['node_modules', '.git', '.wrangler', 'download', 'store-assets']);
 
 export const START_HERE = `Qwen for Excel and Word
 

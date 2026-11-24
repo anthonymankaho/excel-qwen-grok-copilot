@@ -1,7 +1,7 @@
 # Store listing draft · 上架文案草稿 (Marketplace / AppSource)
 
-Status 狀態: DRAFT 2026-11-24 — publisher identity (D2) and final legal review are Anthony's; nothing submitted.
-App Id: `7f3a9c2e-6b14-4e8d-a1f0-9c5d2e8b6a40` · manifest `manifest.cloudflare.xml` v1.4.0.0 · ProviderName draft `Anthony Man` (must equal the verified Partner Center publisher name exactly before submission).
+Status 狀態: SUBMISSION-READY DRAFT 2026-11-24 — D2 decided: **Anthony Man** (must equal the verified Partner Center publisher name exactly). Legal pages live; Worker BYO live (Version 54752ffa). Nothing submitted yet — submission is Anthony's.
+App Id: `7f3a9c2e-6b14-4e8d-a1f0-9c5d2e8b6a40` · manifest `manifest.cloudflare.xml` v1.4.0.0 · ProviderName `Anthony Man`.
 
 ## Title 標題
 - EN: Qwen for Excel and Word — your own AI copilot for workbooks and documents
@@ -28,13 +28,14 @@ Qwen for Excel and Word 為 Excel／Word 帶來 Copilot 式工作窗格。Chat �
 - EULA: https://excel-qwen-grok.anthonym-354.workers.dev/legal/eula.html
 
 ## Assets checklist 資產清單 (per Microsoft publishing checklist)
-- [ ] Store logo per checklist sizes (icons 32/64 exist for the manifest; store logo separate)
-- [ ] ≥1 screenshot 1280×800 or 1920×1080 per claimed client (Excel desktop, Excel web, Word desktop)
+- [x] Store logos generated: `store-assets/logo-96.png` (+64/32); manifest icons 32/64 live (`npm run store-assets` regenerates)
+- [x] Pane UI screenshots 1280×800: `store-assets/screenshot-1-sidebar-guide.png`, `screenshot-2-attach-menu.png`, `screenshot-3-settings-byo.png`
+- [ ] **Office-in-context screenshots (Excel desktop / Excel web / Word) — Anthony captures** (sideload manifest, real workbook); pane-only shots above are supplementary
 - [ ] Optional preview video
-- [ ] Search keywords: Excel, Word, AI, Qwen, copilot, review, reconciliation, finance, BYO key
-- [ ] Pricing: Free; external account/fee disclosed (QwenCloud BYO)
-- [ ] Publisher name verified in Partner Center (D2 — Anthony)
-- [ ] Legal pages reviewed by publisher (drafts in public/legal/)
+- [x] Search keywords: Excel, Word, AI, Qwen, copilot, review, reconciliation, finance, BYO key
+- [x] Pricing: Free; external account/fee disclosed (QwenCloud BYO)
+- [x] Publisher name decided D2 = Anthony Man; **Partner Center verification still Anthony's**
+- [x] Legal pages live at /legal/*.html (publisher final review still recommended)
 
 ## Out of scope for v1 (disclose, do not claim) v1 不_claim_
 OneDrive search, Saved skills, History, Memory, PDF/XLSX/image extraction are LOCAL-relay features; the hosted listing must not claim them. Grok is not offered.

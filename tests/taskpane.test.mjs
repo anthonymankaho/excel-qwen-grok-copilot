@@ -43,7 +43,7 @@ function fire(el, type, ev = {}) {
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, location, sheetNames, usedRanges, healthBuild }) {
+function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, location, sheetNames, usedRanges, healthBuild, blockStorage }) {
   const els = new Map();
   const defaults = { provider: 'qwen', qwenModel: 'qwen4-max', qwenEndpoint: 'https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions' };
   const get = id => { if (!els.has(id)) { const el = makeElement(id); if (defaults[id]) el.value = defaults[id]; if (id === 'includeContext' || id === 'rememberKey') el.checked = true; els.set(id, el); } return els.get(id); };
@@ -307,7 +307,7 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
     setTimeout: () => 0, clearTimeout: () => {},
     localStorage: {
       getItem: k => (k in store ? store[k] : null),
-      setItem: (k, v) => { store[k] = String(v); },
+      setItem: (k, v) => { if (blockStorage) throw new Error('SecurityError: third-party storage blocked'); store[k] = String(v); },
       removeItem: k => { delete store[k]; }
     },
     document: { getElementById: get, createElement: tag => makeElement(tag), querySelectorAll: () => [], addEventListener() {} },
@@ -1184,6 +1184,17 @@ test('Copilot-style attach menu opens and attached files render as removable chi
   const remove = chips[0].children.find(c => c.textContent === '×');
   await fire(remove, 'click'); await flush();
   assert.equal(sb.els('attachmentChips').children.length, 0);
+});
+
+test('When the browser blocks add-in storage, the hosted key stays session-only and says so', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Noted.', model: 'm' }, location: { hostname: 'excel-qwen-grok.example.workers.dev' }, blockStorage: true });
+  await boot(sb);
+  sb.els('apiKey').value = 'sk-sp-byo-user-key-001';
+  sb.els('rememberKey').checked = true;
+  await fire(sb.els('saveKey'), 'click'); await flush();
+  assert.match(sb.els('toast').textContent, /blocks add-in storage/);
+  await ask(sb, 'hello from cloud');
+  assert.equal(chatCalls(sb).at(-1).body.apiKey, 'sk-sp-byo-user-key-001');
 });
 
 test('every pane element id exists in index.html (removed controls cannot break the pane silently)', () => {
