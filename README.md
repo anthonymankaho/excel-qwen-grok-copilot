@@ -4,6 +4,36 @@ A local task pane for desktop Excel and Word. You ask in plain language. Qwen or
 
 ---
 
+## Release roadmap 發行計劃
+
+| Step | English | 繁體中文 |
+|---|---|---|
+| 1 | Review attached HTML and text reports. | 檢視附加的 HTML 與文字報表。 |
+| 2 | Connect personal OneDrive for read-only search and review. | 連接個人版 OneDrive，提供唯讀搜尋及檢視。 |
+| 3 | Trace finance answers to workbook cells or report lines and show the checks performed. | 把財務答案追溯至工作簿儲存格或報表行數，並顯示已執行的檢查。 |
+| 4 | Show Agent progress and let users continue at the round limit. Keep edit approval and Undo controls. | 顯示 Agent 進度及輪數上限續做按鈕，保留修改審批及復原功能。 |
+| 5 | Test realistic workflows with month-end workbooks and HTML reports, including reconciliation, large inputs and provider interruptions. | 用實際月結工作簿及 HTML 報表測試對帳、大量資料及模型服務中斷。 |
+| 6 | Deploy the production add-in and publish it in Microsoft Marketplace, where users can install it from Office. | 正式部署增益集並上架 Microsoft Marketplace，讓使用者可在 Office 內安裝。 |
+
+### Step 6 — Microsoft Marketplace launch 正式上架
+
+**Planned after Step 5 · 計劃於第 5 步完成後進行**
+
+1. **Production service.** Host the pane and relay over HTTPS. Set up individual or organization sign-in in place of the shared test relay token, keep service credentials server-side, and confirm the supported Qwen/Grok access and pricing model. Decide whether OneDrive will ship in the hosted release. [Office Add-ins manifest guidance](https://learn.microsoft.com/en-us/office/dev/add-ins/develop/add-in-manifests)
+
+   **正式服務。** 以 HTTPS 部署工作窗格及 Relay，改用個別使用者或組織登入，服務憑證存於伺服器，並確認 Qwen／Grok 的使用方式與收費模式。決定 OneDrive 是否納入正式託管版本。
+2. **Manifest and installation.** Create and validate the production manifest with the publisher identity, app ID, version, icons and support URL. Test clean installation and core workflows on the Excel and Word clients the listing will support. [Microsoft publishing checklist](https://learn.microsoft.com/en-us/partner-center/marketplace-offers/checklist)
+
+   **正式發行檔與安裝。** 建立及驗證正式 manifest，確認發行者名稱、應用程式 ID、版本、圖示和支援網址。以市集標示支援的 Excel 及 Word 用戶端測試全新安裝及主要功能。
+3. **Listing and review.** Enroll the publisher in the Microsoft 365 and Copilot program in Partner Center. Prepare the listing, screenshots, HTTPS links for support, privacy and the end user license agreement (EULA), and reviewer instructions with sample files and test access. Explain when workbook, document or attachment text is sent to the relay and selected model provider, and disclose any external account or fee required. [Microsoft submission guide](https://learn.microsoft.com/en-us/partner-center/marketplace-offers/add-in-submission-guide)
+
+   **市集頁面與審查。** 在 Partner Center 將發行者註冊至 Microsoft 365 and Copilot 計劃。準備上架文案、截圖、支援／私隱／使用者授權合約（EULA）的 HTTPS 網址，以及審查用的操作步驟、範例檔案和測試權限。說明工作簿、文件或附件文字何時會傳到 Relay 及所選模型服務，並列明所需外部帳戶及費用。
+4. **Publish and verify.** Submit for Microsoft certification, resolve any review findings, then verify the public listing and complete an install from Office with a fresh account. Record the live listing URL and first published version. [Publish an Office Add-in](https://learn.microsoft.com/en-us/office/dev/add-ins/publish/publish-office-add-ins-to-appsource)
+
+   **上架與確認。** 提交 Microsoft 審核及處理審核意見。上架後確認市集頁面已公開，並以新帳戶在 Office 內實際安裝。記錄正式連結及首個發行版本。
+
+---
+
 ## Install 安裝
 
 **Teammates — this is the whole install.** Each person uses their own API key; none is bundled, and the owner's key is never shared.
