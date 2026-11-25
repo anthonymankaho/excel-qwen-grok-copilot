@@ -25,7 +25,7 @@
       <strong>Key 金鑰:</strong> YOUR own Qwen key in both modes (BYO). Local: it stays on this PC. Hosted: Remember saves it in Office storage or this browser when available; each request sends it through the Worker to QwenCloud, and the Worker never stores it. 託管版記住金鑰時優先用 Office 儲存，否則用瀏覽器儲存；Worker 不會保存。<br>
       <strong>Local-only 本機限定:</strong> OneDrive search, Saved skills, History, Memory and PDF/XLSX extraction need the local relay; the hosted pane hides them.<br>
       <strong>Data flow 資料流:</strong> workbook/attachment text goes pane → relay → QwenCloud only when you send; keys never enter the repo, the audit card or logs. Scanned PDFs are transcribed by rendering up to 12 pages and sending those images to QwenCloud with YOUR key (labelled in the attachment). Finance checks are computed by the pane, not the model.<br>
-      <strong>Troubleshooting 疑難排解:</strong> every error now ends with "→" plus a bilingual fix. Common ones: <em>build mismatch</em> → restart relay (npm run relay-stop, npm run relay-ensure) + reload pane; <em>relay down / Failed to fetch</em> → npm start; <em>401</em> → re-apply your key in Settings; <em>429</em> → wait / check Token Plan balance in console; <em>no text layer</em> → add your key for vision transcription or attach a text export; <em>Share off</em> → tick Share.</p>
+      <strong>Troubleshooting 疑難排解:</strong> every error now ends with "→" plus a bilingual fix. Common ones: <em>build mismatch</em> → restart relay (npm run relay-stop, npm run relay-ensure) + reload pane; <em>relay down / Failed to fetch</em> → npm start; <em>401</em> → re-apply your key in Settings; <em>429</em> → check your API quota; do not use Token Plan with this custom add-in; <em>no text layer</em> → add your key for vision transcription or attach a text export; <em>Share off</em> → tick Share.</p>
     </details>
     <section class="context-card card">
       <div class="context-top"><span id="contextEyebrow" class="eyebrow">WORKBOOK CONTEXT · AUTO</span><button id="refreshSelection" class="text-button">↻ Refresh</button></div>
@@ -81,7 +81,7 @@
       <div id="qwenFields">
         <label for="qwenEndpoint">Qwen chat completions URL</label>
         <input id="qwenEndpoint" type="url" value="https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions" autocomplete="url">
-        <p class="hint">QwenCloud International Token Plan endpoint. Use your Token Plan key (sk-sp-…). The relay only calls HTTPS chat-completions URLs on qwencloudapi.com or aliyuncs.com.</p>
+        <p class="hint">Legacy test endpoint. <strong>Do not use an Alibaba Token Plan key with this custom add-in</strong> unless Alibaba confirms permission: its current policy excludes custom application backends. <a href="https://help.aliyun.com/en/model-studio/token-plan-permissions-and-usage" target="_blank" rel="noopener">Provider policy</a>. 此為舊測試 endpoint。除非阿里雲確認允許，<strong>請勿在此自訂增益集使用 Token Plan key</strong>；現行政策不允許自訂應用程式後端使用。</p>
       <label for="qwenModel">Model</label><input id="qwenModel" value="qwen4-max" autocomplete="off">
       </div>
       <div id="relayFields" class="hidden">
@@ -93,7 +93,7 @@
         <input id="apiKey" type="password" placeholder="Enter key once; remembered if ticked below" autocomplete="new-password">
       </div>
       <div class="button-row"><button id="saveKey" class="primary">Use key</button><button id="clearKey" class="secondary">Clear key</button><label class="context-toggle"><input type="checkbox" id="rememberKey" checked> Remember key on this PC</label></div>
-      <p id="keyHint" class="hint">Keys go only to the relay at 127.0.0.1 on this computer. With Remember ticked they persist in this pane’s local browser storage (this PC, this Windows user only); untick for memory-only sessions. Clear key removes both. Use your own key — never someone else’s personal Token Plan key.</p>
+      <p id="keyHint" class="hint">Keys go only to the relay at 127.0.0.1 on this computer. With Remember ticked they persist in this pane’s local browser storage (this PC, this Windows user only); untick for memory-only sessions. Clear key removes both. Each user uses their own key; no key is shared. Do not use a Token Plan key with this custom add-in unless Alibaba confirms permission. 每位使用者輸入自己的 key，不會共用；除非阿里雲確認允許，請勿在此自訂增益集使用 Token Plan key。</p>
       <h2>Finance checks</h2>
       <p class="hint">Leave these blank when the sheet has headers such as Debit and Credit. A check that cannot name its columns asks you. It does not mark pass or fail.</p>
       <label for="debitColumn">Debit column</label><input id="debitColumn" placeholder="Debit or 1" autocomplete="off">

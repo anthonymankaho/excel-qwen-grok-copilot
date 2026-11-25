@@ -63,13 +63,7 @@ Then in Excel: **Home → Add-ins → Qwen for Excel and Word**.
 
 ### First key entry 首次輸入 key
 
-1. In the pane open **Settings**.
-2. The provider is **Qwen**; paste your own key.
-3. Paste **your own** key.
-4. Leave **Remember key on this PC** ticked.
-5. Press **Use key**. The provider dot turns green.
-
-Pair the key with the right URL — see `SOP-USER-GUIDE.md` §7. A `sk-sp-…` Token Plan key uses the Token Plan URL, which is already the default.
+**Provider-terms hold:** the current build defaults to Alibaba Token Plan, which Alibaba does not allow through custom application backends. Do not enter a Token Plan key in this add-in unless Alibaba confirms permission. The supported Model Studio API/credential flow is still being prepared. See `MARKETPLACE_READINESS.md` before entering a key.
 
 ### Optional cloud sources（選用雲端來源）
 
@@ -147,20 +141,10 @@ Use this when the pane must open from an `https://` address. No local install is
 
 1. In Excel: **Home → Add-ins → Upload My Add-in** → choose `manifest.cloudflare.xml`.
 2. The pane address is `https://excel-qwen-grok.anthonym-354.workers.dev`.
-3. Open **Settings**, paste the **relay token**, press **Use key**. The matching `RELAY_TOKEN` secret is already on the Worker. Ask the owner for the token; it is not in the zip.
-4. **No provider key is needed** — `QWEN_API_KEY` is already a Worker secret (set 2026-11-22). The pane is Qwen-only (Grok removed 2026-11-24).
+3. The current hosted test build asks each user to enter their own Qwen key in Settings; it saves the key in Office/browser storage when available and sends it per request through the Worker. Each user's key is separate; no key is shared, and no provider key is embedded in the Worker.
+4. **Marketplace hold:** the current default is an Alibaba Token Plan endpoint. Alibaba's current policy does not allow Token Plan keys through custom application backends, even when the key belongs to that user. Do not use Token Plan credentials with this add-in unless Alibaba confirms the use is permitted. The hosted long-term-key storage also needs an approved design before public release. See `MARKETPLACE_READINESS.md`.
 
-Owner-only, to set or replace a provider secret:
-
-```powershell
-npx wrangler login
-npx wrangler secret put QWEN_API_KEY
-npx wrangler secret list --name excel-qwen-grok
-```
-
-`secret list` prints **names only, never values**. Never put a key in the repository or in chat. After a code change, redeploy with `npm run deploy:cloudflare`. To rotate the relay token, `npx wrangler secret put RELAY_TOKEN` with a passphrase of at least 16 characters, then paste the new value into Settings.
-
-The hosted route rejects a missing token, a wrong token, a call from another site, and a pasted provider key.
+The Worker exposes the pane and forwards user-authorized requests; it has no provider key configured. Do not add a provider key or relay secret to this repository. After a code change, redeploy with `npm run deploy:cloudflare` only when the release is ready and authorized.
 
 ---
 
@@ -222,7 +206,7 @@ If auto-start is installed, `relay-stop` alone is not enough — the minute task
 2. They install Node 20+, close Excel, and run `npm run setup` then `npm start` — or double-click `Setup and Start.bat` if they want auto-start.
 3. They enter **their own** key with Remember ticked.
 4. Each computer has its own relay, its own optional startup item, and its own remembered keys. Nothing is shared between machines.
-5. For the hosted pane instead, they need only the relay token from you.
+5. The hosted pane currently asks each user for their own key, but it is not ready for public use with Token Plan credentials. Follow `MARKETPLACE_READINESS.md` before relying on the hosted service.
 
 ---
 

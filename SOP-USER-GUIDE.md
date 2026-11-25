@@ -132,16 +132,15 @@ Excel's own **Ctrl+Z** still works for edits Excel recorded.
 
 ## 7. Keys, URLs and models 金鑰、URL 與模型
 
-Open **Settings**, pick the provider, paste **your own** key, leave **Remember key on this PC** ticked, press **Use key**.
+Each user is intended to enter and pay for their own key; keys are not shared. **Current provider-terms hold (2026-11-25): do not use an Alibaba Token Plan key with this custom add-in.** Alibaba limits Token Plan to supported interactive coding/agent tools and excludes custom application backends. The previous HTTP 200/`hi` test proved connectivity only, not permission to use that plan with this add-in. The current default URL below is a legacy test configuration, not an approved Marketplace setup.
 
-| Key type | URL |
+The hosted pane also stores the user's long-term key in Office/browser storage. Alibaba's current API-key guidance says not to configure or use long-term keys in browser/mobile client code. The hosted key flow needs to be redesigned or explicitly confirmed by Alibaba before public release. See `MARKETPLACE_READINESS.md`.
+
+| Legacy test key type | URL (reference only; not approved for this custom add-in) |
 |---|---|
-| Qwen **Token Plan** (`sk-sp-…`) | `https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` — the default |
-| Regular QwenCloud | `https://<region>.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` |
+| Qwen **Token Plan** (`sk-sp-…`) | `https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` |
 
-**Change the URL when you change key type.** A Token Plan key does not work on the pay-as-you-go URL, and vice versa — that mismatch is the usual cause of HTTP 401.
-
-**The model must exist on your plan.** A Token Plan key's catalogue is narrower than the public docs: `qwen-max`, `qwen-turbo` and `qwen-plus` are **not** on it and return `400 Model not exist`. Confirmed working: `qwen4-max` (the pane default), `qwen3.8-max`, `qwen3.7-plus`, `qwen3.6-flash`.
+The supported Model Studio API endpoint depends on the user's region and workspace; use the current [Alibaba Model Studio API-key and regional endpoint guidance](https://help.aliyun.com/en/model-studio/get-api-key) only after the add-in's secure credential flow has been approved and implemented.
 
 The relay only accepts HTTPS chat-completions on `qwencloudapi.com` or `aliyuncs.com`, and does not follow redirects.
 
@@ -191,7 +190,7 @@ Provider key 或登入帳戶電郵地址不會寫入 repository 或 audit card�
 |---|---|
 | Provider HTTP 401 | Key and URL do not match — §7 |
 | `Model not exist` (HTTP 400) | That model is not on your plan. Change it in Settings — §7 |
-| Qwen endpoint rejected | Use the Token Plan URL or a regional `…/compatible-mode/v1/chat/completions` |
+| Qwen endpoint rejected | Do not switch to a Token Plan key; use only a supported API/credential flow after the Marketplace update |
 | Invalid conversation message | Over 50,000 characters. Shorten the message, remove an attachment, or untick **Send workbook context** |
 | Context says truncated | Ask about a smaller range, or let the model profile the sheet |
 | `Execute FAILED · …` | Read the reason on the audit line; it now names the actual cause |

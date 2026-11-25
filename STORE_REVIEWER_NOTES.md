@@ -1,9 +1,13 @@
-# Reviewer instructions · 審查員指引 (draft 2026-11-24)
+# Reviewer instructions · 審查員指引 (draft — NOT FOR SUBMISSION)
+
+**HOLD as of 2026-11-25.** Do not paste this draft into Partner Center yet. The hosted flow's Token Plan default and browser-stored long-term key need an approved replacement, and a working reviewer test route has not been provisioned. See `MARKETPLACE_READINESS.md`.
+
+**截至 2026-11-25 暫停使用。** 請勿把此草稿貼到 Partner Center。託管版目前的 Token Plan 預設及瀏覽器保存長期 key 尚未改為經確認可用的設計，亦未準備可供審查員使用的測試途徑。詳見 `MARKETPLACE_READINESS.md`。
 
 ## Install 安裝
-1. Sideload `manifest.cloudflare.xml` (Excel desktop: shared folder catalog; Excel on the web: Insert > Add-ins > Upload My Add-in). Hosted pane URL: https://excel-qwen-grok.anthonym-354.workers.dev/
-2. No publisher credentials are embedded. The reviewer supplies **their own** QwenCloud API key in Settings (BYO). If a temporary test key is preferred, contact the publisher via the Support URL; the publisher issues it manually (never in this repo).
-   審查員自備 Qwen key；如需臨時測試 key 经支援頁聯絡發行者手動發出。
+1. After the release gates are cleared, install the final Partner Center package in Excel and Word using the certification instructions supplied with that submission.
+2. The current app requires a Qwen API key. If the final release still requires a paid external provider account, the publisher must supply working test access in Partner Center's certification notes. Do not instruct reviewers to contact the publisher or expect them to bring a paid API key. Never commit reviewer credentials to this repository.
+   清除發行條件後，依該次 Partner Center 認證指引在 Excel／Word 安裝最終套件。如正式版仍需付費外部服務帳戶，發行者必須在 Partner Center certification notes 提供可用測試權限；不得要求審查員聯絡發行者或自備付費 API key。審查憑證絕不可提交到 repository。
 
 ## Core workflows to verify 核心流程
 1. **Chat read-only**: open any workbook, select a range, ask "Summarize the selection". Expect an answer citing cells; no writes. Then ask "Please review the whole file" — expect sheet inventory + batched profiles + checks and a coverage statement; still no writes.

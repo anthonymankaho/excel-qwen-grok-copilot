@@ -12,14 +12,14 @@ A local task pane for desktop Excel and Word. You ask in plain language. Qwen pl
 | 2 | Connect personal OneDrive for read-only search and review. | 連接個人版 OneDrive，提供唯讀搜尋及檢視。 |
 | 3 | Trace finance answers to workbook cells or report lines and show the checks performed. | 把財務答案追溯至工作簿儲存格或報表行數，並顯示已執行的檢查。 |
 | 4 | Show Agent progress and let users continue at the round limit. Keep edit approval and Undo controls. | 顯示 Agent 進度及輪數上限續做按鈕，保留修改審批及復原功能。 |
-| 5 | Test realistic workflows with month-end workbooks and HTML reports, including reconciliation, large inputs and provider interruptions. | 用實際月結工作簿及 HTML 報表測試對帳、大量資料及模型服務中斷。 |
-| 6 | Deploy the production add-in and publish it in Microsoft Marketplace, where users can install it from Office. | 正式部署增益集並上架 Microsoft Marketplace，讓使用者可在 Office 內安裝。 |
+| 5 | Finish live testing of realistic workflows with month-end workbooks and HTML reports, including reconciliation, large inputs and provider interruptions. | 完成實機測試：用實際月結工作簿及 HTML 報表測試對帳、大量資料及模型服務中斷。 |
+| 6 | Prepare and publish the production add-in in Microsoft Marketplace after the release gates are cleared. | 清除發行前置條件後，準備並上架正式版至 Microsoft Marketplace。 |
 
 ### Step 5 progress — 2026-11-24 / 第 5 步進度
 
-The October close trial showed that asking the user to pick technical read ranges is not a usable workbook-review flow. Agent now receives a workbook inventory and chooses the sheets and ranges itself. A large `profileRequest` scans up to 2 million cells locally in 20,000-cell batches, then sends compact column statistics, Excel error-value counts and explicit coverage to the model. A failed range read is reported as unread evidence so Agent can retry. **Share Office file data with AI** controls whether metadata and requested workbook reads can be sent; it is a data-sharing choice, not a sheet-scope setting. Raw range reads are delivered in 2,000-cell batches that Agent pages through with `contextRequest.offset` until the whole range is read; profiles and finance checks scan the full requested range with no cell or column cap; Agent pauses at 25 model rounds with **Continue Agent · 繼續**. A complete live Excel retest is pending.
+The October close trial showed that asking the user to pick technical read ranges is not a usable workbook-review flow. Agent now receives a workbook inventory and chooses the sheets and ranges itself. A large `profileRequest` scans up to 2 million cells locally in 20,000-cell batches, then sends compact column statistics, Excel error-value counts and explicit coverage to the model. A failed range read is reported as unread evidence so Agent can retry. **Share Office file data with AI** controls whether metadata and requested workbook reads can be sent; it is a data-sharing choice, not a sheet-scope setting. Raw range reads are delivered in 2,000-cell batches that Agent pages through with `contextRequest.offset` until the whole range is read; profiles and finance checks scan the full requested range with no cell or column cap; Agent pauses at 25 model rounds with **Continue Agent · 繼續**. Anthony confirmed Excel web key persistence after reopening and a basic `hi` response; the full month-end workbook review after these changes still needs a live retest. Step 5 remains in progress.
 
-10 月月結試用顯示，不應要求使用者自行設定技術性的讀取範圍。現在 Agent 先取得活頁簿清單，再自行選擇工作表及範圍。大型 `profileRequest` 會在本機以每批 20,000 格掃描最多 200 萬格，向模型回傳精簡欄位統計、Excel 錯誤值數目及明確覆蓋範圍。範圍讀取失敗會標示為未讀取，供 Agent 重試。**Share Office file data with AI** 是資料分享選項，不是工作表範圍設定。原始範圍讀取以每批 2,000 格交付，Agent 用 `contextRequest.offset` 分頁直至讀完整個範圍；摘要與財務檢查掃描完整請求範圍，無儲存格或欄數上限；Agent 每 25 輪暫停，可按 **Continue Agent · 繼續**。完整 Excel 實機重測尚待進行。
+10 月月結試用顯示，不應要求使用者自行設定技術性的讀取範圍。現在 Agent 先取得活頁簿清單，再自行選擇工作表及範圍。大型 `profileRequest` 會在本機以每批 20,000 格掃描最多 200 萬格，向模型回傳精簡欄位統計、Excel 錯誤值數目及明確覆蓋範圍。範圍讀取失敗會標示為未讀取，供 Agent 重試。**Share Office file data with AI** 是資料分享選項，不是工作表範圍設定。原始範圍讀取以每批 2,000 格交付，Agent 用 `contextRequest.offset` 分頁直至讀完整個範圍；摘要與財務檢查掃描完整請求範圍，無儲存格或欄數上限；Agent 每 25 輪暫停，可按 **Continue Agent · 繼續**。Anthony 已確認 Excel 網頁版重開後仍保存 key，並成功收到基本 `hi` 回覆；但上述變更後的完整月結活頁簿覆核仍須實機重測。第 5 步仍進行中。
 
 **2026-11-24 — Qwen in Excel, scope-free.** The Grok section was removed (UI, routing, relay, docs); the pane is Qwen-only. `contextRequest` accepts `offset` so any range is walkable; the 160-cell finance-check cap and the 2M-cell/60-column profile caps are gone — checks and profiles cover the full requested range, and a check that cannot fully read its range returns NEEDS_USER, never PASS. Round ceiling raised 10 → 25. `npm run check` and `npm test` pass 75/75; live Excel retest pending the owner reloading the pane.
 **2026-11-24 (later) — Chat whole-file review (Copilot parity).** Chat runs a read-only tool loop: `scanRequest` (every-sheet formula-error scan), `groupBalance` (per-voucher DR=CR), `crossCheck` (export vs ledger rows + totals), profiles and paged reads; report shape = passed-checks table, exceptions by priority, suggested formulas, next steps with confirmation-gated fixes. Chat never writes. `npm test` 78/78.
@@ -38,9 +38,11 @@ The October close trial showed that asking the user to pick technical read range
 
 ### Step 6 — Microsoft Marketplace launch 正式上架
 
-**Planned after Step 5 · 計劃於第 5 步完成後進行**
+**Preparation started 2026-11-25 · 準備已開始；目前不得提交** — see [`MARKETPLACE_READINESS.md`](MARKETPLACE_READINESS.md) for the release gates. The existing BYO key setup is not ready for public release: the current default is a Token Plan endpoint, and the hosted pane stores long-term keys in Office/browser storage. Publisher identity and full live workbook QA are also outstanding.
 
-1. **Production service.** Host the pane and relay over HTTPS. Set up individual or organization sign-in in place of the shared test relay token, keep service credentials server-side, and confirm the supported Qwen access and pricing model. Decide whether OneDrive will ship in the hosted release. [Office Add-ins manifest guidance](https://learn.microsoft.com/en-us/office/dev/add-ins/develop/add-in-manifests)
+**2026-11-25 開始準備；目前不得提交** — 發行前置條件見 [`MARKETPLACE_READINESS.md`](MARKETPLACE_READINESS.md)。現有自備 key 流程尚未達到公開發行條件：目前預設為 Token Plan endpoint，託管 pane 會在 Office／瀏覽器儲存長期 key；發行者身份及完整活頁簿實機 QA 亦未完成。
+
+1. **Production service.** Keep the HTTPS pane and Worker, then settle a supported Qwen API and credential flow. Every user will use their own key; no key is shared. The current Token Plan route and hosted browser storage must be replaced or explicitly approved by Alibaba before release. If moving credentials server-side, add per-user authentication and usage controls. Decide whether OneDrive will ship in the hosted release. [Office Add-ins manifest guidance](https://learn.microsoft.com/en-us/office/dev/add-ins/develop/add-in-manifests)
 
    **正式服務。** 以 HTTPS 部署工作窗格及 Relay，改用個別使用者或組織登入，服務憑證存於伺服器，並確認 Qwen 的使用方式與收費模式。決定 OneDrive 是否納入正式託管版本。
 2. **Manifest and installation.** Create and validate the production manifest with the publisher identity, app ID, version, icons and support URL. Test clean installation and core workflows on the Excel and Word clients the listing will support. [Microsoft publishing checklist](https://learn.microsoft.com/en-us/partner-center/marketplace-offers/checklist)
@@ -92,7 +94,7 @@ The zip is a build artifact: rebuild it with `npm run package` after any code or
 ### Word, and Excel on the web
 
 - **Word:** close Word, then `npm run start:word`.
-- **Excel on the web:** **Home → Add-ins → Upload My Add-in** → `manifest.cloudflare.xml`, then paste the **relay token** in Settings. No provider key needed — `QWEN_API_KEY` is already a Worker secret.
+- **Excel on the web:** **Home → Add-ins → Upload My Add-in** → `manifest.cloudflare.xml`. The hosted pane currently asks each user for their own Qwen API key and sends it per request through the Worker; no provider key is embedded in the Worker. See [`MARKETPLACE_READINESS.md`](MARKETPLACE_READINESS.md) before using Token Plan credentials or preparing a public release.
 
 ### Read-only cloud source review (desktop local relay only)
 
@@ -134,22 +136,9 @@ OneDrive 文字檢視支援 XLSX/XLSM、DOCX、HTML、TXT、MD、CSV、TSV、JSO
 
 ## Processing status · 處理狀態
 
-**2026-11-22 — Qwen Token Plan key rotated across the estate.**
+**2026-11-25 — Marketplace preparation.** The hosted Worker is live as BYO-key pass-through (`build: 2026-11-24.10`, `byo:true`, `configured.qwen:false` at the last read-only health check). Each user enters their own key; the add-in does not use an owner key. Do not use Token Plan keys with this custom add-in unless Alibaba confirms this use is permitted. The Marketplace release is on hold pending a supported API/credential design, publisher enrollment, and full live workbook testing. See [`MARKETPLACE_READINESS.md`](MARKETPLACE_READINESS.md).
 
-The owner's Qwen Token Plan key was rotated. For this repository's Cloudflare Worker (`excel-qwen-grok`):
-
-- `QWEN_API_KEY` is now **set** as a Worker secret, so the hosted pane can call Qwen with no key entry.
-- `GROK_API_KEY` is no longer used — Grok was removed on 2026-11-24; the pane and relay are Qwen-only.
-- `RELAY_TOKEN` was left untouched.
-- `npx wrangler secret list --name excel-qwen-grok` returns exactly `QWEN_API_KEY` and `RELAY_TOKEN`.
-
-The value was pushed from an environment variable through wrangler's stdin. It was never written into this repository, onto a command line, or into chat.
-
-Verified on the same key, for context: it returns HTTP 200 on both Token Plan endpoints (`token-plan.maas.qwencloudapi.com` and `token-plan.ap-southeast-1.maas.aliyuncs.com`), and its model list does **not** include `qwen-max`, `qwen-turbo`, or `qwen-plus` — those return `400 Model not exist`. `qwen4-max`, this pane's Qwen default, is on the list, so no default-model change was needed.
-
-**Superseded 2026-11-24 已取代:** Grok removed; no `GROK_API_KEY` is needed. The only pending owner actions are the live Excel retest and publishing this change.
-
-處理狀態（2026-11-22）：Qwen Token Plan key 已輪換。此 repo 的 Cloudflare Worker `excel-qwen-grok` 上，`QWEN_API_KEY` **已設定**，hosted pane 可直接使用 Qwen；`RELAY_TOKEN` 未動；`GROK_API_KEY` **仍未設定**，需要一把 xAI key，在此之前 **Auto** 只會用 Qwen。key 由環境變數經 wrangler stdin 推送，從未寫入 repo、指令列或對話。同一把 key 已驗證在兩個 Token Plan endpoint 回 HTTP 200，但其模型清單**不含** `qwen-max`／`qwen-turbo`／`qwen-plus`（回 `400 Model not exist`）；本 pane 的 Qwen 預設模型 `qwen4-max` 在清單內，故無需更改。2026-11-24 起 Grok 已移除，pane 與 relay 僅用 Qwen，`GROK_API_KEY` 不再需要。
+**2026-11-25 — Marketplace 準備。** 託管 Worker 以 BYO-key 方式運作（最後一次唯讀 health check：`build: 2026-11-24.10`、`byo:true`、`configured.qwen:false`）。每位使用者輸入自己的 key；增益集不使用作者 key。除非阿里雲確認允許，請勿在此自訂增益集使用 Token Plan key。Marketplace 發行暫停，待確立合規 API／憑證設計、完成發行者註冊及完整活頁簿實機測試。詳見 [`MARKETPLACE_READINESS.md`](MARKETPLACE_READINESS.md)。
 
 ### 2026-11-22 (later) — local install, and the agent read-back fix
 
@@ -274,7 +263,7 @@ See **[Install](#install-安裝)** at the top for the short version. In full:
 3. From the project folder run `npm run setup` (Node check + `npm install`), then `npm start`. This sideloads the add-in and starts the relay, and installs **no** auto-start.
 4. Prefer one double-click? `Setup and Start.bat` does the same **and** installs the Windows logon auto-start. By hand that is `npm install`, `npm run autostart`, then `npm start`.
 5. Open the pane from **Home > Add-ins**. The add-in name is **Qwen for Excel and Word**.
-6. Open Settings, pick Qwen, paste **your own** API key, leave **Remember key on this PC** ticked, and press **Use key**.
+6. **Provider-terms hold:** every user is intended to enter their own key, but the current add-in defaults to Alibaba Token Plan. Alibaba's current policy excludes Token Plan from custom app backends. Do not use a Token Plan key with this add-in unless Alibaba confirms permission. The supported standard API/credential flow is being prepared; see [`MARKETPLACE_READINESS.md`](MARKETPLACE_READINESS.md).
 
 To open the same add-in in Word, run `npm run start:word` once with Word closed. `npm start` only launches Excel.
 
@@ -315,7 +304,7 @@ History stays in memory. Reloading the pane clears it. Each request sends at mos
 
 **Agent** uses the same metadata. It can ask for one range, run the safe actions for that step, read those cells back, and calculate the checks. The composer shows `Agent 1/25` and the current activity. At the round limit, review the audit card and use **Continue Agent · 繼續** if offered. Use the review card for pending edits. With Direct off, a step that would write waits for **Approve**, then **Apply edits**.
 
-The pane runs on Qwen only. It will not send the workbook until the Qwen key is loaded in the relay.
+The pane runs on Qwen only. The current Token Plan endpoint is under provider-terms review; do not use a Token Plan key with this custom app. The supported standard API/credential flow is pending.
 
 The audit card lists the request, the provider, the context that was sent, the actions, and the check results.
 
@@ -360,10 +349,9 @@ The key is sent only to the relay on this computer. With **Remember key on this 
 
 | Provider | Endpoint | Key | Default model |
 |---|---|---|---|
-| Qwen, Token Plan | `https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` | Token Plan key, `sk-sp-…` | `qwen4-max` |
-| Qwen, pay as you go | `https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` | A regular QwenCloud key | Set in Settings |
+| Legacy Qwen Token Plan test configuration — do not use with this custom add-in | `https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` | Token Plan key, `sk-sp-…` | `qwen4-max` |
 
-A Token Plan key works only on the Token Plan URL. A regular QwenCloud key works only on a regional QwenCloud chat-completions URL. Change the URL in Settings when you change key type. The relay refuses any Qwen URL that is not HTTPS chat-completions on `qwencloudapi.com` or `aliyuncs.com`, and it does not follow redirects.
+A Token Plan key must not be used with this custom application backend unless Alibaba confirms the use is permitted. A normal Model Studio key must use its matching regional/workspace endpoint; the application's standard API and secure credential flow are not yet finalized. See the current [Alibaba API-key guidance](https://help.aliyun.com/en/model-studio/get-api-key) before using a supported release.
 
 A Token Plan key also carries its own model list, which is narrower than the public Qwen docs. `qwen-max`, `qwen-turbo`, and `qwen-plus` are not on it and return `400 Model not exist` — that reads like a broken URL but is not one. Set the model in Settings to one the key actually serves. `qwen4-max`, `qwen3.8-max`, `qwen3.7-plus`, and `qwen3.6-flash` were confirmed working on 2026-11-22.
 
@@ -375,9 +363,9 @@ The same pane is published at `https://excel-qwen-grok.anthonym-354.workers.dev`
 
 The manifest to upload in Excel is `manifest.cloudflare.xml` (version 1.5.0.0). It has its own add-in id, so it can sit beside the local sideload. With Microsoft 365 Premium, add it from **Home → Add-ins → Upload My Add-in**.
 
-In the hosted pane, open Settings, paste **your own Qwen API key**, leave **Remember** ticked, and press **Save key · 儲存金鑰**. The pane confirms whether Office storage or browser storage remembered it. If both are unavailable, the key works for that session only. Each request carries the key through the Worker to QwenCloud; the Worker does not store it. **Clear key** removes saved copies. No key is stored in this repository or workbook.
+The current hosted test build accepts each user's own Qwen API key, stores it in Office/browser storage, and forwards it through the Worker. Keys are not shared. **Do not use Alibaba Token Plan keys with this custom app unless Alibaba confirms permission; the current endpoint is a legacy test configuration.** The hosted long-term-key flow also needs an approved design before public release. See `MARKETPLACE_READINESS.md`.
 
-在託管版 Settings 輸入**您自己的 Qwen API key**，保持 **Remember** 勾選並按 **Save key · 儲存金鑰**。增益集會確認 Office 或瀏覽器儲存是否成功；兩者均不可用則只限本次使用。每次請求經 Worker 傳至 QwenCloud，Worker 不會保存 key。**Clear key** 會清除已保存的副本；repo 及工作簿均不存 key。
+目前託管測試版接受各使用者自己的 Qwen API key，存於 Office／瀏覽器儲存並經 Worker 轉送；key 不會共用。**除非阿里雲確認允許，請勿在此自訂應用程式使用 Alibaba Token Plan key；目前 endpoint 僅屬舊測試設定。** 託管版長期 key 流程亦須在公開發行前改為經確認的設計。詳見 `MARKETPLACE_READINESS.md`。
 
 A later code change is published with `npm run deploy:cloudflare` after `npx wrangler login`. Workbook text sent from the hosted pane goes to Cloudflare and then to Qwen.
 
@@ -387,7 +375,7 @@ Each computer runs its own relay and stores its own keys.
 
 1. Download `download/Qwen-for-Excel-and-Word.zip` and unzip it. Open the folder inside. It has no API keys. `npm run package` rebuilds that zip after a code change.
 2. Install Node.js 20 or newer, close Excel, and double-click `Setup and Start.bat`.
-3. Enter your own key. Do not use someone else’s Token Plan key. The plan and its quota belong to that person.
+3. Each person has their own key; no key is shared. Do not use a Token Plan key with this custom app until Alibaba confirms permission and the add-in is updated.
 
 ## Commands
 
@@ -424,9 +412,9 @@ Before trusting a change in the real app, start the relay, load a key, ask one q
 | The pane looks old | Restart the relay, then close and reopen the pane. On another computer, `git pull` first |
 | Context says truncated | Select a smaller range, or ask about one section at a time |
 | Invalid conversation message | The message plus context is over 50,000 characters. Shorten it, remove an attachment, or untick **Send workbook context** |
-| Provider HTTP 401 | The key and the URL do not match. `sk-sp-…` needs the Token Plan URL. A regular Qwen key needs the pay-as-you-go URL |
+| Provider HTTP 401 | The key and endpoint may not match. Do not switch to a Token Plan key for this custom app; use only the supported API flow after it is released |
 | Model not exist (HTTP 400) | The model is not on that key's list. A Token Plan key does not serve `qwen-max`, `qwen-turbo`, or `qwen-plus`. Pick one it does, in Settings |
-| Qwen endpoint rejected | Use the Token Plan URL, or `https://<region>.maas.qwencloudapi.com/compatible-mode/v1/chat/completions` |
+| Qwen endpoint rejected | The API route is being updated for Marketplace readiness; see `MARKETPLACE_READINESS.md` |
 | A reply takes too long | Press **Stop**. Tick **Fast** for a shorter reply |
 | Stopped. A validation failed | Read the audit card. The difference is still in the sheet. Correct it yourself, then ask again |
 | A change looks wrong | Press **Undo last apply**, or Excel `Ctrl+Z` |

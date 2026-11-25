@@ -1,39 +1,23 @@
-# Partner Center submission steps · 提交步驟 (Anthony executes 由 Anthony 執行)
+# Marketplace readiness steps · Marketplace 上架準備步驟
 
-**Full click-by-click teaching version: `STORE_SUBMISSION_TUTORIAL.md` (Steps 0–9, 🚦 gates, pitfalls).** 完整逐步教學見該檔。
+**Current status: HOLD — preparation only.** No Partner Center offer should be created until the publisher and Qwen API/credential decisions in `MARKETPLACE_READINESS.md` are settled.
 
-Prepared 2026-11-24. Everything below the line is account/outbound work reserved to Anthony.
-Pre-requisites already DONE: BYO Worker live (Version 9ad85130), owner key secret deleted, legal pages live, manifest v1.5.0.0 (ProviderName "Anthony Man"), listing copy + reviewer notes + logos/pane screenshots in repo.
+**目前狀態：暫停提交，僅作準備。** `MARKETPLACE_READINESS.md` 所列發行者身份及 Qwen API／憑證方案未決定前，不應在 Partner Center 建立 offer。
 
-## 1. Enroll 註冊
-1. https://partner.microsoft.com → sign in with the Microsoft account you want as publisher.
-2. Join the **Microsoft 365 and Copilot** program (Office add-ins). Individual enrollment is free; complete identity verification so the published name equals **Anthony Man** exactly (D2).
-   加入 Microsoft 365 and Copilot 計劃；個人免費；完成身份驗證使發布名稱恰為 "Anthony Man"。
+## Gates before submission · 提交前置條件
 
-## 2. Create the offer 建立 offer
-1. New offer → **Office Add-in** (AppSource).
-2. Offer ID e.g. `qwen-for-excel-and-word`; alias/name per STORE_LISTING.md title.
-3. Upload `manifest.cloudflare.xml` (v1.5.0.0). Validation must pass; fix any schema findings before continuing.
-   上傳 manifest；驗證须過。
+1. **Publisher.** Complete Partner Center enrollment in the Microsoft 365 and Copilot program with an eligible, verified publisher. Confirm that the legal publisher and display name are authorized and match manifest `ProviderName`. A new enrollment requires a Microsoft Entra work/school account; personal Microsoft 365 Premium by itself is not the publisher program.
+2. **API terms and security.** Each user is intended to use their own key. Do not use Token Plan keys with this custom app unless Alibaba explicitly approves the use. Replace the current hosted browser storage for long-term keys or obtain written approval for the design. Choose a supported regional Model Studio API and ensure test access is available to Microsoft reviewers.
+3. **Step 5 QA.** Complete live testing of Excel desktop, Excel web, Word, large workbook reviews, finance checks, attachments, Share behavior, approval/Undo, and provider failures on the final hosted build.
+4. **Package and listing.** Update manifest publisher/locales/legal URLs; run Microsoft's Office Add-in manifest/store validation; finalize the listing, disclosures, privacy/EULA/support pages, screenshots, and pricing/additional-purchase details.
+5. **Reviewer access.** Prepare a usable test account/key/access route and place it only in Partner Center certification notes. Reviewers must not be told to contact the publisher or to supply their own paid API key.
+6. **Submit.** Review all offer fields and submit for certification only after every release gate is closed. After approval, publish, then verify a fresh-account install from Office and record the listing URL/version.
 
-## 3. Properties / listing 屬性與上架頁
-1. Category: Productivity; keywords per STORE_LISTING.md.
-2. Paste EN + zh-TW long/short descriptions and the **disclosure lines** (BYO key, Share-gated sending, ≤12 scanned pages).
-3. Pricing: **Free**; note external QwenCloud account/fees.
-4. Privacy URL / Terms URL / Support URL: the three /legal/*.html URLs (already in manifest).
-5. Upload logos (`store-assets/logo-96.png`) and screenshots. Add Office-in-context screenshots you capture; pane-only shots are supplementary.
-   上傳 logo／截圖；補您拍的 Office 內截圖。
+## Current package references · 目前套件文件
 
-## 4. Reviewer notes 審查員
-Paste `STORE_REVIEWER_NOTES.md`. Reviewer supplies their own Qwen key (BYO); if you prefer to issue a temporary test key, do it manually from the console and share via secure channel — never in the repo.
-審查員自備 key；如發臨時測試 key 请手動從 console 發并经安全渠道——不入 repo。
+- Listing draft: `STORE_LISTING.md` — HOLD; not submission-ready.
+- Reviewer instructions: `STORE_REVIEWER_NOTES.md` — HOLD; do not paste into certification yet.
+- Detailed gates and decisions: `MARKETPLACE_READINESS.md`.
+- Production manifest: `manifest.cloudflare.xml` v1.5.0.0 — provisional publisher and locale; legal `.html` URLs currently redirect.
 
-## 5. Submit & certify 提交與審核
-1. Submit for certification. Typical Office add-in review: days to ~2 weeks; rejection rounds are normal — fix findings, resubmit.
-2. On approval: publish; verify the live AppSource listing URL and a **fresh-account install from Office** (Excel desktop + web). Record listing URL + version in README.
-   核准後發布；以全新帳戶從 Office 安裝驗證；README 記錄 listing URL＋version。
-
-## 6. Post-publish 發布後
-- Keep `manifest.cloudflare.xml` Version bumped for every store update; redeploy Worker (`npx wrangler deploy`) for code changes.
-- Optional: delete the now-unused `RELAY_TOKEN` Worker secret (`npx wrangler secret delete RELAY_TOKEN --name excel-qwen-grok`).
-- Monitor: Worker analytics + your QwenCloud console (your own usage only; users pay their own keys).
+Microsoft references: [Partner Center enrollment](https://learn.microsoft.com/partner-center/create-account), [Marketplace submission guide](https://learn.microsoft.com/en-us/partner-center/marketplace-offers/add-in-submission-guide), [publishing checklist](https://learn.microsoft.com/en-us/partner-center/marketplace-offers/checklist).
