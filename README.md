@@ -109,7 +109,7 @@ Each colleague clicks **Connect**, signs in through the system browser, and appr
 Before colleagues connect:
 
 1. Register a Microsoft public client that supports personal Microsoft accounts. Add the **Mobile and desktop applications** platform with `http://localhost` redirect support and delegated `Files.Read` permission. The sign-in uses the system browser and PKCE; no Microsoft client secret is used.
-2. The app owner fills `microsoftClientId` once in the root `cloud-oauth.json` before packaging or sharing the add-in. Restart the local relay after changing this file. This is a public app ID, not a user credential. Colleagues then open **Cloud sources → Connect** and approve their own account in the browser; no per-user Settings entry is needed.
+2. The app owner fills `microsoftClientId` once in the root `cloud-oauth.json` before packaging or sharing the add-in. Restart the local relay after changing this file. This is a public app ID, not a user credential. Colleagues then open **MCP → Connect** and approve their own account in the browser; no per-user Settings entry is needed.
 
 OneDrive text review supports XLSX/XLSM, DOCX, HTML, TXT, MD, CSV, TSV, JSON, and XML. OneDrive uses Microsoft Graph's [personal-account file permissions](https://learn.microsoft.com/en-us/graph/permissions-reference).
 
@@ -122,7 +122,7 @@ OneDrive text review supports XLSX/XLSM, DOCX, HTML, TXT, MD, CSV, TSV, JSON, an
 同事連接前，管理者需：
 
 1. 註冊支援個人 Microsoft 帳戶的 public client，加入 **Mobile and desktop applications** 平台、`http://localhost` redirect 支援及委派 `Files.Read` 權限。登入透過系統瀏覽器及 PKCE 完成；不使用 Microsoft client secret。
-2. 管理者在分享或打包增益集前，只需把 `microsoftClientId` 填入根目錄 `cloud-oauth.json` 一次；更改後要重新啟動本機 Relay。這是公開應用程式 ID，不是使用者憑證。同事之後按 **Cloud sources → Connect**，在瀏覽器登入並授權自己的帳戶；無須逐人設定 Settings。
+2. 管理者在分享或打包增益集前，只需把 `microsoftClientId` 填入根目錄 `cloud-oauth.json` 一次；更改後要重新啟動本機 Relay。這是公開應用程式 ID，不是使用者憑證。同事之後按 **MCP → Connect**，在瀏覽器登入並授權自己的帳戶；無須逐人設定 Settings。
 
 OneDrive 文字檢視支援 XLSX/XLSM、DOCX、HTML、TXT、MD、CSV、TSV、JSON 和 XML。OneDrive 使用 Microsoft Graph 的[個人帳戶檔案權限](https://learn.microsoft.com/en-us/graph/permissions-reference)。
 
@@ -139,6 +139,10 @@ OneDrive 文字檢視支援 XLSX/XLSM、DOCX、HTML、TXT、MD、CSV、TSV、JSO
 ---
 
 ## Processing status · 處理狀態
+
+**2026-11-25 — GitHub skill install.** Local build `2026-11-25.3`. Saved skills installs one `SKILL.md` from a GitHub repository into the OneDrive skills folder. A public repo can omit the token. Remember keeps the token in this browser only. Restart the local relay and reopen the pane. The hosted Worker was not deployed.
+
+**2026-11-25 — 從 GitHub 安裝技能。** 本機版本 `2026-11-25.3`。Saved skills 可把一個 GitHub `SKILL.md` 安裝到 OneDrive 技能資料夾。公開 repo 可以不填 token。Remember 只把 token 留在這個瀏覽器。請重啟本機 relay 並重新開啟窗格。託管 Worker 未部署。
 
 **2026-11-25 — Model and Effort.** Local build `2026-11-25.2`. The composer and Settings offer `auto`, `qwen4-max` (default), `qwen3.8-max`, and `qwen3.8-flash`. Effort is Off, Low, Medium, High (default), or Extra. The relay sends `reasoning_effort` and does not send `thinking_budget`. Fast still turns thinking off for that question. Restart the local relay so the pane and relay builds match. The hosted Worker was not deployed. `npm test` 123/123.
 
@@ -300,7 +304,7 @@ The context card shows what the next question will send.
 - Untick **Share Office file data with AI** to prevent open workbook/document data and Agent-requested ranges from being sent. Attached files are controlled separately.
 - Use **📎 Attach** to choose up to three HTML/HTM, TXT, MD, CSV, TSV, JSON, or XML files (5 MB each). HTML tables and readable text are extracted locally; scripts, CSS, chart images, and links are not run or interpreted. The pane shows a preview of extracted text before sending. It sends at most 18,000 characters per file and 26,000 characters from attachments per question. **New chat** clears attachments and conversation history.
 
-Ask in the box and press Enter. Shift+Enter adds a line. **Summarize**, **Explain**, **Write formula**, and **Revise** fill a starting prompt. Replies stream. The send button becomes **Stop** while a reply is running. **New chat** clears the conversation and the audit trail. **Model** is `auto`, `qwen4-max` (default), `qwen3.8-max`, or `qwen3.8-flash`. `auto` lets Qwen choose. **Effort** is Off, Low, Medium, High (default), or Extra; the relay sends `reasoning_effort` and does not send `thinking_budget`. **Fast** still skips thinking for that question, even when Effort is High or Extra. The choice is remembered on this PC.
+Ask in the box and press Enter. Shift+Enter adds a line. Replies stream. The send button becomes **Stop** while a reply is running. **New chat** clears the conversation and the audit trail. **Model** is `auto`, `qwen4-max` (default), `qwen3.8-max`, or `qwen3.8-flash`. `auto` lets Qwen choose. **Effort** is Off, Low, Medium, High (default), or Extra; the relay sends `reasoning_effort` and does not send `thinking_budget`. **Fast** still skips thinking for that question, even when Effort is High or Extra. The choice is remembered on this PC.
 
 The footer pill sets Chat, Plan, or Agent. The pane runs on Qwen. The dot is green when the Qwen key is loaded, amber when the relay is up and the key is not, and red when the relay is down.
 

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extractDocx, extractPdf, extractWorkbook } from './extract-files.mjs';
-import { RELAY_BUILD, appendMemory, buildSkillContext, deleteSession, listSessions, listSkills, originAllowed, prepareChat, providerDelta, providerErrorMessage, qwenEndpointAllowed, readMemory, readSession, requestHostAllowed, resolveSkillsRoot, saveSkill, takeSseDataLines, writeSession } from './relay-core.mjs';
+import { RELAY_BUILD, appendMemory, buildSkillContext, deleteSession, fetchGitHubSkill, installSkillFile, listSessions, listSkills, originAllowed, parseGitHubSkillSource, prepareChat, providerDelta, providerErrorMessage, qwenEndpointAllowed, readMemory, readSession, requestHostAllowed, resolveSkillsRoot, saveSkill, takeSseDataLines, writeSession } from './relay-core.mjs';
 import { LocalSourceMcp } from './mcp-connectors.mjs';
 
 export { originAllowed, prepareChat, providerDelta, providerErrorMessage, qwenEndpointAllowed, requestHostAllowed, takeSseDataLines } from './relay-core.mjs';
@@ -178,6 +178,22 @@ export function createRelay() {
     if (req.method === 'GET' && url.pathname === '/api/skills/context') {
       const root = resolveSkillsRoot(process.env.SKILLS_ROOT || '');
       return send(res, 200, buildSkillContext(url.searchParams.get('question') || '', root));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/skills/github') {
+      try {
+        const body = await readBody(req);
+        const parsed = parseGitHubSkillSource(body.repo || body.url);
+        if (parsed.error) return send(res, 400, { error: parsed.error });
+        const token = body.token == null || body.token === '' ? '' : body.token;
+        if (token !== '' && (typeof token !== 'string' || token.length > 300 || /\s/.test(token))) return send(res, 400, { error: 'Invalid GitHub token.' });
+        const fetched = await fetchGitHubSkill({ ...parsed, token });
+        if (fetched.error) return send(res, fetched.status || 400, { error: fetched.error });
+        const root = resolveSkillsRoot(process.env.SKILLS_ROOT || '');
+        const result = installSkillFile(root, fetched.text, { replace: body.replace === true });
+        if (result.error) return send(res, 400, { error: result.error });
+        return send(res, 200, { ok: true, id: result.id, path: result.path, replaced: result.replaced });
+      } catch (error) { return send(res, 400, { error: error.message }); }
     }
 
     if (req.method === 'POST' && url.pathname === '/api/skills/save') {

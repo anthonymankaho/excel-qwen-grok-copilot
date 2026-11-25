@@ -16,7 +16,7 @@ Each person uses **their own API key**. The owner's Token Plan key stays on the 
 | Folder | The folder that holds `manifest.xml`. Every command below runs from there |
 | Key | Your own Qwen key. Nothing is bundled |
 
-The pane and the local relay both live at `http://127.0.0.1:3000`. Both manifests are version **1.5.0.0**. The local build to use is **2026-11-25.2**.
+The pane and the local relay both live at `http://127.0.0.1:3000`. Both manifests are version **1.5.0.0**. The local build to use is **2026-11-25.3**.
 
 **This PC’s folder is `C:\Users\User\Desktop\excel-qwen-grok-copilot`.** Run every `npm` command from that folder. PowerShell opened in `C:\WINDOWS\System32` cannot see `package.json` and fails with `ENOENT`. The older folder `C:\Users\User\Desktop\Excel Qwen Grok Copilot` is an archived checkout. Do not install or edit it.
 
@@ -77,7 +77,7 @@ OneDrive search is desktop/local-relay only. Each colleague signs in to their ow
 
 1. Create a Microsoft public app registration that supports personal Microsoft accounts. Add the **Mobile and desktop applications** platform with `http://localhost` redirect support and delegated `Files.Read`. Sign-in uses the system browser and PKCE; no Microsoft client secret is used.
 2. Fill `microsoftClientId` once in the root `cloud-oauth.json`, then include the file in the shared package. Restart the local relay after changing it. This is a public application ID, not a user credential. Do not put account emails, access tokens, or client secrets in the file.
-3. Each colleague opens **Cloud sources → Connect** and signs in through the system browser. Search results are read-only. A selected result reaches Qwen only after **Review and add to chat** and sending a question.
+3. Each colleague opens **MCP → Connect** and signs in through the system browser. Search results are read-only. A selected result reaches Qwen only after **Review and add to chat** and sending a question.
 
 Each person uses their own account and grants consent separately; the pane no longer asks colleagues to enter OAuth app settings. These connectors are unavailable in the hosted Excel-on-the-web pane. See `README.md` and `SOP-USER-GUIDE.md` for details.
 
@@ -87,7 +87,7 @@ OneDrive 搜尋只支援桌面版／本機 Relay。每位同事登入自己的�
 
 1. **Microsoft：** 建立支援個人 Microsoft 帳戶的 public app registration，加入 **Mobile and desktop applications** 平台、`http://localhost` redirect 支援和委派 `Files.Read` 權限。登入使用系統瀏覽器和 PKCE；不使用 Microsoft client secret。
 2. 在根目錄 `cloud-oauth.json` 一次填入 `microsoftClientId`，並在分享套件時附上此檔案；更改後要重新啟動本機 Relay。這是公開應用程式 ID，不是使用者憑證。不可在檔案放入帳戶電郵、存取權杖或 client secret。
-3. 每位同事開啟 **Cloud sources → Connect**，在系統瀏覽器登入。搜尋結果只讀；只有按 **Review and add to chat** 並傳送問題後，所選結果才會傳給 Qwen。
+3. 每位同事開啟 **MCP → Connect**，在系統瀏覽器登入。搜尋結果只讀；只有按 **Review and add to chat** 並傳送問題後，所選結果才會傳給 Qwen。
 
 每位使用者各自登入及授權；窗格不再要求同事輸入 OAuth 應用程式設定。Excel 網頁版不支援這些連接器。詳情見 `README.md` 和 `SOP-USER-GUIDE.md`。
 
@@ -221,6 +221,10 @@ If auto-start is installed, `relay-stop` alone is not enough — the minute task
 ---
 
 ## 12. Processing status · 處理狀態
+
+**2026-11-25 — GitHub skill install.** Local build `2026-11-25.3`. Saved skills can install one `SKILL.md` from `https://github.com/owner/repo`. The token stays in this browser when Remember is ticked. Restart the local relay and reopen the pane. Hosted Worker was not redeployed.
+
+**2026-11-25 — 從 GitHub 安裝技能。** 本機版本 `2026-11-25.3`。Saved skills 可從 `https://github.com/owner/repo` 安裝一個 `SKILL.md`。勾選 Remember 時，token 只留在這個瀏覽器。請重啟本機 relay 並重新開啟窗格。託管 Worker 未重新部署。
 
 **2026-11-25 — Folder, build, and restart.** This PC uses `C:\Users\User\Desktop\excel-qwen-grok-copilot` only. Local build `2026-11-25.2`. Both manifests are `1.5.0.0`. After a code change, run `npm run relay-stop` then `npm run relay-ensure` from that folder and reopen the pane. The hosted Worker was not redeployed. `npm test` 123/123.
 

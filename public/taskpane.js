@@ -1,5 +1,5 @@
 const API = '';
-const PANE_BUILD = '2026-11-25.2'; // Must match relay-core RELAY_BUILD; a stale relay process is detected and reported.
+const PANE_BUILD = '2026-11-25.3'; // Must match relay-core RELAY_BUILD; a stale relay process is detected and reported.
 const CHAT_MODELS = ['auto', 'qwen4-max', 'qwen3.8-max', 'qwen3.8-flash'];
 const CHAT_EFFORTS = ['off', 'low', 'medium', 'high', 'xhigh'];
 const CONTEXT_CAP = 45_000; // Relay rejects messages over 50,000 chars; leave room for the prompt itself.
@@ -287,6 +287,29 @@ async function refreshSkills() {
       host.append(row);
     }
   } catch (error) { $('skillsCount').textContent = explainError(error.message || 'Local relay unavailable'); }
+}
+
+function restoreGitHubToken() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('eqgc.github.v1') || '{}');
+    if (typeof saved.token === 'string' && saved.token) {
+      $('githubToken').value = saved.token;
+      $('githubRemember').checked = true;
+    }
+  } catch { /* storage optional */ }
+}
+
+async function installGitHubSkill() {
+  const repo = $('githubRepo').value.trim();
+  const token = $('githubToken').value.trim();
+  if (!repo) return toast('Enter owner/repo or a GitHub link to SKILL.md.');
+  try {
+    const result = await api('skills/github', { repo, token, replace: $('githubReplace').checked });
+    if ($('githubRemember').checked) localStorage.setItem('eqgc.github.v1', JSON.stringify({ token }));
+    else localStorage.removeItem('eqgc.github.v1');
+    await refreshSkills();
+    toast(result.replaced ? `Skill updated: ${result.id}` : `Skill installed: ${result.id}`);
+  } catch (error) { toast(explainError(error.message)); }
 }
 
 async function saveCurrentSkill() {
@@ -3266,6 +3289,11 @@ $('provider').addEventListener('change', toggleProviderFields);
 $('refreshSelection').addEventListener('click', refreshContextCard);
 $('includeContext').addEventListener('change', () => { $('shareQuick').checked = $('includeContext').checked; refreshContextCard(); });
 $('shareQuick').addEventListener('change', () => { $('includeContext').checked = $('shareQuick').checked; refreshContextCard(); });
+function setWorkbookCard(open) {
+  $('workbookCard').classList.toggle('hidden', !open);
+  $('workbookToggle').setAttribute('aria-expanded', String(open));
+}
+$('workbookToggle').addEventListener('click', () => { const open = $('workbookCard').classList.contains('hidden'); setWorkbookCard(open); if (open) refreshContextCard(); });
 $('sidebarToggle').addEventListener('click', () => setSidebar($('sidebar').classList.contains('hidden')));
 $('sidebarClose').addEventListener('click', () => setSidebar(false));
 $('newChatSide').addEventListener('click', () => { newChat(); setSidebar(false); });
@@ -3374,12 +3402,14 @@ $('composer').addEventListener('submit', async event => {
 });
 $('prompt').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('composer').requestSubmit(); } });
 $('insertAnswer').addEventListener('click', insertAnswer);
-document.querySelectorAll('.action').forEach(button => button.addEventListener('click', () => { $('prompt').value = button.dataset.prompt; $('prompt').focus(); }));
+
 loadFinanceProfile();
 ['debitColumn', 'creditColumn', 'amountColumn', 'keyColumns', 'requiredColumns', 'entityColumn', 'currencyColumn', 'dateColumn', 'checkTolerance'].forEach(id => {
   $(id).addEventListener('change', saveFinanceProfile);
 });
 
+$('installGithubSkill').addEventListener('click', installGitHubSkill);
+restoreGitHubToken();
 $('modelPick').addEventListener('change', () => syncModel('modelPick'));
 $('qwenModel').addEventListener('change', () => syncModel('qwenModel'));
 $('effortMode').addEventListener('change', saveChatPrefs);

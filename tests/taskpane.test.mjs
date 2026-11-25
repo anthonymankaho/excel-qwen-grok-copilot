@@ -369,7 +369,7 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
     fetch: async (url, opts) => {
       const body = opts?.body ? JSON.parse(opts.body) : null;
       calls.push({ url, body, headers: opts?.headers || {} });
-      if (url.endsWith('/api/health')) return { ok: true, status: 200, json: async () => ({ ok: true, build: healthBuild || '2026-11-25.2', configured: { qwen: true } }) };
+      if (url.endsWith('/api/health')) return { ok: true, status: 200, json: async () => ({ ok: true, build: healthBuild || '2026-11-25.3', configured: { qwen: true } }) };
       if (url.endsWith('/api/connectors/search')) return { ok: true, status: 200, json: async () => ({ items: [{ id: 'item-1', name: 'aging.xlsx', detail: 'sheet' }] }) };
       if (url.endsWith('/api/connectors/read')) return { ok: true, status: 200, json: async () => ({ name: body.item.name, kind: 'XLSX', text: 'Coverage: COMPLETE\nGJ001 | 100' }) };
       if (url.endsWith('/api/extract')) return { ok: true, status: 200, json: async () => ({ text: '[Sheet: Data]\nL1: Voucher | Debit\nL2: GJ001 | 100', kind: 'XLSX' }) };
@@ -380,6 +380,7 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
       if (url.endsWith('/api/memory/add')) return { ok: true, status: 200, json: async () => ({ ok: true }) };
       if (url.endsWith('/api/memory')) return { ok: true, status: 200, json: async () => ({ text: '- [2026-11-24] MPL truth is 30_GJ_2026' }) };
       if (url.includes('/api/skills/context')) return { ok: true, status: 200, json: async () => ({ selected: ['monthly-report-review'], text: 'SAVED SKILLS test block' }) };
+      if (url.endsWith('/api/skills/github')) return { ok: true, status: 200, json: async () => ({ ok: true, id: 'demo-skill', path: 'C:\\skills\\demo-skill\\SKILL.md', replaced: false }) };
       if (url.endsWith('/api/skills/save')) return { ok: true, status: 200, json: async () => ({ ok: true, path: 'C:\\skills\\new-skill\\SKILL.md' }) };
       if (url.endsWith('/api/skills')) return { ok: true, status: 200, json: async () => ({ root: 'C:\\skills', skills: [{ id: 'monthly-report-review', description: 'Review the whole report', chars: 100 }] }) };
       const turnText = Array.isArray(reply?.turns) ? reply.turns[Math.min(streamTurn, reply.turns.length - 1)] : null;
@@ -1108,6 +1109,23 @@ test('Saved skills context is attached to the question and audited', async () =>
   assert.match(visible(sb.els('conversation')), /skills monthly-report-review/);
 });
 
+test('GitHub skill install posts the repo and token without putting the token in the question', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall });
+  await boot(sb);
+  sb.els('githubRepo').value = 'https://github.com/kgraph57/demo-skill';
+  sb.els('githubToken').value = 'ghp_pane_token';
+  sb.els('githubRemember').checked = true;
+  sb.els('githubReplace').checked = false;
+  await fire(sb.els('installGithubSkill'), 'click'); await flush();
+  const call = sb.calls.find(c => String(c.url).endsWith('/api/skills/github'));
+  assert.ok(call);
+  assert.equal(call.body.repo, 'https://github.com/kgraph57/demo-skill');
+  assert.equal(call.body.token, 'ghp_pane_token');
+  assert.equal(call.body.replace, false);
+  assert.equal(JSON.parse(sb.store['eqgc.github.v1']).token, 'ghp_pane_token');
+  assert.equal(String(sb.els('prompt').value).includes('ghp_pane_token'), false);
+});
+
 test('Save current task as skill posts a new folder with trigger and procedure', async () => {
   const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Procedure.', model: 'm' } });
   await boot(sb);
@@ -1157,6 +1175,24 @@ test('History resume restores the conversation and the Agent checkpoint', async 
   assert.match(lastContent(sb), /Continue the original task/);
 });
 
+test('Workbook access opens from the bottom button and stays out of the sidebar', async () => {
+  const html = fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8');
+  const aside = html.slice(html.indexOf('<aside id="sidebar"'), html.indexOf('</aside>'));
+  assert.equal(aside.includes('id="workbookCard"'), false);
+  assert.equal(aside.includes('id="contextEyebrow"'), false);
+  assert.match(html, /id="workbookCard" class="context-card card hidden"/);
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall });
+  await boot(sb);
+  sb.els('workbookCard').classList.add('hidden');
+  sb.els('sidebar').classList.add('hidden');
+  await fire(sb.els('workbookToggle'), 'click');
+  assert.equal(sb.els('workbookCard').classList.contains('hidden'), false);
+  assert.equal(sb.els('sidebar').classList.contains('hidden'), true);
+  assert.equal(sb.els('workbookToggle').getAttribute('aria-expanded'), 'true');
+  await fire(sb.els('workbookToggle'), 'click');
+  assert.equal(sb.els('workbookCard').classList.contains('hidden'), true);
+});
+
 test('Copilot-style sidebar hides the five browse cards and Share quick toggle mirrors the consent gate', async () => {
   const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Ok.', model: 'm' } });
   await boot(sb);
@@ -1168,9 +1204,14 @@ test('Copilot-style sidebar hides the five browse cards and Share quick toggle m
   assert.equal(sb.els('sidebar').classList.contains('hidden'), false);
   const html = fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8');
   const aside = html.slice(html.indexOf('<aside id="sidebar"'), html.indexOf('</aside>'));
-  for (const id of ['contextEyebrow', 'cloudSources', 'skillsCard', 'historyCard', 'memoryCard']) {
+  for (const id of ['cloudSources', 'skillsCard', 'historyCard', 'memoryCard']) {
     assert.ok(aside.includes(`id="${id}"`), `${id} lives in the sidebar`);
   }
+  assert.equal(/<details id="guideCard"[^>]*\sopen[\s>]/.test(aside), false);
+  assert.match(aside, /<summary><strong>MCP<\/strong>/);
+  assert.match(aside, /<summary><strong>Skills<\/strong>/);
+  assert.equal(aside.includes('<strong>Cloud sources</strong>'), false);
+  assert.equal(aside.includes('<strong>Saved skills</strong>'), false);
   assert.equal(html.indexOf('id="cloudSources"'), html.lastIndexOf('id="cloudSources"'), 'cards are not duplicated in main');
   sb.els('shareQuick').checked = false;
   await fire(sb.els('shareQuick'), 'change');

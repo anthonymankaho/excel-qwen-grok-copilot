@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 
 // Bump together with public/taskpane.js PANE_BUILD whenever pane and relay must ship as one build.
-export const RELAY_BUILD = '2026-11-25.2';
+export const RELAY_BUILD = '2026-11-25.3';
 const QWEN_PATH = '/compatible-mode/v1/chat/completions';
 const SUPPORTED_MODELS = new Set(['auto', 'qwen4-max', 'qwen3.8-max', 'qwen3.8-flash']);
 const EFFORTS = new Set(['off', 'none', 'low', 'medium', 'high', 'xhigh']);
@@ -263,6 +263,96 @@ export function buildSkillContext(question, root, maxChars = 12000) {
       + 'Distinguish general guidance from company-specific facts. Do not announce internal skill names.\n\n'
       + sections.join('\n\n---\n\n')
   };
+}
+
+const GITHUB_NAME_RE = /^[A-Za-z0-9_.-]{1,100}$/;
+
+export function parseGitHubSkillSource(raw) {
+  const text = String(raw || '').trim();
+  if (!text || /[\s\\]/.test(text) || text.includes('..') || text.includes('@')) {
+    return { error: 'Use owner/repo or one https://github.com/owner/repo link to a SKILL.md file.' };
+  }
+  let owner = '';
+  let repo = '';
+  let ref = '';
+  let filePath = 'SKILL.md';
+  const short = text.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/);
+  if (short) {
+    owner = short[1];
+    repo = short[2];
+  } else {
+    let url;
+    try { url = new URL(text); } catch { return { error: 'Use owner/repo or one https://github.com/owner/repo link to a SKILL.md file.' }; }
+    if (url.protocol !== 'https:' || url.username || url.password || url.hostname !== 'github.com') {
+      return { error: 'Only an https://github.com/owner/repo link is accepted.' };
+    }
+    const parts = url.pathname.split('/').filter(Boolean).map(part => decodeURIComponent(part));
+    if (parts.length < 2 || parts.some(part => part === '.' || part === '..')) {
+      return { error: 'Use owner/repo or one https://github.com/owner/repo link to a SKILL.md file.' };
+    }
+    owner = parts[0];
+    repo = parts[1].replace(/\.git$/, '');
+    if (parts.length > 2) {
+      if (parts[2] !== 'blob' || parts.length < 5) return { error: 'Use the repository link or a link to one SKILL.md file.' };
+      ref = parts[3];
+      filePath = parts.slice(4).join('/');
+    }
+  }
+  if (!GITHUB_NAME_RE.test(owner) || !GITHUB_NAME_RE.test(repo)) return { error: 'Invalid repository name.' };
+  if (ref && !/^[A-Za-z0-9._/-]{1,200}$/.test(ref)) return { error: 'Invalid Git branch.' };
+  const segments = filePath.split('/');
+  if ((filePath !== 'SKILL.md' && !filePath.endsWith('/SKILL.md')) || segments.some(part => !part || part === '.' || part === '..')) {
+    return { error: 'Only a SKILL.md file can be installed.' };
+  }
+  return { owner, repo, ref, path: filePath };
+}
+
+export async function fetchGitHubSkill({ owner, repo, ref = '', path: filePath, token = '', fetchImpl }) {
+  const fetchFn = fetchImpl || globalThis.fetch;
+  const encodedPath = String(filePath).split('/').map(encodeURIComponent).join('/');
+  const url = new URL(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodedPath}`);
+  if (ref) url.searchParams.set('ref', ref);
+  const headers = {
+    Accept: 'application/vnd.github.raw',
+    'User-Agent': 'excel-qwen-grok-copilot',
+    'X-GitHub-Api-Version': '2022-11-28'
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  let response;
+  try {
+    response = await fetchFn(url.href, { method: 'GET', redirect: 'manual', headers });
+  } catch {
+    return { error: 'GitHub could not be reached.', status: 502 };
+  }
+  if (response.status >= 300 && response.status < 400) return { error: 'GitHub redirected this request. The redirect was not followed.', status: 502 };
+  if (response.status === 404) return { error: 'That repository has no SKILL.md at the requested path.', status: 404 };
+  if (response.status === 401 || response.status === 403) return { error: 'GitHub refused this token or this repository is private.', status: response.status };
+  if (response.status !== 200) return { error: `GitHub returned HTTP ${response.status}.`, status: 502 };
+  const declared = Number(response.headers?.get?.('content-length') || 0);
+  if (declared > 64 * 1024) return { error: 'SKILL.md is over 64 KB. The pane skips files that large.', status: 400 };
+  const text = await response.text();
+  if (Buffer.byteLength(text) > 64 * 1024) return { error: 'SKILL.md is over 64 KB. The pane skips files that large.', status: 400 };
+  return { text };
+}
+
+export function installSkillFile(root, markdown, { replace = false } = {}) {
+  const text = String(markdown || '').replace(/^\uFEFF/, '').trim();
+  if (!text) return { error: 'The skill file is empty.' };
+  if (Buffer.byteLength(text) > 64 * 1024) return { error: 'SKILL.md is over 64 KB. The pane skips files that large.' };
+  const meta = skillMeta(text);
+  if (!SKILL_ID_RE.test(meta.name || '')) return { error: 'SKILL.md name must be lowercase letters, digits, and hyphens.' };
+  if (!String(meta.description || '').trim()) return { error: 'SKILL.md needs a description line.' };
+  if (!root) root = path.join(appDataRoot(), 'skills');
+  const dir = path.join(root, meta.name);
+  const file = path.join(dir, 'SKILL.md');
+  const rootResolved = path.resolve(root);
+  const resolved = path.resolve(file);
+  if (resolved !== path.join(rootResolved, meta.name, 'SKILL.md')) return { error: 'Invalid skill name.' };
+  const exists = fs.existsSync(dir);
+  if (exists && !replace) return { error: `Skill "${meta.name}" already exists. Tick Replace to update SKILL.md.` };
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(file, text.endsWith('\n') ? text : `${text}\n`, 'utf8');
+  return { id: meta.name, path: file, replaced: exists };
 }
 
 export function saveSkill(root, { id, description, body }) {
