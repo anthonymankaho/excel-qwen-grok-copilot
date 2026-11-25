@@ -8,11 +8,12 @@ This file is for continuing **Qwen for Excel and Word** on another computer. Sta
 
 - Private repository / 私有儲存庫: `https://github.com/anthonymankaho/excel-qwen-grok-copilot`
 - Branch / 分支: `main`
-- Verified HEAD before this handoff / 本交接前已核對提交: `4627819` (`Record successful Excel web key retest`)
+- Verified implementation baseline / 已核對的程式基準提交: `4627819` (`Record successful Excel web key retest`); use the latest `main` for the handoff and subsequent work. / 交接及續做請使用最新 `main`。
 - Work computer project / 工作電腦專案: `C:\Users\User\Desktop\excel-qwen-grok-copilot`
 - Hosted Excel web pane / 網頁版: `https://excel-qwen-grok.anthonym-354.workers.dev`
 - Hosted build / 部署版本: `2026-11-24.10`; Cloudflare Worker version `922f0de0-193f-42f1-b79b-b36e224863ac`
 - Local working tree was clean and matched `origin/main` before this handoff. GitHub has the code; it does **not** include the user's month-end finance workbook or API key. / 本交接前本機與遠端一致且無未提交修改。GitHub 有程式碼，沒有用戶的月結財務工作簿或 API key。
+- 2026-11-25 sync check: the older `C:\Users\User\Desktop\Excel Qwen Grok Copilot` checkout was 44 commits behind and had four local edits. They were preserved on `archive/legacy-local-edits-20261125` at `f72d587`; this is historical reference only. Continue from `main`, not the archive branch. / 2026-11-25 核對：舊資料夾落後 44 個提交，其 4 個本機修改已保存於 `archive/legacy-local-edits-20261125`（`f72d587`），只供歷史參考；續做請用 `main`。
 
 ## Verified now / 已核實
 
