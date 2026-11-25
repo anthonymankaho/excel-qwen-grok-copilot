@@ -116,6 +116,48 @@ function renderMessage(role, content) {
   return bubble;
 }
 
+const CELL_RE = /^[A-Z]{1,3}[1-9][0-9]{0,6}$/i;
+const RANGE_RE = /^[A-Z]{1,3}[1-9][0-9]{0,6}(:[A-Z]{1,3}[1-9][0-9]{0,6})?$/i;
+function colIndex(letters) { let n = 0; for (const ch of letters.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64); return n; }
+function colLetter(n) { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
+function parseAddr(addr) {
+  const [a, b] = addr.toUpperCase().split(':');
+  const p = s => { const m = s.match(/^([A-Z]+)([0-9]+)$/); return { c: colIndex(m[1]), r: Number(m[2]) }; };
+  const p1 = p(a), p2 = b ? p(b) : p1;
+  return { r1: Math.min(p1.r, p2.r), c1: Math.min(p1.c, p2.c), r2: Math.max(p1.r, p2.r), c2: Math.max(p1.c, p2.c) };
+}
+function opOf(e) { return e.op || (e.cell ? 'writeCell' : null); }
+function spanAddress(e) {
+  if (e.op === 'insertRows' || e.op === 'deleteRows') return `${e.at}:${e.at + e.count - 1}`;
+  const c1 = colIndex(e.at); return `${colLetter(c1)}:${colLetter(c1 + e.count - 1)}`;
+}
+function validEdit(e) {
+  if (!e || typeof e.sheet !== 'string' || !e.sheet.length || e.sheet.length > 100) return false;
+  const op = opOf(e);
+  const cellVal = v => (typeof v === 'string' && v.length <= 5000) || typeof v === 'number' || v === null;
+  if (op === 'writeCell') return CELL_RE.test(e.cell || '') && cellVal(e.value) && e.value !== null;
+  if (op === 'writeRange') {
+    if (!RANGE_RE.test(e.range || '') || !Array.isArray(e.values) || e.values.length < 1 || e.values.length > 500) return false;
+    const d = parseAddr(e.range);
+    if (e.values.length !== d.r2 - d.r1 + 1) return false;
+    return e.values.every(row => Array.isArray(row) && row.length === d.c2 - d.c1 + 1 && row.length <= 100 && row.every(cellVal));
+  }
+  if (op === 'insertRows' || op === 'deleteRows') return Number.isInteger(e.at) && e.at >= 1 && e.at <= 1048576 && Number.isInteger(e.count) && e.count >= 1 && e.count <= 500;
+  if (op === 'insertColumns' || op === 'deleteColumns') return /^[A-Z]{1,3}$/i.test(e.at || '') && Number.isInteger(e.count) && e.count >= 1 && e.count <= 500;
+  if (op === 'numberFormat') return RANGE_RE.test(e.range || '') && typeof e.format === 'string' && e.format.length <= 100;
+  return false;
+}
+function mergeOld(formulas, values) {
+  return (values || []).map((row, i) => row.map((v, j) => {
+    const f = formulas?.[i]?.[j];
+    return String(f || '').startsWith('=') ? f : (v === '' || v == null ? null : v);
+  }));
+}
+function newValues(e) {
+  const grid = opOf(e) === 'writeCell' ? [[e.value]] : e.values;
+  return grid.map(row => row.map(v => (v === '' ? null : v)));
+}
+
 function parseEdits(text) {
   const blocks = [...text.matchAll(/```json\s*([\s\S]*?)```/g)];
   for (let i = blocks.length - 1; i >= 0; i--) {
@@ -123,7 +165,7 @@ function parseEdits(text) {
       const parsed = JSON.parse(blocks[i][1]);
       const edits = parsed?.edits;
       if (!Array.isArray(edits) || edits.length < 1 || edits.length > 200) continue;
-      if (!edits.every(e => e && typeof e.sheet === 'string' && e.sheet.length <= 100 && typeof e.cell === 'string' && /^[A-Z]{1,3}[1-9][0-9]{0,6}$/i.test(e.cell) && (typeof e.value === 'string' || typeof e.value === 'number') && String(e.value).length <= 5000)) continue;
+      if (!edits.every(validEdit)) continue;
       const prose = (text.slice(0, blocks[i].index) + text.slice(blocks[i].index + blocks[i][0].length)).trim();
       return { prose, edits };
     } catch { /* not an edits block; keep looking */ }
@@ -139,19 +181,34 @@ async function renderEditsCard(edits) {
   let olds = null;
   try {
     olds = await Excel.run(async context => {
-      const ranges = edits.map(e => context.workbook.worksheets.getItem(e.sheet).getRange(e.cell));
-      ranges.forEach(r => r.load(['values', 'formulas']));
-      await context.sync();
-      return ranges.map(r => ({ value: r.values?.[0]?.[0], formula: r.formulas?.[0]?.[0] }));
+      const out = [];
+      for (const e of edits) {
+        const op = opOf(e);
+        if (op === 'insertRows' || op === 'insertColumns') { out.push(null); continue; }
+        const addr = op === 'writeCell' ? e.cell : op === 'numberFormat' ? e.range : op === 'writeRange' ? e.range : spanAddress(e);
+        const r = context.workbook.worksheets.getItem(e.sheet).getRange(addr);
+        r.load(op === 'numberFormat' ? ['numberFormat'] : ['values', 'formulas']);
+        await context.sync();
+        out.push(op === 'numberFormat' ? { nf: r.numberFormat } : { value: r.values?.[0]?.[0], formula: r.formulas?.[0]?.[0], grid: mergeOld(r.formulas, r.values) });
+      }
+      return out;
     });
   } catch { olds = null; }
-  edits.forEach((edit, i) => {
+  edits.forEach((e, i) => {
     const row = document.createElement('div'); row.className = 'edit-row';
+    const op = opOf(e);
     const old = olds?.[i];
     const oldText = !old ? '(current unreadable)'
       : String(old.formula || '').startsWith('=') ? old.formula
       : (old.value === '' || old.value == null ? '(empty)' : String(old.value));
-    row.textContent = `${edit.sheet}!${edit.cell}: ${oldText} → ${String(edit.value)}`;
+    if (op === 'writeCell') row.textContent = `${e.sheet}!${e.cell}: ${oldText} → ${String(e.value)}`;
+    else if (op === 'writeRange') {
+      const d = parseAddr(e.range);
+      const preview = e.values.slice(0, 3).map(r => r.map(v => v === null || v === '' ? '·' : String(v)).join('\t')).join('\n');
+      row.textContent = `${e.sheet}!${e.range}: write ${d.r2 - d.r1 + 1}×${d.c2 - d.c1 + 1} (old first: ${oldText})\n${preview}${e.values.length > 3 ? '\n…' : ''}`;
+    } else if (op === 'insertRows' || op === 'insertColumns') row.textContent = `${e.sheet}: insert ${e.count} ${op === 'insertRows' ? 'rows' : 'columns'} at ${e.at}`;
+    else if (op === 'deleteRows' || op === 'deleteColumns') row.textContent = `${e.sheet}: delete ${e.count} ${op === 'deleteRows' ? 'rows' : 'columns'} ${spanAddress(e)} (content saved for Undo)`;
+    else row.textContent = `${e.sheet}!${e.range}: number format → ${e.format}`;
     card.append(row);
   });
   const actions = document.createElement('div'); actions.className = 'button-row';
@@ -161,17 +218,41 @@ async function renderEditsCard(edits) {
     apply.disabled = true; dismiss.disabled = true;
     try {
       const recs = await Excel.run(async context => {
-        const ranges = edits.map(e => context.workbook.worksheets.getItem(e.sheet).getRange(e.cell));
-        ranges.forEach(r => r.load(['values', 'formulas']));
-        await context.sync();
-        const before = ranges.map((r, i) => ({ sheet: edits[i].sheet, cell: edits[i].cell, value: r.values?.[0]?.[0], formula: r.formulas?.[0]?.[0] }));
-        ranges.forEach((r, i) => {
-          const v = edits[i].value;
-          if (typeof v === 'string' && v.startsWith('=')) r.formulas = [[v]];
-          else r.values = [[v]];
-        });
-        await context.sync();
-        return before;
+        const out = [];
+        for (const e of edits) {
+          const op = opOf(e);
+          const ws = context.workbook.worksheets.getItem(e.sheet);
+          if (op === 'writeCell' || op === 'writeRange') {
+            const addr = op === 'writeCell' ? e.cell : e.range;
+            const r = ws.getRange(addr);
+            r.load(['values', 'formulas']); await context.sync();
+            const old2D = mergeOld(r.formulas, r.values);
+            r.values = newValues(e); await context.sync();
+            out.push({ kind: 'write', sheet: e.sheet, addr, old2D });
+          } else if (op === 'insertRows' || op === 'insertColumns') {
+            const addr = spanAddress(e);
+            ws.getRange(addr).insert(op === 'insertRows' ? Excel.InsertShiftDirection.down : Excel.InsertShiftDirection.right);
+            await context.sync();
+            out.push({ kind: op === 'insertRows' ? 'deleteRows' : 'deleteColumns', sheet: e.sheet, addr });
+          } else if (op === 'deleteRows' || op === 'deleteColumns') {
+            const addr = spanAddress(e);
+            const r = ws.getRange(addr);
+            r.load(['values', 'formulas', 'numberFormat']); await context.sync();
+            const saved = { grid: mergeOld(r.formulas, r.values), nf: r.numberFormat };
+            r.delete(op === 'deleteRows' ? Excel.DeleteShiftDirection.up : Excel.DeleteShiftDirection.left);
+            await context.sync();
+            out.push({ kind: op === 'deleteRows' ? 'insertRows' : 'insertColumns', sheet: e.sheet, addr, saved });
+          } else {
+            const r = ws.getRange(e.range);
+            r.load(['numberFormat']); await context.sync();
+            const oldNF = r.numberFormat;
+            const d = parseAddr(e.range);
+            r.numberFormat = Array.from({ length: d.r2 - d.r1 + 1 }, () => Array.from({ length: d.c2 - d.c1 + 1 }, () => e.format));
+            await context.sync();
+            out.push({ kind: 'format', sheet: e.sheet, addr: e.range, oldNF });
+          }
+        }
+        return out;
       });
       label.textContent = `APPLIED ${edits.length} EDITS`;
       const undoBtn = document.createElement('button'); undoBtn.className = 'secondary'; undoBtn.textContent = 'Undo last apply';
@@ -179,16 +260,28 @@ async function renderEditsCard(edits) {
         undoBtn.disabled = true;
         try {
           await Excel.run(async context => {
-            for (const rec of recs) {
-              const r = context.workbook.worksheets.getItem(rec.sheet).getRange(rec.cell);
-              if (String(rec.formula || '').startsWith('=')) r.formulas = [[rec.formula]];
-              else if (rec.value === '' || rec.value == null) r.clear();
-              else r.values = [[rec.value]];
+            for (const rec of [...recs].reverse()) {
+              const ws = context.workbook.worksheets.getItem(rec.sheet);
+              const r = ws.getRange(rec.addr);
+              if (rec.kind === 'write') {
+                if (CELL_RE.test(rec.addr) && rec.old2D?.[0]?.[0] == null) r.clear();
+                else r.values = rec.old2D;
+                await context.sync();
+              }
+              else if (rec.kind === 'deleteRows' || rec.kind === 'deleteColumns') { r.delete(rec.kind === 'deleteRows' ? Excel.DeleteShiftDirection.up : Excel.DeleteShiftDirection.left); await context.sync(); }
+              else if (rec.kind === 'insertRows' || rec.kind === 'insertColumns') {
+                r.insert(rec.kind === 'insertRows' ? Excel.InsertShiftDirection.down : Excel.InsertShiftDirection.right);
+                await context.sync();
+                r.values = rec.saved.grid; r.numberFormat = rec.saved.nf; await context.sync();
+              } else {
+                const d = parseAddr(rec.addr);
+                r.numberFormat = rec.oldNF || Array.from({ length: d.r2 - d.r1 + 1 }, () => Array.from({ length: d.c2 - d.c1 + 1 }, () => 'General'));
+                await context.sync();
+              }
             }
-            await context.sync();
           });
-          label.textContent = `UNDONE — RESTORED ${recs.length} CELLS`;
-          toast('Restored previous cell values.');
+          label.textContent = `UNDONE — RESTORED ${recs.length} OPERATIONS`;
+          toast('Restored the workbook to its pre-apply state.');
         } catch (error) { undoBtn.disabled = false; toast(`Could not undo: ${error.message}`); }
       });
       actions.append(undoBtn);

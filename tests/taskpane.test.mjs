@@ -41,20 +41,56 @@ function makeSandbox({ selection, used, reply, seedKeys, cells }) {
   const writes = [];
   const calls = [];
   const cellStore = {};
-  for (const [k, v] of Object.entries(cells || {})) cellStore[k] = { value: v.value ?? '', formula: v.formula ?? '' };
+  for (const [k, v] of Object.entries(cells || {})) cellStore[k] = { value: v.value ?? '', formula: v.formula ?? '', nf: v.nf ?? 'General' };
   const range = (obj) => ({ load() {}, isNullObject: false, getCell: () => target('Selection', 'A1'), ...obj });
+  const cur = key => (cellStore[key] ||= { value: '', formula: '', nf: 'General' });
   const target = (sheet, cell) => {
     const key = `${sheet}!${cell}`;
-    const cur = () => (cellStore[key] ||= { value: '', formula: '' });
     return {
       load() {},
-      get values() { return [[cur().value]]; },
-      get formulas() { return [[cur().formula]]; },
-      set formulas(v) { cur().formula = v[0][0]; cur().value = v[0][0]; writes.push({ sheet, cell, kind: 'formula', value: v[0][0] }); },
-      set values(v) { cur().value = v[0][0]; cur().formula = ''; writes.push({ sheet, cell, kind: 'value', value: v[0][0] }); },
-      clear() { cur().value = ''; cur().formula = ''; writes.push({ sheet, cell, kind: 'clear' }); }
+      get values() { return [[cur(key).value]]; },
+      get formulas() { return [[cur(key).formula]]; },
+      get numberFormat() { return [[cur(key).nf]]; },
+      set numberFormat(v) { cur(key).nf = v[0][0]; writes.push({ sheet, cell, kind: 'numberFormat', format: v[0][0] }); },
+      set formulas(v) { cur(key).formula = v[0][0]; cur(key).value = v[0][0]; writes.push({ sheet, cell, kind: 'formula', value: v[0][0] }); },
+      set values(v) {
+        const x = v[0][0];
+        if (typeof x === 'string' && x.startsWith('=')) { cur(key).formula = x; cur(key).value = x; writes.push({ sheet, cell, kind: 'formula', value: x }); }
+        else { cur(key).value = x == null ? '' : x; cur(key).formula = ''; writes.push({ sheet, cell, kind: x == null ? 'clear' : 'value', value: x }); }
+      },
+      clear() { cur(key).value = ''; cur(key).formula = ''; writes.push({ sheet, cell, kind: 'clear' }); }
     };
   };
+  const colIdx = s => { let n = 0; for (const ch of s.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64); return n; };
+  const colName = n => { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
+  const dimsOf = addr => {
+    const A = addr.toUpperCase();
+    if (/^[A-Z]+[0-9]+$/.test(A)) { const m = A.match(/^([A-Z]+)([0-9]+)$/); return { r1: +m[2], r2: +m[2], c1: colIdx(m[1]), c2: colIdx(m[1]) }; }
+    if (/^[A-Z]+:[A-Z]+$/.test(A)) { const [a, b] = A.split(':'); const rows = Object.keys(cellStore).map(k => +k.split('!')[1].match(/[0-9]+$/)[0]); return { r1: 1, r2: Math.max(3, ...rows), c1: colIdx(a), c2: colIdx(b) }; }
+    if (/^[0-9]+:[0-9]+$/.test(A)) { const [a, b] = A.split(':').map(Number); const cols = Object.keys(cellStore).map(k => colIdx(k.split('!')[1].match(/^[A-Z]+/)[0])); return { r1: a, r2: b, c1: 1, c2: Math.max(3, ...cols) }; }
+    const [a, b] = A.split(':'); const p = s => { const m = s.match(/^([A-Z]+)([0-9]+)$/); return { r: +m[2], c: colIdx(m[1]) }; };
+    const p1 = p(a), p2 = p(b);
+    return { r1: Math.min(p1.r, p2.r), r2: Math.max(p1.r, p2.r), c1: Math.min(p1.c, p2.c), c2: Math.max(p1.c, p2.c) };
+  };
+  const gridTarget = (sheet, addr) => {
+    const d = dimsOf(addr);
+    const keys = [];
+    for (let r = d.r1; r <= d.r2; r++) for (let c = d.c1; c <= d.c2; c++) keys.push(`${sheet}!${colName(c)}${r}`);
+    const width = d.c2 - d.c1 + 1;
+    const rowsOf = get => { const rows = []; for (let r = d.r1; r <= d.r2; r++) rows.push(keys.filter(k => k.endsWith(`${r}`)).map(get)); return rows; };
+    return {
+      load() {},
+      get values() { return rowsOf(k => cur(k).value); },
+      get formulas() { return rowsOf(k => cur(k).formula); },
+      get numberFormat() { return rowsOf(k => cur(k).nf); },
+      set values(v) { v.forEach((row, i) => row.forEach((x, j) => { const k = keys[i * width + j]; cur(k).value = x == null ? '' : x; cur(k).formula = typeof x === 'string' && x.startsWith('=') ? x : ''; })); writes.push({ sheet, addr, kind: 'range', value: v }); },
+      set numberFormat(v) { v.forEach((row, i) => row.forEach((x, j) => { cur(keys[i * width + j]).nf = x; })); writes.push({ sheet, addr, kind: 'numberFormat', format: v[0][0] }); },
+      insert(dir) { writes.push({ sheet, addr, kind: dir === 'Down' ? 'insertRows' : 'insertColumns' }); },
+      delete(dir) { writes.push({ sheet, addr, kind: dir === 'Up' ? 'deleteRows' : 'deleteColumns' }); },
+      clear() { keys.forEach(k => { cur(k).value = ''; cur(k).formula = ''; }); writes.push({ sheet, addr, kind: 'clear' }); }
+    };
+  };
+  const getRange = (sheet, addr) => (/^[A-Z]{1,3}[1-9][0-9]{0,6}$/i.test(addr) ? target(sheet, addr) : gridTarget(sheet, addr));
   const sandbox = {
     console, JSON, Math, String, Array, Object, Promise, RegExp, TextEncoder, TextDecoder,
     setTimeout: () => 0, clearTimeout: () => {},
@@ -66,12 +102,14 @@ function makeSandbox({ selection, used, reply, seedKeys, cells }) {
     document: { getElementById: get, createElement: tag => makeElement(tag), querySelectorAll: () => [] },
     Office: { HostType: { Excel: 'Excel' }, onReady(cb) { sandbox.officeCb = cb; } },
     Excel: {
+      InsertShiftDirection: { down: 'Down', right: 'Right' },
+      DeleteShiftDirection: { up: 'Up', left: 'Left' },
       run: fn => fn({
         workbook: {
           getSelectedRange: () => range(selection),
           worksheets: {
             getActiveWorksheet: () => ({ getUsedRangeOrNullObject: () => range(used) }),
-            getItem: sheet => ({ getRange: cell => target(sheet, cell) })
+            getItem: sheet => ({ getRange: addr => getRange(sheet, addr) })
           }
         },
         sync: async () => {}
@@ -262,10 +300,10 @@ test('edit card shows old → new; Apply then Undo restores originals', async ()
   assert.ok(undoBtn, 'undo button appears after apply');
   await fire(undoBtn, 'click'); await flush(); await flush();
   assert.deepEqual(sb.writes.slice(-2), [
-    { sheet: 'Sheet1', cell: 'D5', kind: 'value', value: 123 },
-    { sheet: 'Sheet1', cell: 'B2', kind: 'value', value: 2 }
+    { sheet: 'Sheet1', cell: 'B2', kind: 'value', value: 2 },
+    { sheet: 'Sheet1', cell: 'D5', kind: 'value', value: 123 }
   ]);
-  assert.match(card.children[0].textContent, /UNDONE — RESTORED 2 CELLS/);
+  assert.match(card.children[0].textContent, /UNDONE — RESTORED 2 OPERATIONS/);
 });
 
 test('undo of an originally empty cell clears it', async () => {
@@ -279,4 +317,59 @@ test('undo of an originally empty cell clears it', async () => {
   await fire(actions.children[0], 'click'); await flush(); await flush();
   await fire(actions.children[2], 'click'); await flush(); await flush();
   assert.deepEqual(sb.writes.slice(-1), [{ sheet: 'Sheet1', cell: 'A1', kind: 'clear' }]);
+});
+
+test('range write shows grid preview; undo restores the old grid', async () => {
+  const reply = { text: 'x\n```json\n{"edits":[{"sheet":"Sheet1","op":"writeRange","range":"A1:B1","values":[[10,20]]}]}\n```', model: 'm' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, cells: { 'Sheet1!A1': { value: 1 }, 'Sheet1!B1': { value: 2 } } });
+  await boot(sb); await ask(sb, 'revise');
+  const card = sb.els('conversation').children.find(c => String(c.className).includes('edits-card'));
+  const rows = card.children.filter(c => c.className === 'edit-row');
+  assert.match(rows[0].textContent, /write 1×2/);
+  assert.match(rows[0].textContent, /10\t20/);
+  const actions = card.children.find(c => c.children.length === 2);
+  await fire(actions.children[0], 'click'); await flush(); await flush();
+  assert.deepEqual(sb.writes.slice(-1), [{ sheet: 'Sheet1', addr: 'A1:B1', kind: 'range', value: [[10, 20]] }]);
+  await fire(actions.children[2], 'click'); await flush(); await flush();
+  assert.deepEqual(sb.writes.slice(-1), [{ sheet: 'Sheet1', addr: 'A1:B1', kind: 'range', value: [[1, 2]] }]);
+});
+
+test('insert rows undo deletes the inserted rows', async () => {
+  const reply = { text: 'x\n```json\n{"edits":[{"sheet":"Sheet1","op":"insertRows","at":2,"count":2}]}\n```', model: 'm' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+  await boot(sb); await ask(sb, 'add rows');
+  const card = sb.els('conversation').children.find(c => String(c.className).includes('edits-card'));
+  const actions = card.children.find(c => c.children.length === 2);
+  await fire(actions.children[0], 'click'); await flush(); await flush();
+  assert.deepEqual(sb.writes.slice(-1), [{ sheet: 'Sheet1', addr: '2:3', kind: 'insertRows' }]);
+  await fire(actions.children[2], 'click'); await flush(); await flush();
+  assert.deepEqual(sb.writes.slice(-1), [{ sheet: 'Sheet1', addr: '2:3', kind: 'deleteRows' }]);
+});
+
+test('delete rows undo re-inserts and restores content', async () => {
+  const reply = { text: 'x\n```json\n{"edits":[{"sheet":"Sheet1","op":"deleteRows","at":5,"count":2}]}\n```', model: 'm' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, cells: { 'Sheet1!A5': { value: 'x' }, 'Sheet1!A6': { value: 'y' } } });
+  await boot(sb); await ask(sb, 'remove rows');
+  const card = sb.els('conversation').children.find(c => String(c.className).includes('edits-card'));
+  const actions = card.children.find(c => c.children.length === 2);
+  await fire(actions.children[0], 'click'); await flush(); await flush();
+  assert.deepEqual(sb.writes.slice(-1), [{ sheet: 'Sheet1', addr: '5:6', kind: 'deleteRows' }]);
+  await fire(actions.children[2], 'click'); await flush(); await flush();
+  assert.deepEqual(sb.writes.slice(-3), [
+    { sheet: 'Sheet1', addr: '5:6', kind: 'insertRows' },
+    { sheet: 'Sheet1', addr: '5:6', kind: 'range', value: [['x', null, null], ['y', null, null]] },
+    { sheet: 'Sheet1', addr: '5:6', kind: 'numberFormat', format: 'General' }
+  ]);
+});
+
+test('number format undo restores the previous format', async () => {
+  const reply = { text: 'x\n```json\n{"edits":[{"sheet":"Sheet1","op":"numberFormat","range":"B1:B2","format":"0.0%"}]}\n```', model: 'm' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+  await boot(sb); await ask(sb, 'format percent');
+  const card = sb.els('conversation').children.find(c => String(c.className).includes('edits-card'));
+  const actions = card.children.find(c => c.children.length === 2);
+  await fire(actions.children[0], 'click'); await flush(); await flush();
+  assert.deepEqual(sb.writes.slice(-1), [{ sheet: 'Sheet1', addr: 'B1:B2', kind: 'numberFormat', format: '0.0%' }]);
+  await fire(actions.children[2], 'click'); await flush(); await flush();
+  assert.deepEqual(sb.writes.slice(-1), [{ sheet: 'Sheet1', addr: 'B1:B2', kind: 'numberFormat', format: 'General' }]);
 });
