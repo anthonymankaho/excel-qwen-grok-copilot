@@ -2,6 +2,10 @@
 
 A local task pane for desktop Excel and Word. You ask in plain language. Qwen plans the work, and the pane revises the open file through a fixed list of actions. On this PC the pane and the relay both live at `http://127.0.0.1:3000`. Excel on the web uses the HTTPS copy at `https://excel-qwen-grok.anthonym-354.workers.dev`. Company-wide deployment still needs an admin install.
 
+**Folder on this PC:** `C:\Users\User\Desktop\excel-qwen-grok-copilot`. Run npm from that folder. Installation steps are in [SOP-INSTALL.md](SOP-INSTALL.md). The older Desktop folder `Excel Qwen Grok Copilot` is archived. Do not install from it.
+
+**這部電腦的資料夾：** `C:\Users\User\Desktop\excel-qwen-grok-copilot`。請在該資料夾執行 npm。安裝步驟見 [SOP-INSTALL.md](SOP-INSTALL.md)。桌面上較舊的 `Excel Qwen Grok Copilot` 已封存，不要用它安裝。
+
 ---
 
 ## Release roadmap 發行計劃
@@ -135,6 +139,14 @@ OneDrive 文字檢視支援 XLSX/XLSM、DOCX、HTML、TXT、MD、CSV、TSV、JSO
 ---
 
 ## Processing status · 處理狀態
+
+**2026-11-25 — Model and Effort.** Local build `2026-11-25.2`. The composer and Settings offer `auto`, `qwen4-max` (default), `qwen3.8-max`, and `qwen3.8-flash`. Effort is Off, Low, Medium, High (default), or Extra. The relay sends `reasoning_effort` and does not send `thinking_budget`. Fast still turns thinking off for that question. Restart the local relay so the pane and relay builds match. The hosted Worker was not deployed. `npm test` 123/123.
+
+**2026-11-25 — 模型與 Effort。** 本機版本 `2026-11-25.2`。作曲列與 Settings 可選 `auto`、`qwen4-max`（預設）、`qwen3.8-max`、`qwen3.8-flash`。Effort 為 Off、Low、Medium、High（預設）或 Extra。relay 傳送 `reasoning_effort`，不傳送 `thinking_budget`。Fast 仍可對該題關閉思考。請重啟本機 relay，讓窗格與 relay 版本一致。託管 Worker 未部署。`npm test` 123/123。
+
+**2026-11-25 — Shared file reader, OneDrive tool, skill triggers.** Local build `2026-11-25.1`. Attach and OneDrive use one reader for PDF, DOCX, and XLSX/XLSM. Excel and PDF results say `Coverage: COMPLETE` or `Coverage: INCOMPLETE` with the next row or page. Scanned PDF pages are transcribed one at a time, up to 12. Agent may search personal OneDrive and read one file while Share is on; the hosted pane does not. Skills match a `triggers` line and are no longer forced to include `qwen-chat-assistant`. Restart the local relay so the pane and relay builds match. `npm test` 115/115.
+
+**2026-11-25 — 共用檔案讀取、OneDrive 工具、技能觸發。** 本機版本 `2026-11-25.1`。附加與 OneDrive 共用 PDF、DOCX、XLSX/XLSM 讀取器。Excel 與 PDF 會標示 `Coverage: COMPLETE` 或 `Coverage: INCOMPLETE`，並給出下一列或下一頁。掃描 PDF 逐頁轉錄，最多 12 頁。Share 開啟時，Agent 可搜尋個人 OneDrive 並讀取一個檔案；網頁版沒有此功能。Skills 依 `triggers` 列配對，不再每次強制帶入 `qwen-chat-assistant`。請重啟本機 relay，讓窗格與 relay 版本一致。`npm test` 115/115。
 
 **2026-11-25 — Marketplace preparation.** The hosted Worker is live as BYO-key pass-through (`build: 2026-11-24.10`, `byo:true`, `configured.qwen:false` at the last read-only health check). Each user enters their own key; the add-in does not use an owner key. Do not use Token Plan keys with this custom add-in unless Alibaba confirms this use is permitted. The Marketplace release is on hold pending a supported API/credential design, publisher enrollment, and full live workbook testing. See [`MARKETPLACE_READINESS.md`](MARKETPLACE_READINESS.md).
 
@@ -288,7 +300,7 @@ The context card shows what the next question will send.
 - Untick **Share Office file data with AI** to prevent open workbook/document data and Agent-requested ranges from being sent. Attached files are controlled separately.
 - Use **📎 Attach** to choose up to three HTML/HTM, TXT, MD, CSV, TSV, JSON, or XML files (5 MB each). HTML tables and readable text are extracted locally; scripts, CSS, chart images, and links are not run or interpreted. The pane shows a preview of extracted text before sending. It sends at most 18,000 characters per file and 26,000 characters from attachments per question. **New chat** clears attachments and conversation history.
 
-Ask in the box and press Enter. Shift+Enter adds a line. **Summarize**, **Explain**, **Write formula**, and **Revise** fill a starting prompt. Replies stream. The send button becomes **Stop** while a reply is running. **New chat** clears the conversation and the audit trail. **Fast** skips deep thinking: Qwen turns thinking off.
+Ask in the box and press Enter. Shift+Enter adds a line. **Summarize**, **Explain**, **Write formula**, and **Revise** fill a starting prompt. Replies stream. The send button becomes **Stop** while a reply is running. **New chat** clears the conversation and the audit trail. **Model** is `auto`, `qwen4-max` (default), `qwen3.8-max`, or `qwen3.8-flash`. `auto` lets Qwen choose. **Effort** is Off, Low, Medium, High (default), or Extra; the relay sends `reasoning_effort` and does not send `thinking_budget`. **Fast** still skips thinking for that question, even when Effort is High or Extra. The choice is remembered on this PC.
 
 The footer pill sets Chat, Plan, or Agent. The pane runs on Qwen. The dot is green when the Qwen key is loaded, amber when the relay is up and the key is not, and red when the relay is down.
 
@@ -353,7 +365,7 @@ The key is sent only to the relay on this computer. With **Remember key on this 
 
 A Token Plan key must not be used with this custom application backend unless Alibaba confirms the use is permitted. A normal Model Studio key must use its matching regional/workspace endpoint; the application's standard API and secure credential flow are not yet finalized. See the current [Alibaba API-key guidance](https://help.aliyun.com/en/model-studio/get-api-key) before using a supported release.
 
-A Token Plan key also carries its own model list, which is narrower than the public Qwen docs. `qwen-max`, `qwen-turbo`, and `qwen-plus` are not on it and return `400 Model not exist` — that reads like a broken URL but is not one. Set the model in Settings to one the key actually serves. `qwen4-max`, `qwen3.8-max`, `qwen3.7-plus`, and `qwen3.6-flash` were confirmed working on 2026-11-22.
+A Token Plan key also carries its own model list, which is narrower than the public Qwen docs. `qwen-max`, `qwen-turbo`, and `qwen-plus` are not on it and return `400 Model not exist` — that reads like a broken URL but is not one. The picker offers `auto`, `qwen4-max`, `qwen3.8-max`, and `qwen3.8-flash`. Any other id is rejected before the request is sent. `qwen4-max`, `qwen3.8-max`, `qwen3.7-plus`, and `qwen3.6-flash` were confirmed working on 2026-11-22; `qwen3.7-plus` and `qwen3.6-flash` are no longer in the picker.
 
 The relay listens on `127.0.0.1` only and rejects any other Host or Origin.
 

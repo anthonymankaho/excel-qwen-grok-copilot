@@ -35,15 +35,17 @@ The composer shows the current **Agent round out of 25** and what Agent is doing
 - **Word Chat** sends the selection; an empty selection sends the document body.
 - The **context card** shows the exact text being sent. **↻ Refresh** re-reads it.
 - **Share Office file data with AI** is a data-sharing switch, not a sheet-scope setting. Turn it off to prevent workbook/document metadata and Agent-requested ranges from being sent to Qwen. The add-in will stop a requested read and show **File sharing off**. Attachments are controlled separately.
-- **Attach HTML reports or text files** with **📎 Attach**. Supported types: HTML/HTM, TXT, MD, CSV, TSV, JSON, and XML. Choose up to 3 files, each at most 5 MB. The pane extracts up to 18,000 characters per file and includes at most 26,000 attachment characters in a question.
+- **Attach files** with **＋**. Text types (HTML/HTM, TXT, MD, CSV, TSV, JSON, XML) are up to 5 MB. PDF, DOCX, XLSX/XLSM, and PNG/JPG/WEBP go through the local relay and are up to 20 MB. Choose up to 3 files. The pane keeps up to 18,000 characters per file and at most 26,000 attachment characters in a question. PDF pages are numbered. Excel shows sheet coverage (`COMPLETE` or `INCOMPLETE` plus the next offset). Word keeps headings and table rows.
 - HTML is parsed as text and tables. Scripts, CSS, embedded charts/images, and links are not executed or interpreted. The extracted text and selected workbook context are sent to the chosen Qwen provider when you send a question. Review the context card before sending. Remove files to omit them from the next question; **New chat** clears the conversation and attachments.
-- **Cloud sources** (desktop/local relay only): press **Connect** for Personal OneDrive; the system browser opens so you can sign in to your own personal Microsoft account and approve read-only access. The app owner configures the public Microsoft OAuth app ID once; colleagues do not enter it in Settings. Search results and snippets stay in the pane. **Review and add to chat** fetches the selected item as text and adds it to the attachment list; it is sent to Qwen only with your next question. The connector does not edit OneDrive files. No account email address is hardcoded or saved by the add-in. OneDrive text review supports XLSX/XLSM, DOCX, HTML, TXT, MD, CSV, TSV, JSON, and XML. The hosted Excel-on-the-web pane does not support this connector.
+- **Cloud sources** (desktop/local relay only): press **Connect** for Personal OneDrive; the system browser opens so you can sign in to your own personal Microsoft account and approve read-only access. The app owner configures the public Microsoft OAuth app ID once; colleagues do not enter it in Settings. Search results and snippets stay in the pane. **Review and add to chat** fetches the selected item as text and adds it to the attachment list; it is sent to Qwen only with your next question. The connector does not edit OneDrive files. No account email address is hardcoded or saved by the add-in. OneDrive review supports PDF, DOCX, XLSX/XLSM, HTML, TXT, MD, CSV, TSV, JSON, and XML, with the same coverage line as an attachment. While Share is on, Agent can search and then read one of those files. The hosted Excel-on-the-web pane does not support this connector.
 - OAuth access tokens are held in local relay memory, used in HTTPS requests to the selected source, and cleared when the relay stops; reconnect after a restart.
 - **＋ Active sheet** is a Chat shortcut for the active Excel sheet on the next question only; it does not review every sheet in the workbook. For a whole-workbook review, ask Chat to "review the whole file": the pane scans every sheet for formula errors, profiles the ledgers, and computes per-voucher balance and export-vs-ledger checks, all read-only.
 - A truncation note means the read stopped at 150 rows × 30 columns, or 45,000 characters. Ask about a smaller range.
 - **Enter** sends; **Shift+Enter** adds a line. Quick actions: **Summarize**, **Explain**, **Write formula**, **Revise**.
 - The send button becomes **Stop** while streaming. **New chat** clears history and the audit trail.
-- **Fast** turns Qwen thinking off. Leave it off for a formula audit or a finance plan.
+- **Model**, in the composer and in Settings, is `auto`, `qwen4-max` (default), `qwen3.8-max`, or `qwen3.8-flash`. `auto` lets Qwen choose the model for that question. The choice is remembered on this PC. 作曲列與 Settings 的模型只此四個，預設 `qwen4-max`。`auto` 由 Qwen 為該題選擇模型。選擇會記在這部電腦。
+- **Effort** is Off, Low, Medium, High (default), or Extra. The relay sends `reasoning_effort` and does not send `thinking_budget`. Off skips thinking. Effort 為 Off、Low、Medium、High（預設）或 Extra。relay 傳送 `reasoning_effort`，不傳送 `thinking_budget`。Off 關閉思考。
+- **Fast** still skips thinking for that question, even when Effort is High or Extra. Leave Fast off and Effort at High for a formula audit or a finance plan. Fast 仍可對該題關閉思考，即使 Effort 是 High 或 Extra。公式覆核或財務計劃請關掉 Fast，Effort 保持 High。
 - The pane runs on **Qwen only** (Grok removed 2026-11-24); it sends nothing until the Qwen key is loaded.
 - Only the latest question carries workbook and attachment context; older turns keep their prose. A request sends at most 24 messages.
 
@@ -162,7 +164,7 @@ Two limits are properties of the platform, not unfinished work:
 
 - **Python in Excel.** Office.js exposes no API for it — it is a native cloud feature.
 - **The native Copilot surface.** A sideloaded task pane cannot become the ribbon-integrated Copilot pane, inline ghost suggestions, or the built-in Analyze Data experience.
-- **Attachment formats.** The picker currently reads HTML/HTM, TXT, MD, CSV, TSV, JSON, and XML. It does not parse PDF, DOCX, or XLSX attachments. HTML scripts and CSS are ignored; charts and images are not analyzed.
+- **Attachment formats.** The picker reads HTML/HTM, TXT, MD, CSV, TSV, JSON, XML, PDF, DOCX, XLSX/XLSM, PNG, JPG, and WEBP. PDF, Word, Excel, and images need the local relay. HTML scripts and CSS are ignored. A scanned PDF is transcribed one page at a time, up to 12 pages, with your own Qwen key. OneDrive review uses the same PDF, Word, and Excel reader and states coverage. Agent can search OneDrive and read one chosen file while Share is on. Saved skills are chosen from the description and the `triggers` line; `qwen-chat-assistant` is not attached to every question.
 
 Also: message plus context over 50,000 characters is rejected; the Agent loop is capped at 25 rounds (**Continue Agent · 繼續** resumes); raw range reads page with `offset` and profiles/finance checks cover the full requested range; and there is no audit export button yet.
 
@@ -198,7 +200,7 @@ Provider key 或登入帳戶電郵地址不會寫入 repository 或 audit card�
 | Stopped: validation failed | Leave the difference. Read the audit card. Do not force the totals |
 | Agent reached its 25-round limit | The model requested another step. Review the audit card, then choose **Continue Agent · 繼續** |
 | `Could not finish` with no answer | The status line and audit card now name the reason. A common cause is a relay process still running an older build: the pane detects the mismatch and says so — restart the relay (`npm run relay-stop`, then `npm run relay-ensure` for a hidden relay, or `npm start` to also re-sideload) and send again. The pane JS refreshes from disk on load; the relay process only picks up new code when restarted |
-| A reply will not finish | Press **Stop**; tick **Fast** if it is slow |
+| A reply will not finish | Press **Stop**. Set **Effort** to Off, or tick **Fast**, for a shorter reply |
 | A change is wrong | **Undo last apply**, or Excel `Ctrl+Z` |
 | Pane is Qwen-only | Grok was removed on 2026-11-24. Only the Qwen key is used, and nothing is sent until it is loaded |
 
@@ -207,6 +209,10 @@ For relay, sideload and install problems see `SOP-INSTALL.md` §10.
 ---
 
 ## 12. Processing status · 處理狀態
+
+**2026-11-25 — Model and Effort.** Build `2026-11-25.2`. Composer and Settings list `auto`, `qwen4-max` (default), `qwen3.8-max`, and `qwen3.8-flash`. Effort is Off, Low, Medium, High, or Extra. The relay sends `reasoning_effort` and never `thinking_budget`. Fast still forces thinking off. Restart the local relay after this bump. Hosted Worker was not deployed. `npm test` 123/123. Excel and Word were not opened for a live check.
+
+**2026-11-25 — 模型與 Effort。** 版本 `2026-11-25.2`。作曲列與 Settings 可選 `auto`、`qwen4-max`（預設）、`qwen3.8-max`、`qwen3.8-flash`。Effort 為 Off、Low、Medium、High 或 Extra。relay 傳送 `reasoning_effort`，不傳送 `thinking_budget`。Fast 仍強制關閉思考。此版本需重啟本機 relay。託管 Worker 未部署。`npm test` 123/123。未開啟 Excel 或 Word 做實機檢查。
 
 **2026-11-22 — Copilot-parity build verified in real Excel.**
 

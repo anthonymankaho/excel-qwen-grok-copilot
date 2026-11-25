@@ -134,6 +134,18 @@ test('groupBalance balances each voucher and crossCheck compares two ranges', ()
   assert.equal(JSON.stringify(scan.scanRequest), '{}');
 });
 
+test('a OneDrive source request keeps search and one-file read, and drops a blank query', () => {
+  const search = AgentCore.parseEnvelope('```json\n{"sourceRequest":{"action":"search","query":"October aging"},"decision":"CONTINUE"}\n```');
+  assert.equal(search.sourceRequest.action, 'search');
+  assert.equal(search.sourceRequest.query, 'October aging');
+  const read = AgentCore.parseEnvelope('```json\n{"sourceRequest":{"action":"read","id":"item-1","name":"aging.xlsx"},"decision":"CONTINUE"}\n```');
+  assert.equal(read.sourceRequest.action, 'read');
+  assert.equal(read.sourceRequest.id, 'item-1');
+  assert.equal(read.sourceRequest.name, 'aging.xlsx');
+  const blank = AgentCore.parseEnvelope('```json\n{"sourceRequest":{"action":"search","query":"  "},"decision":"CONTINUE"}\n```');
+  assert.equal(blank.sourceRequest, null);
+});
+
 test('a prose plan string is kept and a wide context request survives parsing', () => {
   const envelope = AgentCore.parseEnvelope('Reading first.\n```json\n{"plan":"1) Read the header row of Combined Aging (USD). 2) Add a Pivot - Aging tab. 3) Build a SUMIFS cross-tab.","actions":[],"contextRequest":{"sheet":"Combined Aging (USD)","range":"A1:Q6"},"decision":"CONTINUE"}\n```');
   assert.equal(envelope.plan.goal.startsWith('1) Read the header row'), true);

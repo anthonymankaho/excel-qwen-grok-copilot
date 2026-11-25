@@ -43,11 +43,12 @@ function fire(el, type, ev = {}) {
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, location, sheetNames, usedRanges, healthBuild, blockStorage, allowStorageAccess, officeStore, streamFailures = 0 }) {
+function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, location, sheetNames, usedRanges, healthBuild, blockStorage, allowStorageAccess, officeStore, streamFailures = 0, prefs }) {
   const els = new Map();
   const defaults = { provider: 'qwen', qwenModel: 'qwen4-max', qwenEndpoint: 'https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions' };
   const get = id => { if (!els.has(id)) { const el = makeElement(id); if (defaults[id]) el.value = defaults[id]; if (id === 'includeContext' || id === 'rememberKey') el.checked = true; els.set(id, el); } return els.get(id); };
   const store = seedKeys ? { 'eqgc.keys.v1': JSON.stringify(seedKeys) } : {};
+  if (prefs) store['eqgc.chat.v1'] = JSON.stringify(prefs);
   const writes = [];
   const calls = [];
   let streamTurn = 0;
@@ -368,7 +369,9 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
     fetch: async (url, opts) => {
       const body = opts?.body ? JSON.parse(opts.body) : null;
       calls.push({ url, body, headers: opts?.headers || {} });
-      if (url.endsWith('/api/health')) return { ok: true, status: 200, json: async () => ({ ok: true, build: healthBuild || '2026-11-24.10', configured: { qwen: true } }) };
+      if (url.endsWith('/api/health')) return { ok: true, status: 200, json: async () => ({ ok: true, build: healthBuild || '2026-11-25.2', configured: { qwen: true } }) };
+      if (url.endsWith('/api/connectors/search')) return { ok: true, status: 200, json: async () => ({ items: [{ id: 'item-1', name: 'aging.xlsx', detail: 'sheet' }] }) };
+      if (url.endsWith('/api/connectors/read')) return { ok: true, status: 200, json: async () => ({ name: body.item.name, kind: 'XLSX', text: 'Coverage: COMPLETE\nGJ001 | 100' }) };
       if (url.endsWith('/api/extract')) return { ok: true, status: 200, json: async () => ({ text: '[Sheet: Data]\nL1: Voucher | Debit\nL2: GJ001 | 100', kind: 'XLSX' }) };
       if (url.endsWith('/api/sessions/delete')) return { ok: true, status: 200, json: async () => ({ ok: true }) };
       if (url.includes('/api/sessions/read')) return { ok: true, status: 200, json: async () => ({ id: 's-old-1', started: '2026-11-24T09:00:00Z', prompt: 'review whole file', messages: [{ role: 'user', content: 'review whole file' }, { role: 'assistant', content: 'Old report.' }], audit: [], checkpoint: { prompt: 'review whole file', progress: [], observation: '' } }) };
@@ -545,6 +548,64 @@ test('Fast toggle is sent to the relay as fast flag', async () => {
   sb.els('fastMode').checked = true;
   await ask(sb, 'quicker');
   assert.equal(chatCalls(sb).at(-1).body.fast, true);
+});
+
+test('composer Model and Effort are sent with the question', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall });
+  await boot(sb);
+  sb.els('modelPick').value = 'qwen3.8-flash';
+  await fire(sb.els('modelPick'), 'change');
+  sb.els('effortMode').value = 'low';
+  await ask(sb, 'draft the journal');
+  const body = chatCalls(sb).at(-1).body;
+  assert.equal(body.model, 'qwen3.8-flash');
+  assert.equal(body.effort, 'low');
+  assert.equal(body.fast, false);
+  assert.equal(sb.els('qwenModel').value, 'qwen3.8-flash');
+});
+
+test('Agent sends the selected Effort', async () => {
+  const reply = { text: 'Done.\n```json\n{"actions":[],"decision":"COMPLETE"}\n```', model: 'qwen4-max' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  sb.els('effortMode').value = 'xhigh';
+  await ask(sb, 'review the sheet');
+  assert.equal(chatCalls(sb).at(-1).body.effort, 'xhigh');
+  assert.equal(chatCalls(sb).at(-1).body.mode, 'agent');
+});
+
+test('only auto, qwen4-max, qwen3.8-max, and qwen3.8-flash can be selected', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall });
+  await boot(sb);
+  sb.els('modelPick').value = 'qwen3.7-plus';
+  await fire(sb.els('modelPick'), 'change');
+  assert.equal(sb.els('qwenModel').value, 'qwen4-max');
+  sb.els('modelPick').value = 'auto';
+  await fire(sb.els('modelPick'), 'change');
+  sb.els('effortMode').value = 'medium';
+  await fire(sb.els('effortMode'), 'change');
+  await ask(sb, 'hi');
+  assert.equal(chatCalls(sb).at(-1).body.model, 'auto');
+  assert.equal(chatCalls(sb).at(-1).body.effort, 'medium');
+  assert.equal(JSON.parse(sb.store['eqgc.chat.v1']).model, 'auto');
+  assert.equal(JSON.parse(sb.store['eqgc.chat.v1']).effort, 'medium');
+});
+
+test('a remembered Model and Effort are restored into the composer', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, prefs: { model: 'qwen3.8-max', effort: 'xhigh' } });
+  await boot(sb);
+  assert.equal(sb.els('qwenModel').value, 'qwen3.8-max');
+  assert.equal(sb.els('modelPick').value, 'qwen3.8-max');
+  assert.equal(sb.els('effortMode').value, 'xhigh');
+});
+
+test('a remembered model outside the supported list falls back to qwen4-max', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, prefs: { model: 'qwen3.7-plus', effort: 'low' } });
+  await boot(sb);
+  assert.equal(sb.els('qwenModel').value, 'qwen4-max');
+  assert.equal(sb.els('modelPick').value, 'qwen4-max');
+  assert.equal(sb.els('effortMode').value, 'low');
 });
 
 test('edit card shows old → new; Apply then Undo restores originals', async () => {
@@ -1121,6 +1182,36 @@ test('Copilot-style sidebar hides the five browse cards and Share quick toggle m
   assert.equal(sb.els('sidebar').classList.contains('hidden'), true);
   await fire(sb.els('sidebarToggle'), 'click');
   assert.equal(sb.els('sidebar').classList.contains('hidden'), false);
+});
+
+test('DOCX attachments are extracted by the local relay', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Ok.', model: 'm' } });
+  await boot(sb);
+  const picker = sb.els('attachmentPicker');
+  picker.files = [{ name: 'memo.docx', size: 1000, arrayBuffer: async () => new Uint8Array([80, 75]).buffer }];
+  await fire(picker, 'change', { target: picker }); await flush();
+  const extract = sb.calls.find(c => String(c.url).endsWith('/api/extract'));
+  assert.ok(extract);
+  assert.equal(extract.body.name, 'memo.docx');
+});
+
+test('Agent reads one OneDrive file when the model asks and Share is on', async () => {
+  const sb = makeSandbox({
+    selection: singleEmpty,
+    used: usedSmall,
+    reply: { turns: [
+      '```json\n{"sourceRequest":{"action":"read","id":"item-1","name":"aging.xlsx"},"decision":"CONTINUE"}\n```',
+      'The file is in.\n```json\n{"decision":"COMPLETE"}\n```'
+    ] }
+  });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  await ask(sb, 'Read the October aging from OneDrive');
+  const read = sb.calls.find(c => String(c.url).endsWith('/api/connectors/read'));
+  assert.ok(read);
+  assert.equal(read.body.item.id, 'item-1');
+  assert.equal(read.body.item.name, 'aging.xlsx');
+  assert.match(lastContent(sb), /GJ001 \| 100/);
 });
 
 test('XLSX attachments are extracted by the local relay and attached as evidence', async () => {

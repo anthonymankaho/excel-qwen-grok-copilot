@@ -16,7 +16,11 @@ Each person uses **their own API key**. The owner's Token Plan key stays on the 
 | Folder | The folder that holds `manifest.xml`. Every command below runs from there |
 | Key | Your own Qwen key. Nothing is bundled |
 
-The pane and the local relay both live at `http://127.0.0.1:3000`. The local manifest is version **1.2.0.0**; the hosted manifest is **1.3.0.0**.
+The pane and the local relay both live at `http://127.0.0.1:3000`. Both manifests are version **1.5.0.0**. The local build to use is **2026-11-25.2**.
+
+**This PC’s folder is `C:\Users\User\Desktop\excel-qwen-grok-copilot`.** Run every `npm` command from that folder. PowerShell opened in `C:\WINDOWS\System32` cannot see `package.json` and fails with `ENOENT`. The older folder `C:\Users\User\Desktop\Excel Qwen Grok Copilot` is an archived checkout. Do not install or edit it.
+
+**這部電腦的資料夾是 `C:\Users\User\Desktop\excel-qwen-grok-copilot`。** 所有 `npm` 指令都在該資料夾執行。在 `C:\WINDOWS\System32` 執行會找不到 `package.json`。較舊的 `C:\Users\User\Desktop\Excel Qwen Grok Copilot` 是已封存的副本，不要在那裡安裝或修改。
 
 > **Quote every path.** If your user folder contains a space — e.g. `C:\Users\Anthony Man` — an unquoted path breaks in PowerShell. Always write `cd "C:\Users\Your Name\..."`.
 > **每個路徑都要加引號。** 使用者資料夾若含空格（例如 `C:\Users\Anthony Man`），未加引號的路徑在 PowerShell 會失敗。
@@ -49,10 +53,12 @@ That writes `download/Qwen-for-Excel-and-Word.zip`, including a generated `START
 **Close Excel and Word first.** The sideload cannot register while they are open.
 
 ```powershell
-cd "C:\Users\Your Name\Qwen-for-Excel-and-Word"
+Set-Location "C:\Users\User\Desktop\excel-qwen-grok-copilot"
 npm run setup
 npm start
 ```
+
+On another PC, use the folder where you extracted the zip or cloned the repo. Quote the path when it contains a space.
 
 - **`npm run setup`** checks your Node version, runs `npm install`, and prints the next steps. It installs **no** auto-start and writes **no** key.
 - **`npm start`** sideloads `manifest.xml` into desktop Excel and opens Excel. **Leave that terminal window open — it *is* the relay.** Closing it stops the relay.
@@ -159,11 +165,14 @@ The sideload persists across Excel restarts until `npm run stop`. It is register
 ### After a code change 程式碼變更後
 
 ```powershell
+Set-Location "C:\Users\User\Desktop\excel-qwen-grok-copilot"
 npm run relay-stop
-npm start
+npm run relay-ensure
 ```
 
-**The relay caches its prompt at process start**, so a prompt change needs a restart. Pane files are served with `no-store`, so reopening the pane is enough for those. On another computer, `git pull` first.
+Then close the task pane and open it again. `npm start` is only needed when you also want to re-sideload and open Excel. Run these commands inside the project folder, not from `C:\WINDOWS\System32`.
+
+**The relay loads its code at process start**, so a code change needs a restart. Pane files are served with `no-store`, so reopening the pane loads the new screen. On another computer, `git pull` first. The pane and relay builds must match. Build **2026-11-25.2** adds the model list (`auto`, `qwen4-max`, `qwen3.8-max`, `qwen3.8-flash`) and Effort (Off, Low, Medium, High, Extra). See `SOP-USER-GUIDE.md`.
 
 A restart clears keys held only in relay memory. If **Remember key** was ticked, the pane reloads it automatically on reconnect; otherwise re-enter it in Settings.
 
@@ -186,7 +195,8 @@ If auto-start is installed, `relay-stop` alone is not enough — the minute task
 
 | What you see | What to do |
 |---|---|
-| `Set-Location : 找不到接受引數 ... 的位置參數` | The path has a space and was not quoted. Use `cd "C:\Users\Your Name\..."` |
+| `Could not read package.json` / `ENOENT` | PowerShell is not in the project folder. Run `Set-Location "C:\Users\User\Desktop\excel-qwen-grok-copilot"` first. On this PC that is the only live folder |
+| `Set-Location : 找不到接受引數 ... 的位置參數` | The path has a space and was not quoted. Use `Set-Location "C:\Users\Your Name\..."` |
 | `npm start` fails to sideload | Excel or Word is still open. Close both and retry |
 | Relay unavailable in Settings | The terminal running the relay was closed. Run `npm start` or `npm run dev-server` again |
 | Port 3000 in use | `npm run relay-stop`, then start again |
@@ -196,7 +206,7 @@ If auto-start is installed, `relay-stop` alone is not enough — the minute task
 | Word does not list the add-in | `npm run start:word` with Word closed |
 | `npm test` shows 2 failures about `unzip` | Older packs only. Current versions read the zip in Node and pass on Windows |
 | Provider HTTP 401 | Key and URL do not match — see `SOP-USER-GUIDE.md` §7 |
-| `Model not exist` (HTTP 400) | That model is not on your key's plan. Change the model in Settings |
+| `Model not exist` or `Unsupported model` | Use `auto`, `qwen4-max`, `qwen3.8-max`, or `qwen3.8-flash` in the composer or Settings |
 
 ---
 
@@ -211,6 +221,10 @@ If auto-start is installed, `relay-stop` alone is not enough — the minute task
 ---
 
 ## 12. Processing status · 處理狀態
+
+**2026-11-25 — Folder, build, and restart.** This PC uses `C:\Users\User\Desktop\excel-qwen-grok-copilot` only. Local build `2026-11-25.2`. Both manifests are `1.5.0.0`. After a code change, run `npm run relay-stop` then `npm run relay-ensure` from that folder and reopen the pane. The hosted Worker was not redeployed. `npm test` 123/123.
+
+**2026-11-25 — 資料夾、版本與重啟。** 這部電腦只用 `C:\Users\User\Desktop\excel-qwen-grok-copilot`。本機版本 `2026-11-25.2`。兩個 manifest 都是 `1.5.0.0`。程式變更後，在該資料夾執行 `npm run relay-stop`，再執行 `npm run relay-ensure`，然後重新開啟窗格。託管 Worker 未重新部署。`npm test` 123/123。
 
 **2026-11-22 — CLI install path added; docs split in two.**
 

@@ -49,6 +49,46 @@ test('Fast disables Qwen thinking; bad models and non-Qwen providers are rejecte
   assert.equal(evil.status, 400);
 });
 
+test('Effort sets reasoning_effort on models that support it and never sends a thinking budget', () => {
+  for (const effort of ['low', 'medium', 'high', 'xhigh']) {
+    const prepared = prepareChat({ provider: 'qwen', endpoint: qwenUrl, messages, effort }, secrets);
+    assert.equal(prepared.payload.enable_thinking, true, effort);
+    assert.equal(prepared.payload.reasoning_effort, effort);
+    assert.equal(prepared.payload.thinking_budget, undefined);
+  }
+  const flash = prepareChat({ provider: 'qwen', endpoint: qwenUrl, messages, model: 'qwen3.8-flash', effort: 'MEDIUM' }, secrets);
+  assert.equal(flash.payload.model, 'qwen3.8-flash');
+  assert.equal(flash.payload.reasoning_effort, 'medium');
+  assert.equal(flash.payload.enable_thinking, true);
+  const auto = prepareChat({ provider: 'qwen', endpoint: qwenUrl, messages, model: 'auto', effort: 'high' }, secrets);
+  assert.equal(auto.payload.model, 'auto');
+  assert.equal(auto.payload.enable_thinking, true);
+  assert.equal(auto.payload.reasoning_effort, 'high');
+  assert.equal(auto.payload.thinking_budget, undefined);
+  const unsupported = prepareChat({ provider: 'qwen', endpoint: qwenUrl, messages, model: 'qwen3.7-plus', effort: 'high' }, secrets);
+  assert.equal(unsupported.status, 400);
+});
+
+test('Effort Off, none, and Fast turn thinking off without reasoning_effort', () => {
+  for (const effort of ['off', 'none', 'OFF']) {
+    const prepared = prepareChat({ provider: 'qwen', endpoint: qwenUrl, messages, effort }, secrets);
+    assert.equal(prepared.payload.enable_thinking, false, effort);
+    assert.equal(prepared.payload.reasoning_effort, undefined);
+  }
+  const fastWins = prepareChat({ provider: 'qwen', endpoint: qwenUrl, messages, fast: true, effort: 'xhigh' }, secrets);
+  assert.equal(fastWins.payload.enable_thinking, false);
+  assert.equal(fastWins.payload.reasoning_effort, undefined);
+  const omitted = prepareChat({ provider: 'qwen', endpoint: qwenUrl, messages }, secrets);
+  assert.equal(omitted.payload.enable_thinking, undefined);
+  assert.equal(omitted.payload.reasoning_effort, undefined);
+});
+
+test('an unknown Effort is rejected', () => {
+  const bad = prepareChat({ provider: 'qwen', endpoint: qwenUrl, messages, effort: 'max' }, secrets);
+  assert.equal(bad.status, 400);
+  assert.match(bad.error, /effort/i);
+});
+
 test('SSE tails and provider failures are not dropped', () => {
   const partial = takeSseDataLines('data: {"model":"qwen4-max","choices":[{"delta":{"content":"Hi"}}]}');
   assert.equal(partial.data.length, 0);

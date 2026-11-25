@@ -49,6 +49,22 @@
     return {};
   }
 
+  function normalizeSourceRequest(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    if (raw.action === 'search') {
+      const query = typeof raw.query === 'string' ? raw.query.trim() : '';
+      if (!query || query.length > 300) return null;
+      return { action: 'search', query };
+    }
+    if (raw.action === 'read') {
+      const id = typeof raw.id === 'string' ? raw.id.trim() : '';
+      const name = typeof raw.name === 'string' ? raw.name.trim() : '';
+      if (!id || !name || id.length > 500 || name.length > 500) return null;
+      return { action: 'read', id, name };
+    }
+    return null;
+  }
+
   function normalizePlan(raw) {
     // Models often send plan as prose rather than an object; keep it instead of dropping it.
     if (typeof raw === 'string' && raw.trim()) raw = { goal: raw };
@@ -92,7 +108,7 @@
       try {
         const parsed = JSON.parse(blocks[i][1]);
         if (!parsed || typeof parsed !== 'object') continue;
-        if (!parsed.plan && !parsed.decision && !parsed.contextRequest && !parsed.profileRequest && !parsed.scanRequest && !parsed.actions) continue;
+        if (!parsed.plan && !parsed.decision && !parsed.contextRequest && !parsed.profileRequest && !parsed.scanRequest && !parsed.sourceRequest && !parsed.actions) continue;
         const prose = (source.slice(0, blocks[i].index) + source.slice(blocks[i].index + blocks[i][0].length)).trim();
         return {
           prose,
@@ -101,11 +117,12 @@
           decision: normalizeDecision(parsed.decision),
           contextRequest: normalizeContextRequest(parsed.contextRequest),
           profileRequest: normalizeProfileRequest(parsed.profileRequest),
-          scanRequest: normalizeScanRequest(parsed.scanRequest)
+          scanRequest: normalizeScanRequest(parsed.scanRequest),
+          sourceRequest: normalizeSourceRequest(parsed.sourceRequest)
         };
       } catch { /* not this block */ }
     }
-    return { prose: source, plan: null, actions: null, decision: '', contextRequest: null, profileRequest: null, scanRequest: null };
+    return { prose: source, plan: null, actions: null, decision: '', contextRequest: null, profileRequest: null, scanRequest: null, sourceRequest: null };
   }
 
   function isFinancePrompt(text) {

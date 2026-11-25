@@ -2,8 +2,7 @@ import { spawn } from 'node:child_process';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { McpServer } from '@modelcontextprotocol/server';
 import { PublicClientApplication } from '@azure/msal-node';
-import ExcelJS from 'exceljs';
-import mammoth from 'mammoth';
+import { extractDocx, extractPdf, extractWorkbook } from './extract-files.mjs';
 import { z } from 'zod';
 
 const GRAPH_SCOPES = ['Files.Read'];
@@ -43,20 +42,6 @@ function htmlToText(value) {
     .replace(/ *\n */g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-}
-
-function cellText(value, displayText = '') {
-  if (value == null) return '';
-  if (value instanceof Date) return displayText || value.toISOString();
-  if (typeof value === 'object') {
-    if (Array.isArray(value.richText)) return value.richText.map(part => part.text || '').join('');
-    if (value.formula) return `${displayText || value.result || ''} [=${value.formula}]`;
-    if ('text' in value) return String(value.text ?? '');
-    if ('result' in value) return String(value.result ?? '');
-    if ('hyperlink' in value) return String(value.hyperlink ?? '');
-    return '';
-  }
-  return displayText || String(value);
 }
 
 function truncateText(value, max = MAX_SOURCE_CHARS) {
@@ -109,9 +94,9 @@ export class LocalSourceMcp {
       inputSchema: { query: z.string().min(1).max(300) }
     }, async ({ query }) => textResult(await this.searchOneDrive(query)));
     this.server.registerTool('onedrive_read', {
-      description: 'Read text from one selected personal OneDrive file. Read only.',
+      description: 'Read text from one selected personal OneDrive file. Read only. PDF, Word, and Excel include a coverage line.',
       inputSchema: { fileId: z.string().min(1).max(500), name: z.string().min(1).max(500) }
-    }, async ({ fileId, name }) => textResult(await this.readOneDrive(fileId, name)));
+    }, async ({ fileId, name }) => textResult(await this.readOneDrive(fileId, name, { transcribePage: this._transcribePage || null })));
 
     this.ready = Promise.all([
       this.server.connect(serverTransport),
@@ -254,40 +239,21 @@ export class LocalSourceMcp {
     return buffer;
   }
 
-  async readOneDrive(fileId, name) {
+  async readOneDrive(fileId, name, hooks = {}) {
     const ext = String(name).split('.').pop().toLowerCase();
     const buffer = await this.downloadOneDriveFile(fileId);
     let extracted = '';
     if (['xlsx', 'xlsm'].includes(ext)) {
-      const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(buffer);
-      const rows = [];
-      let charCount = 0;
-      for (const sheet of workbook.worksheets) {
-        rows.push(`## Sheet: ${sheet.name}`);
-        for (let rowNumber = 1; rowNumber <= Math.min(sheet.rowCount, 1500); rowNumber++) {
-          const row = sheet.getRow(rowNumber);
-          const cells = [];
-          for (let column = 1; column <= Math.min(sheet.columnCount, 60); column++) {
-            const cell = row.getCell(column);
-            cells.push(cellText(cell.value, cell.text));
-          }
-          const line = cells.join('\t').replace(/[\t ]+$/g, '');
-          if (line.trim()) rows.push(line);
-          charCount += line.length + 1;
-          if (charCount >= MAX_SOURCE_CHARS) break;
-        }
-        if (charCount >= MAX_SOURCE_CHARS) break;
-      }
-      extracted = rows.join('\n');
+      extracted = (await extractWorkbook(buffer)).text;
     } else if (ext === 'docx') {
-      const result = await mammoth.extractRawText({ buffer });
-      extracted = result.value;
+      extracted = (await extractDocx(buffer)).text;
+    } else if (ext === 'pdf') {
+      extracted = (await extractPdf(buffer, { transcribePage: hooks.transcribePage || null })).text;
     } else if (['txt', 'md', 'csv', 'tsv', 'json', 'xml', 'html', 'htm'].includes(ext)) {
       extracted = buffer.toString('utf8');
       if (ext === 'html' || ext === 'htm' || ext === 'xml') extracted = htmlToText(extracted);
     } else {
-      throw new Error('OneDrive review supports XLSX/XLSM, DOCX, HTML, TXT, MD, CSV, TSV, JSON and XML files.');
+      throw new Error('OneDrive review supports PDF, DOCX, XLSX/XLSM, HTML, TXT, MD, CSV, TSV, JSON and XML files.');
     }
     if (!String(extracted).trim()) throw new Error('OneDrive did not return readable text for this file.');
     return { name, kind: `OneDrive ${ext.toUpperCase()}`, ...truncateText(extracted) };
@@ -299,10 +265,12 @@ export class LocalSourceMcp {
     return this.invoke('onedrive_search', { query: query.trim() });
   }
 
-  async read(source, input = {}) {
+  async read(source, input = {}, hooks = {}) {
     if (source !== 'onedrive' || typeof input.id !== 'string' || !input.id || input.id.length > 500) throw new Error('Choose a valid OneDrive search result to read.');
     if (typeof input.name !== 'string' || !input.name || input.name.length > 500) throw new Error('The OneDrive file name is invalid.');
-    return this.invoke('onedrive_read', { fileId: input.id, name: input.name });
+    this._transcribePage = hooks.transcribePage || null;
+    try { return await this.invoke('onedrive_read', { fileId: input.id, name: input.name }); }
+    finally { this._transcribePage = null; }
   }
 
   async disconnect(source) {

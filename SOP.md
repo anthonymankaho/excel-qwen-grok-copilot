@@ -9,6 +9,8 @@ The runbook is now split in two. Pick the one you need:
 
 `README.md` is the full reference. `START-HERE.txt` inside the download zip is the one-page quick start.
 
+On this PC the live folder is `C:\Users\User\Desktop\excel-qwen-grok-copilot`. The folder `C:\Users\User\Desktop\Excel Qwen Grok Copilot` is an archived checkout of the same GitHub repo. Do not use it.
+
 **Each person uses their own API key.** The owner's Token Plan key is never shared, never committed, and never pasted into chat.
 
 ---
@@ -16,5 +18,7 @@ The runbook is now split in two. Pick the one you need:
 文件現一分為二：**[SOP-INSTALL.md](SOP-INSTALL.md)** 是安裝程序（先決條件、取得檔案、CLI 安裝 `npm run setup` → `npm start`、雙擊替代方案與 auto-start 實際會加什麼、Word、hosted／網頁版 pane、驗證安裝、日常運作、停止與移除、安裝疑難排解、交給隊友）；**[SOP-USER-GUIDE.md](SOP-USER-GUIDE.md)** 是說明書（三種模式與 Direct、發問與上下文控制、所有可改動項目、什麼要等點擊、讀懂卡片、Undo、金鑰／URL／模型、財務工作、做不到什麼、什麼會離開電腦、使用疑難排解）。
 
 `README.md` 是完整參考。下載 zip 內的 `START-HERE.txt` 是一頁快速開始。
+
+這部電腦的使用中資料夾是 `C:\Users\User\Desktop\excel-qwen-grok-copilot`。`C:\Users\User\Desktop\Excel Qwen Grok Copilot` 是同一 GitHub repo 的封存副本，不要使用。
 
 **每人使用自己的 API key。** 擁有人的 Token Plan key 絕不共享、絕不提交、絕不貼入對話。

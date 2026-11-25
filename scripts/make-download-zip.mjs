@@ -47,11 +47,17 @@ OPTIONAL CLOUD SOURCES
 WORD
    Close Word, then in this folder run:  npm run start:word
 
+MODEL AND EFFORT
+   The composer offers auto, qwen4-max, qwen3.8-max, and qwen3.8-flash.
+   Effort is Off, Low, Medium, High, or Extra. Fast skips thinking.
+
 EXCEL ON THE WEB
    Upload manifest.cloudflare.xml from Home > Add-ins > Upload My Add-in.
    Pane address: https://excel-qwen-grok.anthonym-354.workers.dev
-   Paste the relay token in Settings. Provider keys are Worker secrets set
-   with wrangler; they are not in this zip.
+   Each person pastes their own Qwen key. Do not use a Token Plan key
+   with this custom add-in unless Alibaba confirms permission.
+   No provider key is in this zip. The hosted Worker was not updated
+   with the 2026-11-25.2 local build.
 
 DOCS
    SOP-INSTALL.md     installation, CLI steps, troubleshooting

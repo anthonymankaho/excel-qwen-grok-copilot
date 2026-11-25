@@ -1,5 +1,7 @@
 const API = '';
-const PANE_BUILD = '2026-11-24.10'; // Must match relay-core RELAY_BUILD; a stale relay process is detected and reported.
+const PANE_BUILD = '2026-11-25.2'; // Must match relay-core RELAY_BUILD; a stale relay process is detected and reported.
+const CHAT_MODELS = ['auto', 'qwen4-max', 'qwen3.8-max', 'qwen3.8-flash'];
+const CHAT_EFFORTS = ['off', 'low', 'medium', 'high', 'xhigh'];
 const CONTEXT_CAP = 45_000; // Relay rejects messages over 50,000 chars; leave room for the prompt itself.
 const ATTACHMENT_CAP = 26_000;
 const ATTACHMENT_FILE_CAP = 18_000;
@@ -634,14 +636,14 @@ function htmlAttachmentText(source) {
 async function readAttachment(file) {
   const ext = file.name.split('.').pop().toLowerCase();
   const local = new Set(['html', 'htm', 'txt', 'md', 'csv', 'tsv', 'json', 'xml']);
-  const relayed = new Set(['pdf', 'xlsx', 'xlsm', 'png', 'jpg', 'jpeg', 'webp']);
-  if (!local.has(ext) && !relayed.has(ext)) throw new Error(`${file.name}: supported files are HTML, TXT, MD, CSV, TSV, JSON, XML, PDF, XLSX, XLSM, PNG, JPG and WEBP.`);
+  const relayed = new Set(['pdf', 'docx', 'xlsx', 'xlsm', 'png', 'jpg', 'jpeg', 'webp']);
+  if (!local.has(ext) && !relayed.has(ext)) throw new Error(`${file.name}: supported files are HTML, TXT, MD, CSV, TSV, JSON, XML, PDF, DOCX, XLSX, XLSM, PNG, JPG and WEBP.`);
   const cap = relayed.has(ext) ? ATTACHMENT_RELAY_MAX_BYTES : ATTACHMENT_MAX_BYTES;
   if (file.size > cap) throw new Error(`${file.name}: file is over the ${Math.round(cap / 1024 / 1024)} MB limit.`);
   let extracted;
   if (relayed.has(ext)) {
-    // Binary formats are extracted by the local relay (exceljs / pdftotext); the pane never parses them.
-    if (hostedRelay()) throw new Error(`${file.name}: PDF/XLSX extraction needs the local relay on this PC.`);
+    // Binary formats are extracted by the local relay; the pane never parses them.
+    if (hostedRelay()) throw new Error(`${file.name}: PDF, Word, and Excel extraction needs the local relay on this PC.`);
     const bytes = new Uint8Array(await file.arrayBuffer());
     let binary = '';
     for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -2047,6 +2049,42 @@ function operatingMode() {
   return value === 'chat' || value === 'plan' || value === 'agent' ? value : 'legacy';
 }
 
+function selectedModel() {
+  const value = $('qwenModel').value.trim();
+  return CHAT_MODELS.includes(value) ? value : 'qwen4-max';
+}
+
+function selectedEffort() {
+  const value = String($('effortMode')?.value || '').trim().toLowerCase();
+  return CHAT_EFFORTS.includes(value) ? value : '';
+}
+
+function chatFields() {
+  const effort = selectedEffort();
+  return { model: selectedModel(), fast: Boolean($('fastMode').checked), ...(effort ? { effort } : {}) };
+}
+
+function saveChatPrefs() {
+  try { localStorage.setItem('eqgc.chat.v1', JSON.stringify({ model: selectedModel(), effort: selectedEffort() })); } catch { /* storage optional */ }
+}
+
+function syncModel(sourceId) {
+  const picked = $(sourceId).value.trim();
+  const model = CHAT_MODELS.includes(picked) ? picked : 'qwen4-max';
+  $('qwenModel').value = model;
+  $('modelPick').value = model;
+  saveChatPrefs();
+}
+
+function restoreChatPrefs() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('eqgc.chat.v1') || '{}'); } catch { saved = {}; }
+  const model = CHAT_MODELS.includes(saved.model) ? saved.model : selectedModel();
+  $('qwenModel').value = model;
+  $('modelPick').value = model;
+  if (CHAT_EFFORTS.includes(saved.effort)) $('effortMode').value = saved.effort;
+}
+
 async function readWorkbookMeta() {
   if (!state.officeReady) return null;
   if (state.host === 'Word') {
@@ -2370,7 +2408,7 @@ async function routeForPrompt(text, mode) {
   if (hostedRelay()) configured = { qwen: Boolean(byoKey()) };
   const routed = AgentCore.routeProvider({ selected: 'qwen', ready: configured });
   if (routed.error) return routed;
-  return { ...routed, model: $('qwenModel').value.trim(), endpoint: $('qwenEndpoint').value.trim(), relayBuild, buildMismatch: Boolean(relayBuild) && relayBuild !== PANE_BUILD };
+  return { ...routed, model: selectedModel(), endpoint: $('qwenEndpoint').value.trim(), relayBuild, buildMismatch: Boolean(relayBuild) && relayBuild !== PANE_BUILD };
 }
 
 function renderAuditCard() {
@@ -2688,9 +2726,11 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
     state.messages.push({ role: 'user', content });
     if (resumeContext) state.messages.push({ role: 'user', content: resumeContext });
     const fileNames = state.attachments.map(file => file.name);
-    renderMessage('user', displayPrompt + (fileNames.length ? `\n\nAttachments: ${fileNames.join(', ')}` : '') + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
+    const skillNames = skillCtx?.selected?.length ? `\n\nSkills: ${skillCtx.selected.join(', ')}` : '';
+    renderMessage('user', displayPrompt + (fileNames.length ? `\n\nAttachments: ${fileNames.join(', ')}` : '') + skillNames + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
     state.audit.push(AgentCore.audit({ kind: 'context', address: ctx?.address || 'none', chars: ctx?.chars || 0 }));
     if (skillText) state.audit.push(AgentCore.audit({ kind: 'context', address: `skills ${skillCtx.selected.join(', ')}`, chars: skillText.length }));
+    if (skillCtx?.selected?.length) renderAuditCard();
     if (memoryText) state.audit.push(AgentCore.audit({ kind: 'context', address: 'memory', chars: memoryText.length }));
     if (state.attachments.length) state.audit.push(AgentCore.audit({ kind: 'context', address: fileNames.join(', '), chars: files.length }));
     let guard = 0;
@@ -2701,7 +2741,8 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
         showAgentStatus(run.round, 'Waiting for model · 等候模型');
       }
       const messages = dedupContext(state.messages.slice(-24), resumeContext && guard === 0 ? 2 : 1);
-      const result = await streamChat({ provider: routed.provider, model: routed.model, endpoint: routed.endpoint, messages, fast: $('fastMode').checked, host: state.host === 'Word' ? 'word' : 'excel', mode });
+      const fields = chatFields();
+      const result = await streamChat({ provider: routed.provider, model: fields.model, endpoint: routed.endpoint, messages, fast: fields.fast, effort: fields.effort, host: state.host === 'Word' ? 'word' : 'excel', mode });
       if (interrupted()) return;
       const envelope = AgentCore.parseEnvelope(result.text);
       const revision = parseRevision(result.text);
@@ -2713,7 +2754,7 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
       result.bubble.children[result.bubble.children.length - 1].textContent = state.lastAnswer || '(model returned only a JSON envelope; see the audit card)';
       state.audit.push(AgentCore.audit({ kind: 'model', round: run?.round, provider: routed.provider, model: result.model, decision: envelope.decision || 'COMPLETE', plan: envelope.plan?.goal || '' }));
       const normalized = envelope.actions ? normalizeActions(envelope.actions) : { actions: revision.actions || [], skipped: revision.skipped || 0 };
-      if (!$('includeContext').checked && (envelope.profileRequest || envelope.contextRequest || envelope.scanRequest || usableChecks(envelope.plan).length)) {
+      if (!$('includeContext').checked && (envelope.profileRequest || envelope.contextRequest || envelope.scanRequest || envelope.sourceRequest || usableChecks(envelope.plan).length)) {
         observe('Office file sharing is off. No workbook or document range was read or sent to AI. Turn on Share Office file data with AI to review the open file.');
         state.audit.push(AgentCore.audit({ kind: 'blocked', reason: 'Office file sharing is off' }));
         outcome = 'File sharing off · 檔案分享已關閉';
@@ -2723,6 +2764,37 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
         renderModePlan(envelope.plan, normalized.actions, normalized.skipped);
         outcome = normalized.actions.length ? 'Review required · 等候審批' : 'Input required · 等候輸入';
         break;
+      }
+      if (envelope.sourceRequest && !normalized.actions.length) {
+        if (hostedRelay()) {
+          observe('OneDrive search and file reading are available on the local relay on this PC. Nothing was read.');
+          state.audit.push(AgentCore.audit({ kind: 'blocked', reason: 'OneDrive needs the local relay' }));
+          outcome = 'Local relay required · 需要本機 relay';
+          break;
+        }
+        showAgentStatus(run?.round || 1, envelope.sourceRequest.action === 'search' ? 'Searching OneDrive · 搜尋 OneDrive' : 'Reading OneDrive file · 讀取 OneDrive 檔案');
+        try {
+          if (envelope.sourceRequest.action === 'search') {
+            const result = await api('connectors/search', { source: 'onedrive', query: envelope.sourceRequest.query });
+            const items = Array.isArray(result.items) ? result.items : [];
+            const lines = items.map((item, index) => `${index + 1}. ${item.name} | id: ${item.id}${item.detail ? ` | ${item.detail}` : ''}`);
+            observe(`OneDrive search for "${envelope.sourceRequest.query}".\n${lines.join('\n') || 'No files matched.'}\nNothing was read yet. To read one file, set sourceRequest to {"action":"read","id":"...","name":"file.xlsx"}.`, 'OneDrive search');
+            state.audit.push(AgentCore.audit({ kind: 'context', address: `OneDrive search ${envelope.sourceRequest.query}`, chars: lines.join('\n').length }));
+          } else {
+            const result = await api('connectors/read', { source: 'onedrive', item: { id: envelope.sourceRequest.id, name: envelope.sourceRequest.name }, endpoint: $('qwenEndpoint').value.trim() });
+            const clipped = trimContext(String(result.text || ''), 8000);
+            const label = result.name || envelope.sourceRequest.name;
+            observe(`Requested OneDrive file ${label}.\n\n${clipped.text}`, label);
+            evidenceSources.push(label);
+            state.audit.push(AgentCore.audit({ kind: 'context', address: label, chars: clipped.text.length }));
+          }
+        } catch (error) {
+          observe(`No OneDrive file was read: ${error.message}. Nothing was returned, so this is not a successful read.`);
+          state.audit.push(AgentCore.audit({ kind: 'blocked', reason: `onedrive rejected: ${String(error.message || error).slice(0, 240)}` }));
+        }
+        if (interrupted()) return;
+        guard += 1;
+        continue;
       }
       if (envelope.scanRequest && !normalized.actions.length) {
         showAgentStatus(run?.round || 1, 'Scanning workbook · 掃描活頁簿');
@@ -2899,7 +2971,7 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
         break;
       }
       if (next === 'CONTINUE' || next === 'REPLAN') {
-        if (mode === 'chat' && !checks.length && !envelope.contextRequest && !envelope.profileRequest && !envelope.scanRequest) {
+        if (mode === 'chat' && !checks.length && !envelope.contextRequest && !envelope.profileRequest && !envelope.scanRequest && !envelope.sourceRequest) {
           outcome = 'Completed · 已完成';
           break;
         }
@@ -2995,8 +3067,10 @@ async function sendPrompt(prompt) {
     state.forceSheet = false;
     state.messages.push({ role: 'user', content });
     const fileNames = state.attachments.map(file => file.name);
-    renderMessage('user', clean + (fileNames.length ? `\n\nAttachments: ${fileNames.join(', ')}` : '') + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
-    const result = await streamChat({ provider, model: $('qwenModel').value.trim(), endpoint: $('qwenEndpoint').value.trim(), messages: dedupContext(state.messages.slice(-24)), fast: $('fastMode').checked, host: state.host === 'Word' ? 'word' : 'excel' });
+    const skillNames = skillCtx?.selected?.length ? `\n\nSkills: ${skillCtx.selected.join(', ')}` : '';
+    renderMessage('user', clean + (fileNames.length ? `\n\nAttachments: ${fileNames.join(', ')}` : '') + skillNames + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
+    const fields = chatFields();
+    const result = await streamChat({ provider, model: fields.model, endpoint: $('qwenEndpoint').value.trim(), messages: dedupContext(state.messages.slice(-24)), fast: fields.fast, effort: fields.effort, host: state.host === 'Word' ? 'word' : 'excel' });
     if (turn !== state.turn) return;
     const revision = parseRevision(result.text);
     state.messages.push({ role: 'assistant', content: result.text });
@@ -3305,6 +3379,11 @@ loadFinanceProfile();
 ['debitColumn', 'creditColumn', 'amountColumn', 'keyColumns', 'requiredColumns', 'entityColumn', 'currencyColumn', 'dateColumn', 'checkTolerance'].forEach(id => {
   $(id).addEventListener('change', saveFinanceProfile);
 });
+
+$('modelPick').addEventListener('change', () => syncModel('modelPick'));
+$('qwenModel').addEventListener('change', () => syncModel('qwenModel'));
+$('effortMode').addEventListener('change', saveChatPrefs);
+restoreChatPrefs();
 
 Office.onReady(info => {
   if (info.host === Office.HostType.Excel || info.host === Office.HostType.Word) {

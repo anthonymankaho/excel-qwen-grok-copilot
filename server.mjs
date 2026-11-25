@@ -1,10 +1,8 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
-import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import ExcelJS from 'exceljs';
+import { extractDocx, extractPdf, extractWorkbook } from './extract-files.mjs';
 import { RELAY_BUILD, appendMemory, buildSkillContext, deleteSession, listSessions, listSkills, originAllowed, prepareChat, providerDelta, providerErrorMessage, qwenEndpointAllowed, readMemory, readSession, requestHostAllowed, resolveSkillsRoot, saveSkill, takeSseDataLines, writeSession } from './relay-core.mjs';
 import { LocalSourceMcp } from './mcp-connectors.mjs';
 
@@ -23,49 +21,6 @@ function send(res, status, data, type = 'application/json; charset=utf-8') {
   res.end(body);
 }
 
-// Local-only extraction: XLSX via exceljs, PDF via poppler pdftotext on PATH. Never imported by the Worker.
-async function extractXlsx(buffer) {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
-  const sections = [];
-  for (const sheet of workbook.worksheets) {
-    const lines = [];
-    sheet.eachRow({ includeEmpty: false }, row => {
-      if (lines.length >= 2000) return;
-      const cells = [];
-      row.eachCell({ includeEmpty: true }, cell => cells.push(String(cell.text ?? '').replace(/\s+/g, ' ')));
-      lines.push(cells.join(' | '));
-    });
-    sections.push(`[Sheet: ${sheet.name}]\n${lines.join('\n')}`);
-    if (sections.length >= 20) break;
-  }
-  return sections.join('\n\n');
-}
-
-function runPdftotext(tmp, mode) {
-  return new Promise((resolve, reject) => {
-    const child = spawn('pdftotext', [mode, '-enc', 'UTF-8', tmp, '-'], { windowsHide: true });
-    let out = '';
-    let err = '';
-    child.stdout.on('data', part => { out += part; });
-    child.stderr.on('data', part => { err += part; });
-    child.on('error', error => reject(new Error(`pdftotext is not available on this PC: ${error.message}`)));
-    child.on('close', code => (code === 0 ? resolve({ out, err }) : reject(new Error(err.trim() || `pdftotext exited with ${code}`))));
-  });
-}
-
-const VISION_PAGE_CAP = 12;
-
-function runPdftoppm(tmp, prefix) {
-  return new Promise((resolve, reject) => {
-    const child = spawn('pdftoppm', ['-png', '-r', '150', '-f', '1', '-l', String(VISION_PAGE_CAP), tmp, prefix], { windowsHide: true });
-    let err = '';
-    child.stderr.on('data', part => { err += part; });
-    child.on('error', error => reject(new Error(`pdftoppm is not available on this PC: ${error.message}`)));
-    child.on('close', code => (code === 0 ? resolve() : reject(new Error(err.trim() || `pdftoppm exited with ${code}`))));
-  });
-}
-
 // Scanned PDFs/images: transcribe with the user's OWN Qwen key (vision). Images leave this PC only to QwenCloud.
 async function visionTranscribe(content, apiKey, endpoint) {
   const response = await fetch(endpoint, {
@@ -81,15 +36,12 @@ async function visionTranscribe(content, apiKey, endpoint) {
   return text;
 }
 
-async function transcribePdfPages(dir, prefix, apiKey, endpoint) {
-  const pages = fs.readdirSync(dir).filter(n => n.startsWith(`${prefix}-`) && n.endsWith('.png')).sort();
-  if (!pages.length) throw new Error('No pages could be rendered from this PDF.');
-  const content = [{ type: 'text', text: `Transcribe every page of this scanned document verbatim, preserving tables as pipe-separated rows and numbers exactly. Output only the transcription, page by page, prefixed "Page N:". Pages supplied: ${pages.length}.` }];
-  for (const page of pages) {
-    const data = fs.readFileSync(path.join(dir, page)).toString('base64');
-    content.push({ type: 'image_url', image_url: { url: `data:image/png;base64,${data}` } });
-  }
-  return `[Vision transcription of ${pages.length} scanned page(s) via your Qwen key]\n${await visionTranscribe(content, apiKey, endpoint)}`;
+async function transcribePdfPage(png, pageNumber, apiKey, endpoint) {
+  const content = [
+    { type: 'text', text: `Transcribe page ${pageNumber} verbatim. Preserve tables as pipe-separated rows and numbers exactly. Output only this page.` },
+    { type: 'image_url', image_url: { url: `data:image/png;base64,${png.toString('base64')}` } }
+  ];
+  return `[Vision transcription of page ${pageNumber} via your Qwen key]\n${await visionTranscribe(content, apiKey, endpoint)}`;
 }
 
 async function transcribeImage(buffer, mime, apiKey, endpoint) {
@@ -98,26 +50,6 @@ async function transcribeImage(buffer, mime, apiKey, endpoint) {
     { type: 'image_url', image_url: { url: `data:${mime};base64,${buffer.toString('base64')}` } }
   ];
   return `[Vision transcription of an image via your Qwen key]\n${await visionTranscribe(content, apiKey, endpoint)}`;
-}
-
-async function extractPdf(buffer, vision) {
-  const stamp = `eqgc-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eqgc-pdf-'));
-  const tmp = path.join(dir, `${stamp}.pdf`);
-  try {
-    fs.writeFileSync(tmp, buffer);
-    const layout = await runPdftotext(tmp, '-layout');
-    if (layout.out.trim()) return layout.out;
-    const raw = await runPdftotext(tmp, '-raw');
-    if (raw.out.trim()) return raw.out;
-    if (vision?.apiKey) {
-      await runPdftoppm(tmp, path.join(dir, stamp));
-      return await transcribePdfPages(dir, stamp, vision.apiKey, vision.endpoint);
-    }
-    throw new Error('This PDF has no extractable text layer (likely scanned images). Add your Qwen key in Settings to enable vision transcription, or attach a text-based PDF export.');
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 }
 
 function cloudOAuthConfig() {
@@ -217,7 +149,11 @@ export function createRelay() {
     if (req.method === 'POST' && url.pathname === '/api/connectors/read') {
       try {
         const body = await readBody(req);
-        return send(res, 200, await sources.read(body.source, body.item));
+        const endpoint = qwenEndpointAllowed(body.endpoint);
+        const transcribePage = secrets.qwen && endpoint
+          ? (png, page) => transcribePdfPage(png, page, secrets.qwen, endpoint)
+          : null;
+        return send(res, 200, await sources.read(body.source, body.item, { transcribePage }));
       } catch (error) {
         const clientError = /choose|valid|file name/i.test(error.message);
         return send(res, clientError ? 400 : 502, { error: error.message });
@@ -288,13 +224,15 @@ export function createRelay() {
         const endpoint = qwenEndpointAllowed(body.endpoint) || 'https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions';
         const vision = secrets.qwen ? { apiKey: secrets.qwen, endpoint } : null;
         let text = '';
-        if (ext === 'xlsx' || ext === 'xlsm') text = await extractXlsx(buffer);
-        else if (ext === 'pdf') text = await extractPdf(buffer, vision);
+        const transcribePage = vision ? (png, page) => transcribePdfPage(png, page, vision.apiKey, vision.endpoint) : null;
+        if (ext === 'xlsx' || ext === 'xlsm') text = (await extractWorkbook(buffer)).text;
+        else if (ext === 'docx') text = (await extractDocx(buffer)).text;
+        else if (ext === 'pdf') text = (await extractPdf(buffer, { transcribePage })).text;
         else if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
           if (!vision) return send(res, 400, { error: 'Image transcription needs your Qwen key in Settings.' });
           text = await transcribeImage(buffer, ext === 'jpg' ? 'image/jpeg' : `image/${ext}`, vision.apiKey, vision.endpoint);
         }
-        else return send(res, 400, { error: 'Extraction supports PDF, XLSX, XLSM, PNG, JPG and WEBP.' });
+        else return send(res, 400, { error: 'Extraction supports PDF, DOCX, XLSX, XLSM, PNG, JPG and WEBP.' });
         if (!text.trim()) return send(res, 400, { error: `${name}: no readable text was found.` });
         return send(res, 200, { text: text.slice(0, 200000), kind: ext.toUpperCase() });
       } catch (error) { return send(res, 400, { error: error.message }); }
