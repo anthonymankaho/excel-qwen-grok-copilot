@@ -21,9 +21,9 @@ Pick the mode **before** you send. The pane defaults to **Agent**.
 - **Direct on** — safe actions are written immediately; deletes, clears, renames, network formulas and irreversible changes still wait for your click.
 - **Direct off** — you approve the plan, then every action waits for **Apply edits**.
 
-The composer shows the current **Agent round out of 25** and what Agent is doing. If more work is pending at round 25, review the audit card and choose **Continue Agent · 繼續** to give the same task another 25 rounds in the current chat. Review any pending edits or resolve failed checks and missing inputs before sending a follow-up. **Stop** prevents another step from starting. An Office edit already underway may finish and appear on its own card with **Undo last apply** when available.
+The composer shows the current **Agent round out of 25** and what Agent is doing. The AUDIT card stays hidden. If more work is pending at round 25, choose **Continue Agent · 繼續** to give the same task another 25 rounds in the current chat. Review any pending edits or resolve failed checks and missing inputs before sending a follow-up. **Stop** prevents another step from starting. An Office edit already underway may finish and appear on its own card with **Undo last apply** when available.
 
-輸入區會顯示 **Agent 目前輪數（每批最多 25 輪）**及當前進度。第 25 輪後如仍有工作，先檢視審計卡，再按 **Continue Agent · 繼續**，即可在同一對話為原任務增加最多 25 輪。若有待審批修改、檢查失敗或資料缺漏，請先處理再發送後續指示。按 **Stop** 會阻止下一步開始。已開始的 Office 修改仍可能完成，並顯示在修改卡片上。可復原的修改會提供 **Undo last apply**。
+輸入區會顯示 **Agent 目前輪數（每批最多 25 輪）**及當前進度。AUDIT 卡保持隱藏。第 25 輪後如仍有工作，按 **Continue Agent · 繼續**，即可在同一對話為原任務增加最多 25 輪。若有待審批修改、檢查失敗或資料缺漏，請先處理再發送後續指示。按 **Stop** 會阻止下一步開始。已開始的 Office 修改仍可能完成，並顯示在修改卡片上。可復原的修改會提供 **Undo last apply**。
 
 ---
 
@@ -33,10 +33,10 @@ The composer shows the current **Agent round out of 25** and what Agent is doing
 - **Plan and Agent** send workbook *metadata* first — workbook name, sheet names, used-range sizes, table names, selection address. Agent chooses the relevant sheets and ranges; the user does not set a technical scope.
 - **Profile a big sheet.** Agent can scan up to 2 million requested cells locally in 20,000-cell batches and send a compact profile: covered rows/columns, column counts, sample values, numeric sum/min/max and Excel error-value counts with sample addresses. The profile says **INCOMPLETE** if it reaches the cap. A column sum alone does not prove an accounting reconciliation; inspect the relevant rows and formulas.
 - **Word Chat** sends the selection; an empty selection sends the document body.
-- The **context card** shows the exact text being sent. **↻ Refresh** re-reads it.
+- Press **Workbook** to open the context card. It shows the exact text being sent. **↻ Refresh** re-reads it. Press **Workbook** again to hide the card. 按 **Workbook** 打開上下文卡，它顯示即將送出的文字。**↻ Refresh** 會重讀。再按 **Workbook** 即隱藏。
 - **Share Office file data with AI** is a data-sharing switch, not a sheet-scope setting. Turn it off to prevent workbook/document metadata and Agent-requested ranges from being sent to Qwen. The add-in will stop a requested read and show **File sharing off**. Attachments are controlled separately.
 - **Attach files** with **＋**. Text types (HTML/HTM, TXT, MD, CSV, TSV, JSON, XML) are up to 5 MB. PDF, DOCX, XLSX/XLSM, and PNG/JPG/WEBP go through the local relay and are up to 20 MB. Choose up to 3 files. The pane keeps up to 18,000 characters per file and at most 26,000 attachment characters in a question. PDF pages are numbered. Excel shows sheet coverage (`COMPLETE` or `INCOMPLETE` plus the next offset). Word keeps headings and table rows.
-- HTML is parsed as text and tables. Scripts, CSS, embedded charts/images, and links are not executed or interpreted. The extracted text and selected workbook context are sent to the chosen Qwen provider when you send a question. Review the context card before sending. Remove files to omit them from the next question; **New chat** clears the conversation and attachments.
+- HTML is parsed as text and tables. Scripts, CSS, embedded charts/images, and links are not executed or interpreted. The extracted text and selected workbook context are sent to the chosen Qwen provider when you send a question. Open **Workbook** and review the card before sending. Remove files to omit them from the next question; **New chat** clears the conversation and attachments. HTML 會被讀成文字和表格。指令碼、CSS、內嵌圖表和連結不會執行。送出問題前可按 **Workbook** 核對。移除檔案即不帶入下一題；**New chat** 會清除對話和附件。
 - **MCP** (desktop/local relay only): press **Connect** for Personal OneDrive; the system browser opens so you can sign in to your own personal Microsoft account and approve read-only access. The app owner configures the public Microsoft OAuth app ID once; colleagues do not enter it in Settings. Search results and snippets stay in the pane. **Review and add to chat** fetches the selected item as text and adds it to the attachment list; it is sent to Qwen only with your next question. The connector does not edit OneDrive files. No account email address is hardcoded or saved by the add-in. OneDrive review supports PDF, DOCX, XLSX/XLSM, HTML, TXT, MD, CSV, TSV, JSON, and XML, with the same coverage line as an attachment. While Share is on, Agent can search and then read one of those files. The hosted Excel-on-the-web pane does not support this connector.
 - OAuth access tokens are held in local relay memory, used in HTTPS requests to the selected source, and cleared when the relay stops; reconnect after a restart.
 - **Workbook** at the bottom opens WORKBOOK ACCESS on its own. It is not in the sidebar. Press the button again to hide it. The footer **Share** checkbox still controls whether workbook data is sent. 底部 **Workbook** 會獨立打開 WORKBOOK ACCESS，不在側欄。再按一次即隱藏。底部 **Share** 仍決定是否送出活頁簿資料。
@@ -155,7 +155,7 @@ The relay only accepts HTTPS chat-completions on `qwencloudapi.com` or `aliyuncs
 
 Journal entries are **drafts**. The pane does not clear a reconciliation difference, does not change source figures to force a total to match, and does not claim debits equal credits unless its own calculated check says so.
 
-When a check fails, **leave the difference in the sheet**, read the audit card, and investigate. Do not ask the model to force the totals together. A check without an identified column is not a pass.
+When a check fails, **leave the difference in the sheet** and investigate. Do not ask the model to force the totals together. A check without an identified column is not a pass.
 
 ---
 
@@ -166,7 +166,7 @@ Two limits are properties of the platform, not unfinished work:
 - **Python in Excel.** Office.js exposes no API for it — it is a native cloud feature.
 - **The native Copilot surface.** A sideloaded task pane cannot become the ribbon-integrated Copilot pane, inline ghost suggestions, or the built-in Analyze Data experience.
 - **GitHub skill install.** In Skills, paste `owner/repo` or a `https://github.com/owner/repo` link to one `SKILL.md`. A public repo can omit the token. Remember stores the token in this browser only. Tick Replace to update an existing skill. The file is saved in the OneDrive skills folder. The pane does not follow a redirect and does not send the token to Qwen. 在 Skills 貼上 `owner/repo` 或指向一個 `SKILL.md` 的 GitHub 連結。公開 repo 可以不填 token。Remember 只把 token 留在這個瀏覽器。勾選 Replace 才更新已有技能。檔案存入 OneDrive 技能資料夾。窗格不跟隨重新導向，也不把 token 送給 Qwen。
-- **Attachment formats.** The picker reads HTML/HTM, TXT, MD, CSV, TSV, JSON, XML, PDF, DOCX, XLSX/XLSM, PNG, JPG, and WEBP. PDF, Word, Excel, and images need the local relay. HTML scripts and CSS are ignored. A scanned PDF is transcribed one page at a time, up to 12 pages, with your own Qwen key. OneDrive review uses the same PDF, Word, and Excel reader and states coverage. Agent can search OneDrive and read one chosen file while Share is on. Saved skills are chosen from the description and the `triggers` line; `qwen-chat-assistant` is not attached to every question.
+- **Attachment formats.** The picker reads HTML/HTM, TXT, MD, CSV, TSV, JSON, XML, PDF, DOCX, XLSX/XLSM, PNG, JPG, and WEBP. PDF, Word, Excel, and images need the local relay. HTML scripts and CSS are ignored. A scanned PDF is transcribed one page at a time, up to 12 pages, with your own Qwen key. OneDrive review uses the same PDF, Word, and Excel reader and states coverage. Agent can search OneDrive and read one chosen file while Share is on. Skills are chosen from the description and the `triggers` line; `qwen-chat-assistant` is not attached to every question. The sidebar **Guide** starts collapsed.
 
 Also: message plus context over 50,000 characters is rejected; the Agent loop is capped at 25 rounds (**Continue Agent · 繼續** resumes); raw range reads page with `offset` and profiles/finance checks cover the full requested range; and there is no audit export button yet.
 
@@ -176,13 +176,13 @@ Also: message plus context over 50,000 characters is rejected; the Agent loop is
 
 The local relay binds to **127.0.0.1** and rejects any other Host or Origin. Workbook context and source contents are not sent to Qwen until you submit a question. Searching OneDrive sends the query to Microsoft Graph; previewing a result fetches its text to the local pane. The connector only searches and reads; it does not change OneDrive files.
 
-A question sends your prompt, the extracted text from selected attachments and reviewed cloud results, and (when enabled) workbook/document context to Qwen (the only provider). Original cloud files are not uploaded to Qwen; only the text you selected is included. Chat context includes cell values and formulas, or the Word selection/document text. Plan and Agent start with metadata and add a range only when a step asks. **From the hosted pane, the same question also passes through Cloudflare.**
+A question sends your prompt, the extracted text from selected attachments and reviewed cloud results, and (when enabled) workbook/document context to Qwen (the only provider). Original cloud files are not uploaded to Qwen; only the text you selected is included. Chat context includes cell values and formulas, or the Word selection/document text. In Excel, Plan and Agent start with workbook metadata and add a range only when a step asks. In Word, Plan and Agent send the open document. A quoted passage stays in that text when the document is long. **From the hosted pane, the same question also passes through Cloudflare.**
 
 A provider key or signed-in account email is never written into the repository or the audit card. Provider API keys are sent to the local relay. Cloud OAuth tokens are held in local relay memory and used in HTTPS requests to the selected source. These credentials are not sent to Qwen. Keep provider keys and OAuth client secrets out of chat, files and commits; `cloud-oauth.json` holds only public app client IDs.
 
 本機 Relay 綁定 **127.0.0.1**，並拒絕其他 Host 或 Origin。工作簿內容和來源檔案文字不會在提交問題前傳給 Qwen。搜尋 OneDrive 會把搜尋字詞傳給 Microsoft Graph；預覽結果會把文字讀取到本機窗格。本機連接器只會搜尋／讀取，不會修改 OneDrive 檔案。
 
-提交問題後，提示、已選附件及雲端來源文字，以及（如已啟用）工作簿／文件上下文會傳給所選 Qwen provider。原始雲端檔案不會上傳到 Qwen；只有使用者選取的文字會加入問題。Excel Chat 上下文包括儲存格值及公式；Word 上下文包括選取文字或文件文字。Plan 和 Agent 先讀取中繼資料，只在步驟需要時再讀取範圍。**使用網頁版增益集時，同一問題也會經 Cloudflare。**
+提交問題後，提示、已選附件及雲端來源文字，以及（如已啟用）工作簿／文件上下文會傳給所選 Qwen provider。原始雲端檔案不會上傳到 Qwen；只有使用者選取的文字會加入問題。Excel Chat 上下文包括儲存格值及公式；Word 上下文包括選取文字或文件文字。在 Excel，Plan 和 Agent 先讀取工作簿中繼資料，只在步驟需要時再讀取範圍。在 Word，Plan 和 Agent 會送出開啟中的文件。文件很長時，引號裡的段落仍會保留。**使用網頁版增益集時，同一問題也會經 Cloudflare。**
 
 Provider key 或登入帳戶電郵地址不會寫入 repository 或 audit card。Provider API key 會傳至本機 Relay。Cloud OAuth 權杖會保留於本機 Relay 記憶體，並透過 HTTPS 用於所選來源請求；不會傳給 Qwen。不要把 provider key 或 OAuth client secret 放入聊天、檔案或 commit；`cloud-oauth.json` 只存公開的 app client ID。
 
@@ -199,9 +199,9 @@ Provider key 或登入帳戶電郵地址不會寫入 repository 或 audit card�
 | Context says truncated | Ask about a smaller range, or let the model profile the sheet |
 | `Execute FAILED · …` | Read the reason on the audit line; it now names the actual cause |
 | `N rejected as unusable` | The action broke a limit — e.g. a pivot allows 16 value fields and 8 each for rows/columns/filters |
-| Stopped: validation failed | Leave the difference. Read the audit card. Do not force the totals |
-| Agent reached its 25-round limit | The model requested another step. Review the audit card, then choose **Continue Agent · 繼續** |
-| `Could not finish` with no answer | The status line and audit card now name the reason. A common cause is a relay process still running an older build: the pane detects the mismatch and says so — restart the relay (`npm run relay-stop`, then `npm run relay-ensure` for a hidden relay, or `npm start` to also re-sideload) and send again. The pane JS refreshes from disk on load; the relay process only picks up new code when restarted |
+| Stopped: validation failed | Leave the difference. Do not force the totals |
+| Agent reached its 25-round limit | The model requested another step. Choose **Continue Agent · 繼續** |
+| `Could not finish` with no answer | The status line names the reason. A common cause is a relay process still running an older build: the pane detects the mismatch and says so — restart the relay (`npm run relay-stop`, then `npm run relay-ensure` for a hidden relay, or `npm start` to also re-sideload) and send again. The pane JS refreshes from disk on load; the relay process only picks up new code when restarted |
 | A reply will not finish | Press **Stop**. Set **Effort** to Off, or tick **Fast**, for a shorter reply |
 | A change is wrong | **Undo last apply**, or Excel `Ctrl+Z` |
 | Pane is Qwen-only | Grok was removed on 2026-11-24. Only the Qwen key is used, and nothing is sent until it is loaded |
@@ -211,6 +211,30 @@ For relay, sideload and install problems see `SOP-INSTALL.md` §10.
 ---
 
 ## 12. Processing status · 處理狀態
+
+**2026-11-26 — Audit card hidden.** The pane no longer shows an AUDIT card after a question. The trail is still saved with the session. Close and reopen the task pane.
+
+**2026-11-26 — 隱藏 AUDIT 卡。** 提問之後，窗格不再顯示 AUDIT 卡。紀錄仍保存在該次對話。請關閉並重新開啟工作窗格。
+
+**2026-11-26 — GitHub repository in the chat box.** The composer has a **No Repository** button, like Qwen Coder. Open it to choose **No Repository** or one recent repository from the GitHub login on this PC. The next question uses that repository for GitHub reads and writes. Share must be on. The hosted site does not include this. Close and reopen the pane.
+
+**2026-11-26 — 聊天框的 GitHub repo。** 輸入框有 **No Repository** 按鈕，跟 Qwen Coder 一樣。打開後可選 **No Repository**，或這部電腦 GitHub 登入的最近 repo。下一則問題會用那個 repo 做 GitHub 讀寫。Share 要開著。託管網站沒有這項。請關閉並重新開啟窗格。
+
+**2026-11-26 — Connect to Github.** Local build `2026-11-26.3`. Open **MCP** and click **Connect to Github**. This uses the GitHub CLI login already on this PC. You do not paste a token or a password. The token stays in the GitHub CLI credential store. **Disconnect** only stops this pane from using that login. Restart the local relay and reopen the pane. The hosted site does not include this.
+
+**2026-11-26 — Connect to Github。** 本機版本 `2026-11-26.3`。打開 **MCP**，按 **Connect to Github**。這用的是這部電腦 GitHub CLI 已有的登入。不用貼上 token，也不用輸入密碼。Token 留在 GitHub CLI 憑證庫。**Disconnect** 只是這個窗格不再使用該登入。請重啟本機 relay 並重新開啟窗格。託管網站沒有這項。
+
+**2026-11-26 — Word desk, commit, and push.** Save the repo folder in **MCP**. In Word, a finished Qwen answer is added at the end of the document. `open path/file.js` opens that file. `git pull` refreshes it. `git commit` writes the document back. `git push` pushes the current branch and does not use `--force`. `git commit and push` does both. The command must start the message. Remove Qwen notes before commit. Restart the local relay and reopen Word.
+
+**2026-11-26 — Word 桌面、提交與 push。** 在 **MCP** 儲存 repo 資料夾。在 Word，完成的 Qwen 回答會加在文件結尾。`open path/file.js` 打開該檔。`git pull` 刷新。`git commit` 把文件寫回。`git push` 推送目前分支，不用 `--force`。`git commit and push` 兩者都做。指令必須是訊息的開頭。提交前刪去 Qwen 註記。請重啟本機 relay 並重新開啟 Word。
+
+**2026-11-26 — GitHub MCP.** Local build `2026-11-26.1`. In **MCP**, save a GitHub token if the repo is private. Agent can list repositories and read one file while Share is on. **Write to GitHub** opens a pull request on a new branch. **Write to default branch** is a second click. The hosted site does not include this connector. Restart the local relay and reopen the pane.
+
+**2026-11-26 — GitHub MCP。** 本機版本 `2026-11-26.1`。私人 repo 請在 **MCP** 儲存 GitHub token。Share 開啟時，Agent 可列出 repo 和讀一個檔案。**Write to GitHub** 在新分支開 pull request。**Write to default branch** 是另一次點擊。託管網站沒有這條連接。請重啟本機 relay 並重新開啟窗格。
+
+**2026-11-26 — Hosted pane deployed.** https://excel-qwen-grok.anthonym-354.workers.dev now serves build `2026-11-25.3` (`byo:true`). The web pane has Model, Effort, and the Workbook button. MCP, Skills, History, Memory, and PDF/Word/Excel extraction stay on the local relay. Close and reopen the Excel web task pane.
+
+**2026-11-26 — 託管窗格已部署。** https://excel-qwen-grok.anthonym-354.workers.dev 現在是版本 `2026-11-25.3`（`byo:true`）。網頁版已有 Model、Effort 和 Workbook 按鈕。MCP、Skills、History、Memory，以及 PDF／Word／Excel 擷取仍只在本機 relay。請關閉並重新開啟 Excel 網頁版工作窗格。
 
 **2026-11-25 — Model and Effort.** Build `2026-11-25.2`. Composer and Settings list `auto`, `qwen4-max` (default), `qwen3.8-max`, and `qwen3.8-flash`. Effort is Off, Low, Medium, High, or Extra. The relay sends `reasoning_effort` and never `thinking_budget`. Fast still forces thinking off. Restart the local relay after this bump. Hosted Worker was not deployed. `npm test` 123/123. Excel and Word were not opened for a live check.
 

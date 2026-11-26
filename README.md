@@ -140,9 +140,33 @@ OneDrive 文字檢視支援 XLSX/XLSM、DOCX、HTML、TXT、MD、CSV、TSV、JSO
 
 ## Processing status · 處理狀態
 
-**2026-11-25 — GitHub skill install.** Local build `2026-11-25.3`. Saved skills installs one `SKILL.md` from a GitHub repository into the OneDrive skills folder. A public repo can omit the token. Remember keeps the token in this browser only. Restart the local relay and reopen the pane. The hosted Worker was not deployed.
+**2026-11-26 — Audit card hidden.** The pane no longer shows an AUDIT card after a question. The trail is still saved with the session. Close and reopen the task pane.
 
-**2026-11-25 — 從 GitHub 安裝技能。** 本機版本 `2026-11-25.3`。Saved skills 可把一個 GitHub `SKILL.md` 安裝到 OneDrive 技能資料夾。公開 repo 可以不填 token。Remember 只把 token 留在這個瀏覽器。請重啟本機 relay 並重新開啟窗格。託管 Worker 未部署。
+**2026-11-26 — 隱藏 AUDIT 卡。** 提問之後，窗格不再顯示 AUDIT 卡。紀錄仍保存在該次對話。請關閉並重新開啟工作窗格。
+
+**2026-11-26 — GitHub repository in the chat box.** The composer **No Repository** button lists recent repositories from the GitHub login on this PC. Choosing one attaches that `owner/repo` to the next question. **No Repository** leaves the question on a blank workspace. Share must be on. The hosted site does not include this. Close and reopen the pane.
+
+**2026-11-26 — 聊天框的 GitHub repo。** 輸入框的 **No Repository** 按鈕列出這部電腦 GitHub 登入的最近 repo。選了一個之後，下一則問題會帶上那個 `owner/repo`。選 **No Repository** 就是空白工作區。Share 要開著。託管網站沒有這項。請關閉並重新開啟窗格。
+
+**2026-11-26 — Connect to Github.** Local build `2026-11-26.3`. In **MCP**, **Connect to Github** uses the GitHub CLI login already on this PC. The token stays in that CLI credential store and is not sent to Qwen or saved in the pane. **Disconnect** stops this pane from using the account and does not sign the PC out. The hosted site does not include this. Restart the local relay and reopen the pane.
+
+**2026-11-26 — Connect to Github。** 本機版本 `2026-11-26.3`。在 **MCP** 按 **Connect to Github**，使用這部電腦 GitHub CLI 已有的登入。Token 留在 CLI 憑證庫，不會送給 Qwen，也不會存在窗格。**Disconnect** 只是這個窗格不再使用該帳戶，不會把電腦登出。託管網站沒有這項。請重啟本機 relay 並重新開啟窗格。
+
+**2026-11-26 — Word desk, commit, and push.** In Word, Agent and Plan send the document text, the same way Excel sends the sheet. A selection does not replace that text. A quoted passage stays in that text when the document is long. A finished Qwen answer is added at the end of the document. It does not replace the file. `open src/app.js` loads one local Git file. `git pull` fast-forwards and refreshes it. `git commit` writes the document back to that file. `git push` pushes the current branch and does not use `--force`. `git commit and push` does both. Remove Qwen notes before commit. Set the repo folder under **MCP**. The hosted site does not include this. Restart the local relay and reopen Word.
+
+**2026-11-26 — Word 桌面、提交與 push。** 在 Word，Agent 和 Plan 會送出文件文字，跟 Excel 送出工作表一樣。選取範圍不會取代那段文字。文件很長時，引號裡的段落仍會保留。完成的 Qwen 回答會加在文件結尾，不會覆蓋檔案。`open src/app.js` 載入一個本機 Git 檔。`git pull` 以 fast-forward 更新並刷新。`git commit` 把文件寫回那個檔。`git push` 推送目前分支，不用 `--force`。`git commit and push` 兩者都做。提交前刪去 Qwen 註記。Repo 資料夾在 **MCP** 設定。託管網站沒有這項。請重啟本機 relay 並重新開啟 Word。
+
+**2026-11-26 — GitHub MCP.** Local build `2026-11-26.1`. The MCP card can list repositories and read one text file. A write is sent only after **Write to GitHub**, which opens a pull request on a new branch. **Write to default branch** is a separate click and does not force-push. The token stays in this browser and goes only to `api.github.com`. Share must be on. The hosted site does not include this connector. Restart the local relay and reopen the pane.
+
+**2026-11-26 — GitHub MCP。** 本機版本 `2026-11-26.1`。MCP 卡可列出 repo 和讀一個文字檔。寫入只在按 **Write to GitHub** 之後送出，並在新分支開 pull request。**Write to default branch** 是另一次點擊，不會 force-push。Token 留在這個瀏覽器，只送到 `api.github.com`。Share 要開著。託管網站沒有這條連接。請重啟本機 relay 並重新開啟窗格。
+
+**2026-11-26 — Hosted pane deployed.** `npx wrangler deploy` published `main` commit `6534f67` to https://excel-qwen-grok.anthonym-354.workers.dev. Live health is `build: 2026-11-25.3`, `byo:true`, `configured.qwen:false`. Worker version `ca5916b0-4f70-485b-a186-20e5bd769b23`. The served pane includes Model, Effort, and the Workbook button. MCP, Skills, History, Memory, and PDF/Word/Excel extraction stay on the local relay. Close and reopen the Excel web task pane. The email-and-password team version is cancelled. It was never deployed, and a Token Plan key cannot back that shared login.
+
+**2026-11-26 — 託管窗格已部署。** `npx wrangler deploy` 把 `main` commit `6534f67` 發佈到 https://excel-qwen-grok.anthonym-354.workers.dev。線上 health 為 `build: 2026-11-25.3`、`byo:true`、`configured.qwen:false`。Worker 版本 `ca5916b0-4f70-485b-a186-20e5bd769b23`。網站已有 Model、Effort 和 Workbook 按鈕。MCP、Skills、History、Memory，以及 PDF／Word／Excel 擷取仍只在本機 relay。請關閉並重新開啟 Excel 網頁版工作窗格。email 加密碼的團隊版已取消。它從未部署，Token Plan key 也不能用於那種共用登入。
+
+**2026-11-25 — Pane names and GitHub skill install.** Commit `6534f67`. Local build `2026-11-25.3`. **Skills** installs one `SKILL.md` from a GitHub repository into the OneDrive skills folder. A public repo can omit the token. Remember keeps the token in this browser only. **Workbook** opens WORKBOOK ACCESS above the button. **Guide** starts collapsed. **MCP** is the OneDrive card. The four shortcut buttons and the bottom remark are gone. The hosted Worker was not deployed.
+
+**2026-11-25 — 窗格名稱與從 GitHub 安裝技能。** Commit `6534f67`。本機版本 `2026-11-25.3`。**Skills** 可把一個 GitHub `SKILL.md` 安裝到 OneDrive 技能資料夾。公開 repo 可以不填 token。Remember 只把 token 留在這個瀏覽器。**Workbook** 在按鈕上方打開 WORKBOOK ACCESS。**Guide** 預設收合。**MCP** 是 OneDrive 卡。四個快捷按鈕和底部說明已移除。託管 Worker 未部署。
 
 **2026-11-25 — Model and Effort.** Local build `2026-11-25.2`. The composer and Settings offer `auto`, `qwen4-max` (default), `qwen3.8-max`, and `qwen3.8-flash`. Effort is Off, Low, Medium, High (default), or Extra. The relay sends `reasoning_effort` and does not send `thinking_budget`. Fast still turns thinking off for that question. Restart the local relay so the pane and relay builds match. The hosted Worker was not deployed. `npm test` 123/123.
 
@@ -152,9 +176,9 @@ OneDrive 文字檢視支援 XLSX/XLSM、DOCX、HTML、TXT、MD、CSV、TSV、JSO
 
 **2026-11-25 — 共用檔案讀取、OneDrive 工具、技能觸發。** 本機版本 `2026-11-25.1`。附加與 OneDrive 共用 PDF、DOCX、XLSX/XLSM 讀取器。Excel 與 PDF 會標示 `Coverage: COMPLETE` 或 `Coverage: INCOMPLETE`，並給出下一列或下一頁。掃描 PDF 逐頁轉錄，最多 12 頁。Share 開啟時，Agent 可搜尋個人 OneDrive 並讀取一個檔案；網頁版沒有此功能。Skills 依 `triggers` 列配對，不再每次強制帶入 `qwen-chat-assistant`。請重啟本機 relay，讓窗格與 relay 版本一致。`npm test` 115/115。
 
-**2026-11-25 — Marketplace preparation.** The hosted Worker is live as BYO-key pass-through (`build: 2026-11-24.10`, `byo:true`, `configured.qwen:false` at the last read-only health check). Each user enters their own key; the add-in does not use an owner key. Do not use Token Plan keys with this custom add-in unless Alibaba confirms this use is permitted. The Marketplace release is on hold pending a supported API/credential design, publisher enrollment, and full live workbook testing. See [`MARKETPLACE_READINESS.md`](MARKETPLACE_READINESS.md).
+**2026-11-25 — Marketplace preparation.** The hosted Worker is live as BYO-key pass-through (`build: 2026-11-25.3`, `byo:true`, `configured.qwen:false` at the 2026-11-26 health check). Each user enters their own key; the add-in does not use an owner key. Do not use Token Plan keys with this custom add-in unless Alibaba confirms this use is permitted. The Marketplace release is on hold pending a supported API/credential design, publisher enrollment, and full live workbook testing. See [`MARKETPLACE_READINESS.md`](MARKETPLACE_READINESS.md).
 
-**2026-11-25 — Marketplace 準備。** 託管 Worker 以 BYO-key 方式運作（最後一次唯讀 health check：`build: 2026-11-24.10`、`byo:true`、`configured.qwen:false`）。每位使用者輸入自己的 key；增益集不使用作者 key。除非阿里雲確認允許，請勿在此自訂增益集使用 Token Plan key。Marketplace 發行暫停，待確立合規 API／憑證設計、完成發行者註冊及完整活頁簿實機測試。詳見 [`MARKETPLACE_READINESS.md`](MARKETPLACE_READINESS.md)。
+**2026-11-25 — Marketplace 準備。** 託管 Worker 以 BYO-key 方式運作（2026-11-26 health check：`build: 2026-11-25.3`、`byo:true`、`configured.qwen:false`）。每位使用者輸入自己的 key；增益集不使用作者 key。除非阿里雲確認允許，請勿在此自訂增益集使用 Token Plan key。Marketplace 發行暫停，待確立合規 API／憑證設計、完成發行者註冊及完整活頁簿實機測試。詳見 [`MARKETPLACE_READINESS.md`](MARKETPLACE_READINESS.md)。
 
 ### 2026-11-22 (later) — local install, and the agent read-back fix
 
@@ -237,7 +261,7 @@ This is the Copilot-style revise. The earlier pane sent one prompt, attached a l
 - **財務答案可追溯。** 財務問題會要求以雙語列出事實、計算及假設，並引用確切工作表／儲存格或報表行數。證據卡列出實際傳送的來源，並標示超出來源範圍的引用；位置比對不代表來源一定支持結論。Agent 檢查結果會列明工作表及範圍；Chat 算術不會由增益集獨立重算。
 - **A failed check is a workpaper, not a silent fix.** The card states the issue, the evidence, a possible cause, the check, and the recommended action. A journal entry is a draft. The pane does not clear a reconciliation difference on its own.
 - The pane runs on **Qwen only** (Grok removed 2026-11-24). It sends workbook data only when the Qwen key is already loaded in the relay.
-- **An audit card** closes each Chat, Plan, and Agent turn: request, mode, provider, plan, context sent, actions, blocked actions, and check results. API keys are left out. **New chat** clears the trail.
+- The AUDIT card is hidden. The same trail is saved with the session: request, mode, provider, plan, context sent, actions, blocked actions, and check results. API keys are left out. **New chat** clears the trail.
 - **Direct, Apply, and Undo.** With Direct on, Agent writes safe actions immediately. Deletes, clears, renames, and formulas that can reach the network wait for a click. With Direct off, you approve the plan and then press **Apply edits**. **Undo last apply** is on the card. **Stop** cancels model generation and prevents the next step. An Office edit already in progress may finish.
 
 Restart the relay and reopen the pane after you install this update. The manifest is 1.2.0.0. Word still needs `npm run start:word` once.
@@ -295,18 +319,18 @@ After a code change, restart the relay (`npm run relay-stop`, then `npm run rela
 
 ## Using the pane
 
-The context card shows what the next question will send.
+Press **Workbook** at the bottom to open WORKBOOK ACCESS. It is not in the sidebar. Press **Workbook** again to hide it. The card shows what the next question will send.
 
 - In Chat, a multi-cell Excel selection is sent. A single cell falls back to the used range of the active sheet. Formulas appear as `value [=formula]`. The read stops at the first 150 rows and 30 columns, then at 45,000 characters. A truncation note says so.
 - In Plan and Agent, the next question sends workbook metadata: the workbook name, sheet names within an 8,000-character metadata cap (up to 30 with used-range sizes and table names), and the selection address. Agent chooses which sheet to inspect and can profile a large sheet in local batches. **＋ Active sheet** is a Chat shortcut and does not mean the whole workbook.
 - In Word Chat, the selection is sent. An empty selection sends the document body, with the same character cap. Plan and Agent send a short document outline and wait to be asked for the selection.
 - The card refreshes when the selection changes. **↻ Refresh** reads it again.
 - Untick **Share Office file data with AI** to prevent open workbook/document data and Agent-requested ranges from being sent. Attached files are controlled separately.
-- Use **📎 Attach** to choose up to three HTML/HTM, TXT, MD, CSV, TSV, JSON, or XML files (5 MB each). HTML tables and readable text are extracted locally; scripts, CSS, chart images, and links are not run or interpreted. The pane shows a preview of extracted text before sending. It sends at most 18,000 characters per file and 26,000 characters from attachments per question. **New chat** clears attachments and conversation history.
+- Use **＋** to upload up to three files. HTML/HTM, TXT, MD, CSV, TSV, JSON, and XML are up to 5 MB. PDF, DOCX, XLSX/XLSM, and PNG/JPG/WEBP go through the local relay and are up to 20 MB. HTML tables and readable text are extracted locally; scripts, CSS, chart images, and links are not run or interpreted. The pane shows a preview of extracted text before sending. It sends at most 18,000 characters per file and 26,000 characters from attachments per question. **New chat** clears attachments and conversation history.
 
 Ask in the box and press Enter. Shift+Enter adds a line. Replies stream. The send button becomes **Stop** while a reply is running. **New chat** clears the conversation and the audit trail. **Model** is `auto`, `qwen4-max` (default), `qwen3.8-max`, or `qwen3.8-flash`. `auto` lets Qwen choose. **Effort** is Off, Low, Medium, High (default), or Extra; the relay sends `reasoning_effort` and does not send `thinking_budget`. **Fast** still skips thinking for that question, even when Effort is High or Extra. The choice is remembered on this PC.
 
-The footer pill sets Chat, Plan, or Agent. The pane runs on Qwen. The dot is green when the Qwen key is loaded, amber when the relay is up and the key is not, and red when the relay is down.
+The footer sets Chat, Plan, or Agent. The pane runs on Qwen. The dot is green when the Qwen key is loaded, amber when the relay is up and the key is not, and red when the relay is down. The sidebar ☰ holds **Guide · 說明** (collapsed until opened), **MCP**, **Skills**, History, and Memory. There is no bottom remark under the question box.
 
 **↳ Insert last answer into selection** writes the last reply into the top-left cell of the Excel selection. One line that starts with `=` is written as a formula. Anything else is written as text.
 
@@ -318,11 +342,11 @@ History stays in memory. Reloading the pane clears it. Each request sends at mos
 
 **Plan** inspects metadata, then returns one plan: goal, steps, assumptions, required inputs, risks, and the checks it wants. Proposed actions sit on the same card. Nothing is written until you press **Approve**. If Direct is off, **Approve** is followed by **Apply edits**.
 
-**Agent** uses the same metadata. It can ask for one range, run the safe actions for that step, read those cells back, and calculate the checks. The composer shows `Agent 1/25` and the current activity. At the round limit, review the audit card and use **Continue Agent · 繼續** if offered. Use the review card for pending edits. With Direct off, a step that would write waits for **Approve**, then **Apply edits**.
+**Agent** uses the same metadata. It can ask for one range, run the safe actions for that step, read those cells back, and calculate the checks. The composer shows `Agent 1/25` and the current activity. At the round limit, use **Continue Agent · 繼續** if offered. Use the review card for pending edits. With Direct off, a step that would write waits for **Approve**, then **Apply edits**.
 
 The pane runs on Qwen only. The current Token Plan endpoint is under provider-terms review; do not use a Token Plan key with this custom app. The supported standard API/credential flow is pending.
 
-The audit card lists the request, the provider, the context that was sent, the actions, and the check results.
+The AUDIT card is hidden. The saved session still lists the request, the provider, the context that was sent, the actions, and the check results.
 
 ### Checks the pane calculates
 
@@ -432,6 +456,6 @@ Before trusting a change in the real app, start the relay, load a key, ask one q
 | Model not exist (HTTP 400) | The model is not on that key's list. A Token Plan key does not serve `qwen-max`, `qwen-turbo`, or `qwen-plus`. Pick one it does, in Settings |
 | Qwen endpoint rejected | The API route is being updated for Marketplace readiness; see `MARKETPLACE_READINESS.md` |
 | A reply takes too long | Press **Stop**. Tick **Fast** for a shorter reply |
-| Stopped. A validation failed | Read the audit card. The difference is still in the sheet. Correct it yourself, then ask again |
+| Stopped. A validation failed | The difference is still in the sheet. Correct it yourself, then ask again |
 | A change looks wrong | Press **Undo last apply**, or Excel `Ctrl+Z` |
 | The add-in is missing in Word | Run `npm run start:word` once with Word closed |

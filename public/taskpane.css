@@ -44,3 +44,21 @@
 .source-result small{display:block;color:#777d89;font-size:10px;margin-top:3px;overflow-wrap:anywhere}
 .source-result p{font-size:10px;line-height:1.4;color:#4f535e;margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
 .source-result .primary{margin-top:7px}
+.github-draft{max-height:240px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#f7f8fa;border:1px solid #e8e9ed;border-radius:8px;padding:8px;font:12px/1.45 Consolas,monospace}
+.github-write{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+html,body{height:100%}
+body{display:flex;flex-direction:column;overflow:hidden}
+main{flex:1;min-height:0}
+.conversation{flex:1;min-height:0;max-height:none}
+.insert-row,.composer{flex-shrink:0}
+#settings{min-height:0;max-height:40%;overflow:auto}
+.repo-slot{position:relative}
+.repo-pick{max-width:132px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.repo-menu{position:absolute;bottom:calc(100% + 8px);left:0;width:min(280px,78vw);max-height:280px;overflow:auto;background:#fff;border:1px solid #e7e9ee;border-radius:10px;box-shadow:0 8px 24px #1d233024;z-index:6;padding:6px}
+.repo-menu-label{font-size:10px;font-weight:700;color:#737987;padding:6px 8px 2px}
+.repo-option{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;border:0;background:transparent;text-align:left;font:inherit;padding:7px 8px;border-radius:8px;cursor:pointer;color:#272a31}
+.repo-option:hover,.repo-option[aria-checked="true"]{background:#f4f3ff}
+.repo-option strong{font-size:12px}
+.repo-option small{font-size:10px;color:#727783;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.repo-option[aria-checked="true"] strong::after{content:"  ✓"}
+.repo-menu .hint{margin:4px 8px 8px}

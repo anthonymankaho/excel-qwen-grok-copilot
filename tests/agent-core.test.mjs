@@ -144,6 +144,20 @@ test('a OneDrive source request keeps search and one-file read, and drops a blan
   assert.equal(read.sourceRequest.name, 'aging.xlsx');
   const blank = AgentCore.parseEnvelope('```json\n{"sourceRequest":{"action":"search","query":"  "},"decision":"CONTINUE"}\n```');
   assert.equal(blank.sourceRequest, null);
+  const github = AgentCore.parseEnvelope('```json\n{"githubRequest":{"action":"read","repo":"owner/repo","path":"README.md"},"decision":"CONTINUE"}\n```');
+  assert.equal(github.githubRequest.path, 'README.md');
+  const write = AgentCore.parseEnvelope('```json\n{"githubWrite":{"repo":"owner/repo","title":"Update notes","files":[{"path":"README.md","content":"Hello"}]}}\n```');
+  assert.equal(write.githubWrite.files.length, 1);
+  assert.equal(write.githubWrite.files[0].content, 'Hello');
+  assert.equal(AgentCore.parseGitCommand('open src/app.js').action, 'open');
+  assert.equal(AgentCore.parseGitCommand('git pull').action, 'pull');
+  assert.equal(AgentCore.parseGitCommand('git commit -m "Update the note"').message, 'Update the note');
+  assert.equal(AgentCore.parseGitCommand('git commit and push Update the note').action, 'commit-push');
+  assert.equal(AgentCore.parseGitCommand('git commit and push Update the note').message, 'Update the note');
+  assert.equal(AgentCore.parseGitCommand('git push').action, 'push');
+  assert.equal(AgentCore.parseGitCommand('git push').rejected, false);
+  assert.equal(AgentCore.parseGitCommand('git push --force').rejected, true);
+  assert.equal(AgentCore.parseGitCommand('please git commit'), null);
 });
 
 test('a prose plan string is kept and a wide context request survives parsing', () => {

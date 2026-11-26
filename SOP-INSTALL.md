@@ -16,7 +16,7 @@ Each person uses **their own API key**. The owner's Token Plan key stays on the 
 | Folder | The folder that holds `manifest.xml`. Every command below runs from there |
 | Key | Your own Qwen key. Nothing is bundled |
 
-The pane and the local relay both live at `http://127.0.0.1:3000`. Both manifests are version **1.5.0.0**. The local build to use is **2026-11-25.3**.
+The pane and the local relay both live at `http://127.0.0.1:3000`. Both manifests are version **1.5.0.0**. The local build to use is **2026-11-26.3**.
 
 **This PC’s folder is `C:\Users\User\Desktop\excel-qwen-grok-copilot`.** Run every `npm` command from that folder. PowerShell opened in `C:\WINDOWS\System32` cannot see `package.json` and fails with `ENOENT`. The older folder `C:\Users\User\Desktop\Excel Qwen Grok Copilot` is an archived checkout. Do not install or edit it.
 
@@ -172,7 +172,7 @@ npm run relay-ensure
 
 Then close the task pane and open it again. `npm start` is only needed when you also want to re-sideload and open Excel. Run these commands inside the project folder, not from `C:\WINDOWS\System32`.
 
-**The relay loads its code at process start**, so a code change needs a restart. Pane files are served with `no-store`, so reopening the pane loads the new screen. On another computer, `git pull` first. The pane and relay builds must match. Build **2026-11-25.2** adds the model list (`auto`, `qwen4-max`, `qwen3.8-max`, `qwen3.8-flash`) and Effort (Off, Low, Medium, High, Extra). See `SOP-USER-GUIDE.md`.
+**The relay loads its code at process start**, so a code change needs a restart. Pane files are served with `no-store`, so reopening the pane loads the new screen. On another computer, `git pull` first. The pane and relay builds must match. The current local build is **2026-11-26.3**. It includes the model list (`auto`, `qwen4-max`, `qwen3.8-max`, `qwen3.8-flash`), Effort, GitHub skill install, GitHub MCP, **Connect to Github** through the GitHub CLI login on this PC, Word `open` / `git pull` / `git commit` / `git push` for one local file, appending each finished Qwen answer in Word, and the pane names **Workbook**, **MCP**, and **Skills**. `git push` does not use `--force`. **Disconnect** in the pane does not sign the PC out of GitHub. See `SOP-USER-GUIDE.md`.
 
 A restart clears keys held only in relay memory. If **Remember key** was ticked, the pane reloads it automatically on reconnect; otherwise re-enter it in Settings.
 
@@ -222,9 +222,13 @@ If auto-start is installed, `relay-stop` alone is not enough — the minute task
 
 ## 12. Processing status · 處理狀態
 
-**2026-11-25 — GitHub skill install.** Local build `2026-11-25.3`. Saved skills can install one `SKILL.md` from `https://github.com/owner/repo`. The token stays in this browser when Remember is ticked. Restart the local relay and reopen the pane. Hosted Worker was not redeployed.
+**2026-11-26 — Hosted pane deployed.** `npx wrangler deploy` from this folder published commit `6534f67`. Live health is `build: 2026-11-25.3`, `byo:true`, `configured.qwen:false`. Close and reopen the Excel web task pane. MCP, Skills, History, Memory, and PDF/Word/Excel extraction remain local-only. The email-and-password team version is cancelled and was never deployed. A Token Plan key cannot back that shared login.
 
-**2026-11-25 — 從 GitHub 安裝技能。** 本機版本 `2026-11-25.3`。Saved skills 可從 `https://github.com/owner/repo` 安裝一個 `SKILL.md`。勾選 Remember 時，token 只留在這個瀏覽器。請重啟本機 relay 並重新開啟窗格。託管 Worker 未重新部署。
+**2026-11-26 — 託管窗格已部署。** 在此資料夾執行 `npx wrangler deploy`，發佈 commit `6534f67`。線上 health 為 `build: 2026-11-25.3`、`byo:true`、`configured.qwen:false`。請關閉並重新開啟 Excel 網頁版工作窗格。MCP、Skills、History、Memory，以及 PDF／Word／Excel 擷取仍只在本機。email 加密碼的團隊版已取消，且從未部署。Token Plan key 不能用於那種共用登入。
+
+**2026-11-25 — Pane names and GitHub skill install.** Commit `6534f67`. Local build `2026-11-25.3`. **Skills** can install one `SKILL.md` from `https://github.com/owner/repo`. The token stays in this browser when Remember is ticked. **Guide** starts collapsed. **MCP** is the OneDrive card. **Workbook** opens access above the button. The hosted Worker was not redeployed.
+
+**2026-11-25 — 窗格名稱與從 GitHub 安裝技能。** Commit `6534f67`。本機版本 `2026-11-25.3`。**Skills** 可從 `https://github.com/owner/repo` 安裝一個 `SKILL.md`。勾選 Remember 時，token 只留在這個瀏覽器。**Guide** 預設收合。**MCP** 是 OneDrive 卡。**Workbook** 在按鈕上方打開存取預覽。託管 Worker 未重新部署。
 
 **2026-11-25 — Folder, build, and restart.** This PC uses `C:\Users\User\Desktop\excel-qwen-grok-copilot` only. Local build `2026-11-25.2`. Both manifests are `1.5.0.0`. After a code change, run `npm run relay-stop` then `npm run relay-ensure` from that folder and reopen the pane. The hosted Worker was not redeployed. `npm test` 123/123.
 

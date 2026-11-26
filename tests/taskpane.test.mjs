@@ -43,11 +43,12 @@ function fire(el, type, ev = {}) {
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, location, sheetNames, usedRanges, healthBuild, blockStorage, allowStorageAccess, officeStore, streamFailures = 0, prefs }) {
+function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, location, sheetNames, usedRanges, healthBuild, blockStorage, allowStorageAccess, officeStore, streamFailures = 0, prefs, extraStore, wordSelection, wordBody }) {
   const els = new Map();
   const defaults = { provider: 'qwen', qwenModel: 'qwen4-max', qwenEndpoint: 'https://token-plan.maas.qwencloudapi.com/compatible-mode/v1/chat/completions' };
   const get = id => { if (!els.has(id)) { const el = makeElement(id); if (defaults[id]) el.value = defaults[id]; if (id === 'includeContext' || id === 'rememberKey') el.checked = true; els.set(id, el); } return els.get(id); };
   const store = seedKeys ? { 'eqgc.keys.v1': JSON.stringify(seedKeys) } : {};
+  if (extraStore) Object.assign(store, extraStore);
   if (prefs) store['eqgc.chat.v1'] = JSON.stringify(prefs);
   const writes = [];
   const calls = [];
@@ -300,7 +301,7 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
     let current = false;
     Object.defineProperty(wordFont, key, { get() { return current; }, set(v) { current = v; writes.push({ kind: 'wordFont', key, value: v }); } });
   }
-  const wordDoc = { selectionText: 'Hello team', bodyText: 'Hello team. More text.', style: 'Normal', font: wordFont };
+  const wordDoc = { selectionText: wordSelection === undefined ? 'Hello team' : wordSelection, bodyText: wordBody === undefined ? 'Hello team. More text.' : wordBody, style: 'Normal', font: wordFont };
   let storageBlocked = !!blockStorage;
   const officeValues = officeStore || null;
   const sandbox = {
@@ -343,33 +344,63 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
       })
     },
     Word: {
-      run: fn => fn({
+      run: fn => {
+        const tracked = [];
+        return fn({
         document: {
-          getSelection: () => ({
+          getSelection: () => {
+            const state = { pending: new Set(), loaded: new Set() };
+            tracked.push(state);
+            return {
             get text() { return wordDoc.selectionText; },
-            load() {},
+            load(props) {
+              const list = Array.isArray(props) ? props : String(props || '').split(',');
+              for (const prop of list) {
+                const name = String(prop || '').trim();
+                if (name) state.pending.add(name);
+              }
+            },
             insertText(text, where) { writes.push({ kind: 'wordInsert', where, text }); if (where === 'Replace') wordDoc.selectionText = text; },
             font: wordDoc.font,
-            get style() { return wordDoc.style; },
+            get style() {
+              if (!state.loaded.has('style')) throw new Error("The property 'style' is not available. Before reading the property's value, call the load method on the containing object and call \"context.sync()\" on the associated request context.");
+              return wordDoc.style;
+            },
             set style(v) { wordDoc.style = v; writes.push({ kind: 'wordStyle', style: v }); }
-          }),
+            };
+          },
           body: {
             get text() { return wordDoc.bodyText; },
             load() {},
-            insertText(text, where) { writes.push({ kind: 'wordBody', where, text }); },
+            insertText(text, where) { writes.push({ kind: 'wordBody', where, text }); if (where === 'Replace') wordDoc.bodyText = text; },
             search(term, options) {
               writes.push({ kind: 'wordSearch', term, options });
               return { load() {}, items: [{ insertText(text, where) { writes.push({ kind: 'wordReplace', term, text, where }); } }] };
             }
           }
         },
-        sync: async () => {}
-      })
+        sync: async () => {
+          for (const state of tracked) {
+            for (const prop of state.pending) state.loaded.add(prop);
+            state.pending.clear();
+          }
+        }
+      });
+      }
     },
     fetch: async (url, opts) => {
       const body = opts?.body ? JSON.parse(opts.body) : null;
       calls.push({ url, body, headers: opts?.headers || {} });
-      if (url.endsWith('/api/health')) return { ok: true, status: 200, json: async () => ({ ok: true, build: healthBuild || '2026-11-25.3', configured: { qwen: true } }) };
+      if (url.endsWith('/api/health')) return { ok: true, status: 200, json: async () => ({ ok: true, build: healthBuild || '2026-11-26.3', configured: { qwen: true } }) };
+      if (url.endsWith('/api/connectors/github/account')) return { ok: true, status: 200, json: async () => ({ connected: true, login: 'anthonymankaho', email: '' }) };
+      if (url.endsWith('/api/connectors/github/connect')) return { ok: true, status: 200, json: async () => ({ connected: true, login: 'anthonymankaho', email: '' }) };
+      if (url.endsWith('/api/connectors/github/repos')) return { ok: true, status: 200, json: async () => ({ items: [{ fullName: 'owner/repo', private: false, defaultBranch: 'main', description: '' }] }) };
+      if (url.endsWith('/api/connectors/github/read')) return { ok: true, status: 200, json: async () => ({ repo: body.repo, path: body.path, text: 'hello from GitHub', truncated: false }) };
+      if (url.endsWith('/api/connectors/github/write')) return { ok: true, status: 200, json: async () => ({ ok: true, target: body.target, repo: body.repo, base: 'main', branch: body.target === 'default' ? 'main' : 'eqgc/test', commit: 'abc', prUrl: body.target === 'default' ? '' : 'https://github.com/owner/repo/pull/7', files: body.files.map(file => file.path) }) };
+      if (url.endsWith('/api/git/open')) return { ok: true, status: 200, json: async () => ({ ok: true, repo: body.repo || 'C:\\repo', path: 'src/app.js', text: 'function hello() {}\n' }) };
+      if (url.endsWith('/api/git/pull')) return { ok: true, status: 200, json: async () => ({ ok: true, repo: body.repo || 'C:\\repo', path: body.path, text: 'pulled line\n', summary: 'Already up to date.' }) };
+      if (url.endsWith('/api/git/commit')) return { ok: true, status: 200, json: async () => ({ ok: true, repo: body.repo, path: body.path, commit: 'abc1234', message: body.message }) };
+      if (url.endsWith('/api/git/push')) return { ok: true, status: 200, json: async () => ({ ok: true, repo: body.repo, summary: 'main -> main' }) };
       if (url.endsWith('/api/connectors/search')) return { ok: true, status: 200, json: async () => ({ items: [{ id: 'item-1', name: 'aging.xlsx', detail: 'sheet' }] }) };
       if (url.endsWith('/api/connectors/read')) return { ok: true, status: 200, json: async () => ({ name: body.item.name, kind: 'XLSX', text: 'Coverage: COMPLETE\nGJ001 | 100' }) };
       if (url.endsWith('/api/extract')) return { ok: true, status: 200, json: async () => ({ text: '[Sheet: Data]\nL1: Voucher | Debit\nL2: GJ001 | 100', kind: 'XLSX' }) };
@@ -411,6 +442,9 @@ const selMulti = { address: "'Sheet1'!A1:B2", text: [['1', '2'], ['3', '4']], fo
 const chatCalls = sb => sb.calls.filter(c => c.url.endsWith('/api/chat-stream') || c.url.endsWith('/api/chat'));
 const lastContent = sb => chatCalls(sb).at(-1).body.messages.at(-1).content;
 const visible = el => el ? [el.textContent || '', ...(el.children || []).map(visible)].join('\n') : '';
+function savedAuditText(sb) {
+  return sb.calls.filter(call => String(call.url).endsWith('/api/sessions/save')).map(call => JSON.stringify(call.body.audit || [])).join('\n');
+}
 async function boot(sb) { sb.officeCb({ host: 'Excel' }); await flush(); await flush(); }
 async function ask(sb, text) { sb.els('prompt').value = text; await fire(sb.els('composer'), 'submit'); await flush(); await flush(); }
 
@@ -792,11 +826,21 @@ test('Direct revise replaces and styles the Word selection', async () => {
   sb.els('directRevise').checked = true;
   await ask(sb, 'revise');
   assert.equal(chatCalls(sb).at(-1).body.host, 'word');
-  assert.match(lastContent(sb), /\[Word selection\]/);
+  assert.match(lastContent(sb), /\[Word document\]/);
+  assert.match(lastContent(sb), /More text/);
   assert.ok(sb.writes.some(w => w.kind === 'wordInsert' && w.where === 'Replace' && w.text === 'Revised paragraph.'));
   assert.ok(sb.writes.some(w => w.kind === 'wordFont' && w.key === 'bold' && w.value === true));
   assert.ok(sb.writes.some(w => w.kind === 'wordStyle' && w.style === 'Heading 1'));
   assert.ok(sb.writes.some(w => w.kind === 'wordBody' && w.where === 'End'));
+});
+
+test('a finished answer does not show an audit card', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Report.', model: 'm' } });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  await ask(sb, 'review the note');
+  assert.equal(sb.els('conversation').children.some(c => String(c.className).includes('audit-card')), false);
+  assert.equal(visible(sb.els('conversation')).includes('AUDIT'), false);
 });
 
 test('Chat mode answers and does not write, even when Direct is on', async () => {
@@ -951,7 +995,7 @@ test('Agent and chat route to Qwen only', async () => {
   await ask(sb, 'Reconcile the ledger');
   assert.equal(chatCalls(sb).at(-1).body.provider, 'qwen');
   assert.equal(chatCalls(sb).at(-1).body.mode, 'agent');
-  assert.match(visible(sb.els('conversation')), /via qwen/);
+  assert.match(savedAuditText(sb), /"provider":"qwen"/);
 });
 
 test('A hosted pane sends the user own key per request (BYO) and never configures the server', async () => {
@@ -990,7 +1034,7 @@ test('Agent read-back delivers every column of a wide sheet, not just A to H', a
   assert.match(fed, /\[Excel range Aging!A1:Q2\]/);
   assert.match(fed, /Over 365/);
   assert.match(fed, /Total USD/);
-  assert.match(visible(sb.els('conversation')), /Context Aging!A1:Q2/);
+  assert.match(savedAuditText(sb), /Aging!A1:Q2/);
 });
 
 test('An over-limit read is paged with offset until fully read, never reported as not read', async () => {
@@ -1106,7 +1150,8 @@ test('Saved skills context is attached to the question and audited', async () =>
   sb.els('workMode').value = 'chat';
   await ask(sb, 'review the whole report');
   assert.match(lastContent(sb), /\[Saved skills\]\nSAVED SKILLS test block/);
-  assert.match(visible(sb.els('conversation')), /skills monthly-report-review/);
+  assert.match(visible(sb.els('conversation')), /Skills: monthly-report-review/);
+  assert.match(savedAuditText(sb), /skills monthly-report-review/);
 });
 
 test('GitHub skill install posts the repo and token without putting the token in the question', async () => {
@@ -1225,6 +1270,252 @@ test('Copilot-style sidebar hides the five browse cards and Share quick toggle m
   assert.equal(sb.els('sidebar').classList.contains('hidden'), false);
 });
 
+function findButton(el, label) {
+  if (el?.textContent === label && el.listeners?.click) return el;
+  for (const child of el?.children || []) {
+    const found = findButton(child, label);
+    if (found) return found;
+  }
+  return null;
+}
+
+test('git commit in Word sends the document text and does not call the model', async () => {
+  const sb = makeSandbox({
+    selection: singleEmpty,
+    used: usedSmall,
+    extraStore: { 'eqgc.git.v1': JSON.stringify({ repo: 'C:\\repo', file: 'notes.txt' }) }
+  });
+  await boot(sb);
+  sb.officeCb({ host: 'Word' });
+  await ask(sb, 'git commit Update the note');
+  assert.equal(sb.calls.some(call => String(call.url).endsWith('/api/chat-stream')), false);
+  const call = sb.calls.find(item => String(item.url).endsWith('/api/git/commit'));
+  assert.equal(call.body.path, 'notes.txt');
+  assert.equal(call.body.content, 'Hello team. More text.');
+  assert.equal(call.body.message, 'Update the note');
+  assert.match(visible(sb.els('conversation')), /abc1234/);
+});
+
+test('git push in Word does not call the model or use --force', async () => {
+  const sb = makeSandbox({
+    selection: singleEmpty,
+    used: usedSmall,
+    extraStore: { 'eqgc.git.v1': JSON.stringify({ repo: 'C:\\repo', file: 'notes.txt' }) }
+  });
+  await boot(sb);
+  sb.officeCb({ host: 'Word' });
+  await ask(sb, 'git push');
+  assert.equal(sb.calls.some(call => String(call.url).endsWith('/api/chat-stream')), false);
+  const call = sb.calls.find(item => String(item.url).endsWith('/api/git/push'));
+  assert.equal(call.body.repo, 'C:\\repo');
+  assert.equal(JSON.stringify(call.body).includes('force'), false);
+  assert.match(visible(sb.els('conversation')), /main -> main/);
+  await ask(sb, 'git push --force');
+  assert.equal(sb.calls.filter(item => String(item.url).endsWith('/api/git/push')).length, 1);
+  assert.match(visible(sb.els('conversation')), /--force/);
+  const excel = makeSandbox({ selection: singleEmpty, used: usedSmall, extraStore: { 'eqgc.git.v1': JSON.stringify({ repo: 'C:\\repo', file: 'notes.txt' }) } });
+  await boot(excel);
+  await ask(excel, 'git push');
+  assert.equal(excel.calls.some(call => String(call.url).includes('/api/git/')), false);
+});
+
+test('git commit and push writes the document and then pushes', async () => {
+  const sb = makeSandbox({
+    selection: singleEmpty,
+    used: usedSmall,
+    extraStore: { 'eqgc.git.v1': JSON.stringify({ repo: 'C:\\repo', file: 'notes.txt' }) }
+  });
+  await boot(sb);
+  sb.officeCb({ host: 'Word' });
+  await ask(sb, 'git commit and push Update the note');
+  assert.equal(sb.calls.some(call => String(call.url).endsWith('/api/chat-stream')), false);
+  const commit = sb.calls.find(item => String(item.url).endsWith('/api/git/commit'));
+  const push = sb.calls.find(item => String(item.url).endsWith('/api/git/push'));
+  assert.equal(commit.body.content, 'Hello team. More text.');
+  assert.equal(commit.body.message, 'Update the note');
+  assert.ok(sb.calls.indexOf(commit) < sb.calls.indexOf(push));
+  assert.equal(sb.writes.some(item => item.kind === 'wordBody' && item.where === 'End'), false);
+});
+
+test('a finished Word answer is appended and an Excel answer is not', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Review the function.', model: 'm' } });
+  await boot(sb);
+  sb.officeCb({ host: 'Word' });
+  await ask(sb, 'what does this file do');
+  const appended = sb.writes.filter(item => item.kind === 'wordBody' && item.where === 'End');
+  assert.equal(appended.length, 1);
+  assert.match(appended[0].text, /Qwen/);
+  assert.match(appended[0].text, /Review the function/);
+  const excel = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Review the function.', model: 'm' } });
+  await boot(excel);
+  await ask(excel, 'what does this file do');
+  assert.equal(excel.writes.some(item => item.kind === 'wordBody'), false);
+});
+
+test('Agent in Word reads a named document passage and does not ask for a selection', async () => {
+  const body = `${'Overview line.\n'.repeat(2000)}Revision Analysis (2026-11-26)\nOpus 5.5 advice: keep the local relay.\n`;
+  const sb = makeSandbox({
+    selection: singleEmpty,
+    used: usedSmall,
+    reply: { text: 'Read.', model: 'm' },
+    wordSelection: '',
+    wordBody: body
+  });
+  await boot(sb);
+  sb.officeCb({ host: 'Word' });
+  sb.els('workMode').value = 'agent';
+  await ask(sb, 'please read from "Revision Analysis (2026-11-26)"');
+  const sent = chatCalls(sb).map(call => JSON.stringify(call.body)).join('\n');
+  assert.match(sent, /Opus 5\.5 advice: keep the local relay/);
+  assert.equal(sent.includes('Ask for the selection'), false);
+  assert.match(sent, /\[Word document\]/);
+});
+
+test('a selected Word heading still includes the text under it', async () => {
+  const body = 'Overview\nRevision Analysis (2026-11-26)\nOpus 5.5 advice: keep the local relay.\nSecond advice line.\n';
+  const sb = makeSandbox({
+    selection: singleEmpty,
+    used: usedSmall,
+    reply: { text: 'Read.', model: 'm' },
+    wordSelection: 'Revision Analysis (2026-11-26)',
+    wordBody: body
+  });
+  await boot(sb);
+  sb.officeCb({ host: 'Word' });
+  sb.els('workMode').value = 'agent';
+  await ask(sb, 'please read from "Revision Analysis (2026-11-26)"');
+  const sent = chatCalls(sb).map(call => JSON.stringify(call.body)).join('\n');
+  assert.match(sent, /Opus 5\.5 advice: keep the local relay/);
+  assert.match(sent, /Second advice line/);
+  assert.match(sent, /\[Word document\]/);
+  assert.equal(sent.includes('[Word selection]'), false);
+});
+
+test('open in Word replaces the document and git pull in Excel does not call Git', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, extraStore: { 'eqgc.git.v1': JSON.stringify({ repo: 'C:\\repo', file: '' }) } });
+  await boot(sb);
+  sb.officeCb({ host: 'Word' });
+  await ask(sb, 'open src/app.js');
+  const opened = sb.writes.find(item => item.kind === 'wordBody' && item.where === 'Replace');
+  assert.equal(opened.text, 'function hello() {}\n');
+  assert.match(sb.store['eqgc.git.v1'], /src\/app\.js/);
+  await ask(sb, 'git pull');
+  assert.equal(sb.calls.some(call => String(call.url).endsWith('/api/chat-stream')), false);
+  const excel = makeSandbox({ selection: singleEmpty, used: usedSmall });
+  await boot(excel);
+  await ask(excel, 'git pull');
+  assert.equal(excel.calls.some(call => String(call.url).includes('/api/git/')), false);
+  assert.match(visible(excel.els('conversation')), /Word/);
+});
+
+test('a GitHub write stays on the card until Write to GitHub is clicked', async () => {
+  const token = 'ghp_testtoken';
+  const sb = makeSandbox({
+    selection: singleEmpty,
+    used: usedSmall,
+    reply: { text: 'Draft ready.\n```json\n{"githubWrite":{"repo":"owner/repo","title":"Update notes","body":"Explain the change","files":[{"path":"README.md","content":"Hello from the pane"}]}}\n```', model: 'm' }
+  });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  sb.els('githubMcpToken').value = token;
+  await ask(sb, 'update the readme');
+  assert.equal(sb.calls.some(call => String(call.url).endsWith('/api/connectors/github/write')), false);
+  assert.match(visible(sb.els('conversation')), /Hello from the pane/);
+  assert.equal(visible(sb.els('conversation')).includes(token), false);
+  const button = findButton(sb.els('conversation'), 'Write to GitHub');
+  assert.ok(button);
+  await fire(button, 'click');
+  await flush();
+  const call = sb.calls.find(item => String(item.url).endsWith('/api/connectors/github/write'));
+  assert.equal(call.body.target, 'pull-request');
+  assert.equal(call.body.files[0].content, 'Hello from the pane');
+  assert.equal(call.body.token, token);
+  assert.equal(call.body.useAccount, undefined);
+  assert.match(visible(sb.els('conversation')), /pull\/7/);
+  const sentToModel = sb.calls.filter(item => String(item.url).endsWith('/api/chat-stream')).map(item => JSON.stringify(item.body)).join('\n');
+  assert.equal(sentToModel.includes(token), false);
+});
+
+test('Github Account uses the signed-in login and a write does not put a token in the chat', async () => {
+  const sb = makeSandbox({
+    selection: singleEmpty,
+    used: usedSmall,
+    reply: { text: 'Draft ready.\n```json\n{"githubWrite":{"repo":"owner/repo","title":"Update notes","body":"Explain the change","files":[{"path":"README.md","content":"Hello from the pane"}]}}\n```', model: 'm' }
+  });
+  await boot(sb);
+  assert.match(sb.els('githubMcpStatus').textContent, /Connected as anthonymankaho/);
+  assert.equal(sb.els('connectGitHub').classList.contains('hidden'), true);
+  assert.equal(sb.els('disconnectGitHub').classList.contains('hidden'), false);
+  sb.els('workMode').value = 'agent';
+  await ask(sb, 'update the readme');
+  const button = findButton(sb.els('conversation'), 'Write to GitHub');
+  await fire(button, 'click');
+  await flush();
+  const call = sb.calls.find(item => String(item.url).endsWith('/api/connectors/github/write'));
+  assert.equal(call.body.useAccount, true);
+  assert.equal(call.body.token, undefined);
+  const sentToModel = sb.calls.filter(item => String(item.url).endsWith('/api/chat-stream')).map(item => JSON.stringify(item.body)).join('\n');
+  assert.equal(sentToModel.includes('useAccount'), false);
+  assert.equal(sentToModel.includes('gho_'), false);
+  assert.equal(sentToModel.includes('anthonymankaho'), false);
+  await fire(sb.els('disconnectGitHub'), 'click');
+  assert.equal(sb.store['eqgc.github.account'], 'off');
+  assert.match(sb.els('githubMcpStatus').textContent, /Not connected/);
+  const optedOut = makeSandbox({
+    selection: singleEmpty,
+    used: usedSmall,
+    extraStore: { 'eqgc.github.account': 'off' },
+    reply: { turns: [
+      '```json\n{"githubRequest":{"action":"repos","query":"demo"},"decision":"CONTINUE"}\n```',
+      'Done.\n```json\n{"decision":"COMPLETE"}\n```'
+    ] }
+  });
+  await boot(optedOut);
+  assert.equal(optedOut.calls.some(item => String(item.url).endsWith('/api/connectors/github/account')), false);
+  assert.match(optedOut.els('githubMcpStatus').textContent, /Not connected/);
+  optedOut.els('workMode').value = 'agent';
+  await ask(optedOut, 'list my repos');
+  const repos = optedOut.calls.find(item => String(item.url).endsWith('/api/connectors/github/repos'));
+  assert.equal(repos.body.useAccount, undefined);
+  assert.equal(repos.body.token, undefined);
+  await fire(optedOut.els('connectGitHub'), 'click');
+  await flush();
+  assert.equal(optedOut.store['eqgc.github.account'], undefined);
+  assert.match(optedOut.els('githubMcpStatus').textContent, /Connected as anthonymankaho/);
+  assert.ok(optedOut.calls.some(item => String(item.url).endsWith('/api/connectors/github/connect')));
+});
+
+test('the chat box can select a GitHub repository and sends that name, not a token', async () => {
+  const sb = makeSandbox({
+    selection: singleEmpty,
+    used: usedSmall,
+    reply: { text: 'Noted.\n```json\n{"decision":"COMPLETE"}\n```', model: 'm' }
+  });
+  await boot(sb);
+  assert.equal(sb.els('githubRepoPick').textContent, 'No Repository');
+  assert.equal(sb.els('githubRepoMenu').classList.contains('hidden'), true);
+  sb.els('workMode').value = 'agent';
+  await fire(sb.els('githubRepoPick'), 'click');
+  await flush();
+  assert.equal(sb.els('githubRepoMenu').classList.contains('hidden'), false);
+  const listed = sb.calls.find(item => String(item.url).endsWith('/api/connectors/github/repos'));
+  assert.equal(listed.body.useAccount, true);
+  assert.equal(listed.body.token, undefined);
+  const option = sb.els('githubRepoList').children[0];
+  await fire(option, 'click');
+  assert.equal(sb.els('githubRepoPick').textContent, 'repo');
+  assert.match(sb.store['eqgc.github.repo'], /owner\/repo/);
+  await ask(sb, 'read the readme');
+  assert.match(lastContent(sb), /\[GitHub repository\]\nowner\/repo/);
+  const sent = JSON.stringify(chatCalls(sb).at(-1).body);
+  assert.equal(sent.includes('gho_'), false);
+  assert.equal(sent.includes('ghp_'), false);
+  await fire(sb.els('githubRepoPick'), 'click');
+  await fire(sb.els('githubRepoNone'), 'click');
+  assert.equal(sb.els('githubRepoPick').textContent, 'No Repository');
+  assert.equal(sb.store['eqgc.github.repo'], undefined);
+});
+
 test('DOCX attachments are extracted by the local relay', async () => {
   const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Ok.', model: 'm' } });
   await boot(sb);
@@ -1284,7 +1575,7 @@ test('History delete arms once, then deletes the session on confirm', async () =
 test('Hosted pane hides local-data cards but keeps the guide', async () => {
   const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Ok.', model: 'm' }, location: { hostname: 'excel-qwen-grok.example.workers.dev' } });
   await boot(sb); await flush();
-  for (const id of ['skillsCard', 'historyCard', 'memoryCard', 'cloudSources']) {
+  for (const id of ['skillsCard', 'historyCard', 'memoryCard', 'cloudSources', 'githubRepoSlot']) {
     assert.equal(sb.els(id).classList.contains('hidden'), true, `${id} hidden on hosted`);
   }
   assert.equal(sb.els('guideCard').classList.contains('hidden'), false);
@@ -1342,7 +1633,7 @@ test('Hosted routing uses the in-browser key, not the server configured flag', a
   await boot(sb);
   sb.els('workMode').value = 'chat';
   await ask(sb, 'hello before key');
-  assert.match(visible(sb.els('conversation')), /Add your Qwen API key/);
+  assert.match(sb.els('toast').textContent, /Add your Qwen API key/);
   assert.equal(sb.els('settings').classList.contains('hidden'), false);
   sb.els('apiKey').value = 'sk-sp-byo-user-key-001';
   await fire(sb.els('saveKey'), 'click'); await flush();
@@ -1405,7 +1696,7 @@ test('A stale relay build is reported and blocks the send instead of a silent fa
   await ask(sb, 'review the whole workbook');
   assert.equal(chatCalls(sb).length, 0);
   assert.match(sb.els('agentStatus').textContent, /relay is running build 2026-11-01\.1/);
-  assert.match(visible(sb.els('conversation')), /Restart the relay/);
+  assert.match(sb.els('toast').textContent, /Restart the relay/);
 });
 
 test('A failed sheet scan is reported INCOMPLETE, never as a clean zero-error sheet', async () => {
@@ -1464,7 +1755,7 @@ test('A profile request returns column statistics, not raw cells', async () => {
   assert.match(fed, /A \| Entity \| filled 3 \| distinct 2/);
   assert.match(fed, /MUK \(2\)/);
   assert.match(fed, /C \| Total USD \| filled 3 \| distinct 3 \| numeric 3 \| sum 350 \| min 50 \| max 200/);
-  assert.match(visible(sb.els('conversation')), /Context Aging!A1:C4 \(profile\)/);
+  assert.match(savedAuditText(sb), /Aging!A1:C4 \(profile\)/);
 });
 
 test('a large profile scans a later batch and reports Excel error values with full coverage', async () => {
@@ -1799,6 +2090,6 @@ test('An unknown pivot field names the offending header and leaves no partial pi
   const fed = lastContent(sb);
   assert.match(fed, /Pivot field\(s\) not in Aging!A1:C4: USD O\/S/);
   assert.match(fed, /Headers are: Entity, Bucket, Total USD/);
-  assert.match(visible(sb.els('conversation')), /Execute FAILED/);
-  assert.match(visible(sb.els('conversation')), /USD O\/S/);
+  assert.match(savedAuditText(sb), /FAILED/);
+  assert.match(savedAuditText(sb), /USD O\/S/);
 });

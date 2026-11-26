@@ -9,7 +9,7 @@
     "start:word": "office-addin-debugging start manifest.xml desktop --app word --no-debug --no-live-reload",
     "dev-server": "node server.mjs",
     "stop": "office-addin-debugging stop manifest.xml desktop",
-    "check": "node --check server.mjs && node --check relay-core.mjs && node --check mcp-connectors.mjs && node --check extract-files.mjs && node --check worker.mjs && node --check public/agent-core.js && node --check public/taskpane.js",
+    "check": "node --check server.mjs && node --check relay-core.mjs && node --check github-mcp.mjs && node --check github-account.mjs && node --check git-workspace.mjs && node --check mcp-connectors.mjs && node --check extract-files.mjs && node --check worker.mjs && node --check public/agent-core.js && node --check public/taskpane.js",
     "store-assets": "node scripts/make-store-assets.mjs",
     "deploy:cloudflare": "npx wrangler deploy",
     "test": "node --test \"tests/*.test.mjs\"",

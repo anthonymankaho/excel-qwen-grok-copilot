@@ -8,7 +8,7 @@
 
 - Product: **Qwen for Excel and Word**, add-in-only XML manifest, App ID `7f3a9c2e-6b14-4e8d-a1f0-9c5d2e8b6a40`.
 - Current hosted manifest: `manifest.cloudflare.xml`, v1.5.0.0, `ProviderName` = `Anthony Man`, default locale `en-US`.
-- Production health was read without sending a model request on 2026-11-25: Worker build `2026-11-24.10`, `byo:true`, `configured.qwen:false`.
+- Production health was read without sending a model request on 2026-11-26: Worker build `2026-11-25.3`, `byo:true`, `configured.qwen:false`. The 2026-11-25 read was build `2026-11-24.10`.
 - A provider-terms warning was added to the local pane, support, and EULA sources during this preparation. These source changes have **not** been deployed; the live Worker still serves build `.10` without the new warning.
 - The deployed add-in uses BYO key: each user enters their own key; no user key is intentionally shared and no provider key is embedded in the Worker.
 - The three `.html` legal URLs in the manifest/listing respond with HTTP 307 and then HTTP 200 at extensionless canonical paths. Use the canonical URLs directly in the submission package.

@@ -40,6 +40,7 @@ test('Fast disables Qwen thinking; bad models and non-Qwen providers are rejecte
   const slow = prepareChat({ provider: 'qwen', endpoint: qwenUrl, messages, fast: false }, secrets);
   assert.equal(slow.payload.enable_thinking, undefined);
   assert.match(prepareChat({ provider: 'qwen', endpoint: qwenUrl, messages, host: 'word' }, secrets).payload.messages[0].content, /Word document/);
+  assert.match(prepareChat({ provider: 'qwen', endpoint: qwenUrl, messages, host: 'word' }, secrets).payload.messages[0].content, /appends your finished answer/);
   assert.match(prepareChat({ provider: 'qwen', endpoint: qwenUrl, messages, mode: 'agent' }, secrets).payload.messages[0].content, /MODE AGENT/);
   assert.equal(prepareChat({ provider: 'qwen', endpoint: qwenUrl, messages }, secrets).payload.messages[0].content.includes('MODE AGENT'), false);
   assert.match(slow.payload.messages[0].content, /Excel workbook/);

@@ -49,6 +49,55 @@
     return {};
   }
 
+  function commitMessage(raw) {
+    return String(raw || '').trim().replace(/^-m\s+/, '').replace(/^["']|["']$/g, '').trim();
+  }
+
+  function parseGitCommand(text) {
+    const clean = String(text || '').trim();
+    const open = clean.match(/^open\s+(\S[\s\S]*)$/i);
+    if (open) return { action: 'open', path: open[1].trim() };
+    const pull = clean.match(/^git\s+pull(?:\s+(\S[\s\S]*))?$/i);
+    if (pull) return { action: 'pull', path: (pull[1] || '').trim() };
+    const commitPush = clean.match(/^git\s+commit\s+and\s+push(?:\s+([\s\S]+))?$/i);
+    if (commitPush) return { action: 'commit-push', message: commitMessage(commitPush[1]) };
+    const commit = clean.match(/^git\s+commit(?:\s+([\s\S]+))?$/i);
+    if (commit) return { action: 'commit', message: commitMessage(commit[1]) };
+    const push = clean.match(/^git\s+push(?:\s+([\s\S]*))?$/i);
+    if (push) return { action: 'push', rejected: Boolean(String(push[1] || '').trim()) };
+    return null;
+  }
+
+  function normalizeGitHubRequest(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    if (raw.action === 'repos') {
+      const query = typeof raw.query === 'string' ? raw.query.trim().slice(0, 200) : '';
+      return { action: 'repos', query };
+    }
+    if (raw.action === 'read') {
+      const repo = typeof raw.repo === 'string' ? raw.repo.trim() : '';
+      const filePath = typeof raw.path === 'string' ? raw.path.trim() : '';
+      if (!repo || !filePath || repo.length > 201 || filePath.length > 400) return null;
+      return { action: 'read', repo, path: filePath };
+    }
+    return null;
+  }
+
+  function normalizeGitHubWrite(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const repo = typeof raw.repo === 'string' ? raw.repo.trim() : '';
+    const title = typeof raw.title === 'string' ? raw.title.trim().slice(0, 120) : '';
+    const body = typeof raw.body === 'string' ? raw.body.trim().slice(0, 4000) : '';
+    if (!repo || repo.length > 201 || !Array.isArray(raw.files) || !raw.files.length) return null;
+    const files = [];
+    for (const file of raw.files.slice(0, 5)) {
+      const filePath = typeof file?.path === 'string' ? file.path.trim() : '';
+      if (!filePath || filePath.length > 400 || typeof file?.content !== 'string' || !file.content) return null;
+      files.push({ path: filePath, content: file.content });
+    }
+    return { repo, title: title || 'Update from Qwen for Excel and Word', body, files };
+  }
+
   function normalizeSourceRequest(raw) {
     if (!raw || typeof raw !== 'object') return null;
     if (raw.action === 'search') {
@@ -108,7 +157,7 @@
       try {
         const parsed = JSON.parse(blocks[i][1]);
         if (!parsed || typeof parsed !== 'object') continue;
-        if (!parsed.plan && !parsed.decision && !parsed.contextRequest && !parsed.profileRequest && !parsed.scanRequest && !parsed.sourceRequest && !parsed.actions) continue;
+        if (!parsed.plan && !parsed.decision && !parsed.contextRequest && !parsed.profileRequest && !parsed.scanRequest && !parsed.sourceRequest && !parsed.githubRequest && !parsed.githubWrite && !parsed.actions) continue;
         const prose = (source.slice(0, blocks[i].index) + source.slice(blocks[i].index + blocks[i][0].length)).trim();
         return {
           prose,
@@ -118,11 +167,13 @@
           contextRequest: normalizeContextRequest(parsed.contextRequest),
           profileRequest: normalizeProfileRequest(parsed.profileRequest),
           scanRequest: normalizeScanRequest(parsed.scanRequest),
-          sourceRequest: normalizeSourceRequest(parsed.sourceRequest)
+          sourceRequest: normalizeSourceRequest(parsed.sourceRequest),
+          githubRequest: normalizeGitHubRequest(parsed.githubRequest),
+          githubWrite: normalizeGitHubWrite(parsed.githubWrite)
         };
       } catch { /* not this block */ }
     }
-    return { prose: source, plan: null, actions: null, decision: '', contextRequest: null, profileRequest: null, scanRequest: null, sourceRequest: null };
+    return { prose: source, plan: null, actions: null, decision: '', contextRequest: null, profileRequest: null, scanRequest: null, sourceRequest: null, githubRequest: null, githubWrite: null };
   }
 
   function isFinancePrompt(text) {
@@ -460,6 +511,6 @@
 
   root.AgentCore = {
     MAX_LOOPS, parseEnvelope, normalizePlan, normalizeFinanceProfile, isFinancePrompt, routeProvider, isDestructive, isExcelError,
-    evaluateGridCheck, explainFailure, decide, audit, summarize, sumNumbers
+    evaluateGridCheck, explainFailure, decide, audit, summarize, sumNumbers, parseGitCommand
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

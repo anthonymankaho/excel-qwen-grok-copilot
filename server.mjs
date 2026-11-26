@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { extractDocx, extractPdf, extractWorkbook } from './extract-files.mjs';
 import { RELAY_BUILD, appendMemory, buildSkillContext, deleteSession, fetchGitHubSkill, installSkillFile, listSessions, listSkills, originAllowed, parseGitHubSkillSource, prepareChat, providerDelta, providerErrorMessage, qwenEndpointAllowed, readMemory, readSession, requestHostAllowed, resolveSkillsRoot, saveSkill, takeSseDataLines, writeSession } from './relay-core.mjs';
 import { LocalSourceMcp } from './mcp-connectors.mjs';
+import { githubTokenError, listGitHubRepos, readGitHubFile, writeGitHubFiles } from './github-mcp.mjs';
+import { githubAccountStatus, githubAccountToken, startGithubWebLogin } from './github-account.mjs';
+import { commitGitFile, openGitFile, pullGitFile, pushGitBranch } from './git-workspace.mjs';
 
 export { originAllowed, prepareChat, providerDelta, providerErrorMessage, qwenEndpointAllowed, requestHostAllowed, takeSseDataLines } from './relay-core.mjs';
 
@@ -178,6 +181,63 @@ export function createRelay() {
     if (req.method === 'GET' && url.pathname === '/api/skills/context') {
       const root = resolveSkillsRoot(process.env.SKILLS_ROOT || '');
       return send(res, 200, buildSkillContext(url.searchParams.get('question') || '', root));
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/connectors/github/account') {
+      try {
+        return send(res, 200, await githubAccountStatus());
+      } catch {
+        return send(res, 200, { connected: false, login: '', email: '' });
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/connectors/github/connect') {
+      try {
+        const account = await githubAccountStatus();
+        if (account.connected) return send(res, 200, account);
+        return send(res, 200, startGithubWebLogin());
+      } catch {
+        return send(res, 200, { connected: false, login: '', email: '' });
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/connectors/github/repos' || req.method === 'POST' && url.pathname === '/api/connectors/github/read' || req.method === 'POST' && url.pathname === '/api/connectors/github/write') {
+      try {
+        const body = await readBody(req);
+        let token = body.token == null || body.token === '' ? '' : body.token;
+        if (!token && body.useAccount === true) token = await githubAccountToken();
+        if (!token && body.useAccount === true) return send(res, 401, { error: 'Connect to Github first.' });
+        const tokenError = githubTokenError(token);
+        if (tokenError) return send(res, 400, { error: tokenError });
+        const result = url.pathname.endsWith('/repos')
+          ? await listGitHubRepos({ token, query: body.query })
+          : url.pathname.endsWith('/read')
+            ? await readGitHubFile({ token, repo: body.repo, path: body.path })
+            : await writeGitHubFiles({ token, repo: body.repo, files: body.files, title: body.title, body: body.body, target: body.target });
+        if (result.error) return send(res, result.status || 400, { error: result.error });
+        return send(res, 200, result);
+      } catch (error) {
+        return send(res, 400, { error: 'GitHub request failed.' });
+      }
+    }
+
+    if (req.method === 'POST' && (url.pathname === '/api/git/open' || url.pathname === '/api/git/pull' || url.pathname === '/api/git/commit' || url.pathname === '/api/git/push')) {
+      try {
+        const body = await readBody(req);
+        const repo = typeof body.repo === 'string' ? body.repo : '';
+        const filePath = typeof body.path === 'string' ? body.path : '';
+        const result = url.pathname.endsWith('/open')
+          ? await openGitFile({ repo, path: filePath })
+          : url.pathname.endsWith('/pull')
+            ? await pullGitFile({ repo, path: filePath })
+            : url.pathname.endsWith('/push')
+              ? await pushGitBranch({ repo })
+              : await commitGitFile({ repo, path: filePath, content: body.content, message: body.message });
+        if (result.error) return send(res, result.status || 400, { error: result.error });
+        return send(res, 200, result);
+      } catch {
+        return send(res, 400, { error: 'Git request failed.' });
+      }
     }
 
     if (req.method === 'POST' && url.pathname === '/api/skills/github') {

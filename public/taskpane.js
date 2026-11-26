@@ -1,5 +1,5 @@
 const API = '';
-const PANE_BUILD = '2026-11-25.3'; // Must match relay-core RELAY_BUILD; a stale relay process is detected and reported.
+const PANE_BUILD = '2026-11-26.3'; // Must match relay-core RELAY_BUILD; a stale relay process is detected and reported.
 const CHAT_MODELS = ['auto', 'qwen4-max', 'qwen3.8-max', 'qwen3.8-flash'];
 const CHAT_EFFORTS = ['off', 'low', 'medium', 'high', 'xhigh'];
 const CONTEXT_CAP = 45_000; // Relay rejects messages over 50,000 chars; leave room for the prompt itself.
@@ -19,7 +19,7 @@ const FINANCE_EVIDENCE_INSTRUCTION = `\n\n[Finance evidence rules — apply only
 const KEY_STORE = 'eqgc.keys.v1';
 const HOSTED_KEY_STORE = 'eqgc.hosted.qwen-key.v1';
 const RISKY_FORMULA = /^=.*\b(?:WEBSERVICE|FILTERXML|RTD|REGISTER\.ID|CALL|DDE|INFO|HYPERLINK)\s*\(/i;
-const state = { messages: [], lastAnswer: '', lastPrompt: '', busy: false, officeReady: false, forceSheet: false, turn: 0, host: '', audit: [], attachments: [], attachmentErrors: [], sessionId: null, sessionStarted: null, workbookName: '' };
+const state = { messages: [], lastAnswer: '', lastPrompt: '', busy: false, officeReady: false, forceSheet: false, turn: 0, host: '', audit: [], attachments: [], attachmentErrors: [], sessionId: null, sessionStarted: null, workbookName: '', githubAccount: null };
 let activeAgent = null;
 let agentCheckpoint = null;
 const $ = id => document.getElementById(id);
@@ -289,6 +289,166 @@ async function refreshSkills() {
   } catch (error) { $('skillsCount').textContent = explainError(error.message || 'Local relay unavailable'); }
 }
 
+function githubTokenValue() {
+  return ($('githubMcpToken')?.value || '').trim();
+}
+
+function githubAccountOptedOut() {
+  return localStorage.getItem('eqgc.github.account') === 'off';
+}
+
+function showGitHubAccount(connected, login) {
+  setSourceStatus('githubMcpStatus', connected ? `Connected as ${login}` : 'Not connected', connected);
+  $('connectGitHub')?.classList.toggle('hidden', connected);
+  $('disconnectGitHub')?.classList.toggle('hidden', !connected);
+}
+
+function githubAuthBody(extra = {}) {
+  const token = githubTokenValue();
+  if (token) return { ...extra, token };
+  if (!githubAccountOptedOut() && state.githubAccount?.connected) return { ...extra, useAccount: true };
+  return { ...extra };
+}
+
+const GITHUB_REPO_STORE = 'eqgc.github.repo';
+
+function selectedGitHubRepo() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(GITHUB_REPO_STORE) || '{}');
+    const fullName = String(saved.fullName || '');
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(fullName)) return '';
+    return fullName;
+  } catch { return ''; }
+}
+
+function repoShortName(fullName) {
+  const parts = String(fullName || '').split('/');
+  return parts[1] || 'No Repository';
+}
+
+function refreshGitHubRepoPick() {
+  const fullName = selectedGitHubRepo();
+  const button = $('githubRepoPick');
+  if (!button) return;
+  button.textContent = fullName ? repoShortName(fullName) : 'No Repository';
+  button.title = fullName ? `${fullName} · GitHub repository` : 'No Repository · 空白工作區';
+  $('githubRepoNone')?.setAttribute('aria-checked', String(!fullName));
+}
+
+function setGitHubRepo(fullName) {
+  if (!fullName) localStorage.removeItem(GITHUB_REPO_STORE);
+  else localStorage.setItem(GITHUB_REPO_STORE, JSON.stringify({ fullName }));
+  refreshGitHubRepoPick();
+  setGitHubRepoMenu(false);
+}
+
+function githubRepoNote() {
+  const fullName = selectedGitHubRepo();
+  if (!fullName || hostedRelay() || !$('includeContext').checked) return '';
+  return `\n\n[GitHub repository]\n${fullName}\nUse this repository for githubRequest and githubWrite unless the user names another repository.`;
+}
+
+function setGitHubRepoMenu(open) {
+  $('githubRepoMenu')?.classList.toggle('hidden', !open);
+  $('githubRepoPick')?.setAttribute('aria-expanded', String(open));
+  if (open) {
+    setWorkbookCard(false);
+    setAttachMenu(false);
+    loadGitHubRepoMenu();
+  }
+}
+
+async function loadGitHubRepoMenu() {
+  const list = $('githubRepoList');
+  const empty = $('githubRepoEmpty');
+  const connect = $('githubRepoConnect');
+  if (!list) return;
+  list.replaceChildren();
+  const auth = githubAuthBody();
+  const signedIn = Boolean(auth.token || auth.useAccount);
+  connect?.classList.toggle('hidden', signedIn);
+  if (!signedIn) {
+    if (empty) {
+      empty.classList.remove('hidden');
+      empty.textContent = 'Connect to Github in MCP to list repositories. 請先在 MCP 按 Connect to Github。';
+    }
+    return;
+  }
+  if (empty) {
+    empty.classList.remove('hidden');
+    empty.textContent = 'Loading repositories… 正在讀取 repo…';
+  }
+  try {
+    const result = await api('connectors/github/repos', githubAuthBody({ query: '' }));
+    const items = Array.isArray(result.items) ? result.items : [];
+    if (empty) empty.classList.toggle('hidden', items.length > 0);
+    if (empty && !items.length) empty.textContent = 'No repositories were returned. 沒有讀到 repo。';
+    const selected = selectedGitHubRepo();
+    for (const item of items) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'repo-option';
+      button.setAttribute('role', 'menuitemradio');
+      button.setAttribute('aria-checked', String(item.fullName === selected));
+      const strong = document.createElement('strong');
+      strong.textContent = repoShortName(item.fullName);
+      const small = document.createElement('small');
+      small.textContent = item.fullName;
+      button.append(strong, small);
+      button.addEventListener('click', () => setGitHubRepo(item.fullName));
+      list.append(button);
+    }
+  } catch (error) {
+    if (empty) {
+      empty.classList.remove('hidden');
+      empty.textContent = explainError(error.message);
+    }
+  }
+}
+
+async function refreshGitHubAccount() {
+  if (hostedRelay()) return;
+  if (githubAccountOptedOut()) {
+    state.githubAccount = { connected: false, login: '' };
+    showGitHubAccount(false, '');
+    return;
+  }
+  try {
+    const account = await api('connectors/github/account');
+    const login = String(account?.login || '');
+    state.githubAccount = account?.connected && login ? { connected: true, login } : { connected: false, login: '' };
+  } catch {
+    state.githubAccount = state.githubAccount?.connected ? state.githubAccount : { connected: false, login: '' };
+  }
+  showGitHubAccount(Boolean(state.githubAccount?.connected), state.githubAccount?.login || '');
+}
+
+async function connectGitHubAccount() {
+  localStorage.removeItem('eqgc.github.account');
+  try {
+    const result = await api('connectors/github/connect', {});
+    if (result?.pending) toast('The browser opened. Approve GitHub, then click Connect to Github again. 瀏覽器已打開。批准後再按一次 Connect to Github。');
+  } catch (error) {
+    toast(explainError(error.message));
+  }
+  await refreshGitHubAccount();
+}
+
+function disconnectGitHubAccount() {
+  localStorage.setItem('eqgc.github.account', 'off');
+  state.githubAccount = { connected: false, login: '' };
+  showGitHubAccount(false, '');
+  toast('This pane will not use the GitHub login. The PC stays signed in. 這個窗格不再使用 GitHub 登入。這部電腦仍然保持登入。');
+}
+
+function refreshGitHubMcpStatus() {
+  if (!githubAccountOptedOut() && state.githubAccount?.connected) {
+    showGitHubAccount(true, state.githubAccount.login || '');
+    return;
+  }
+  showGitHubAccount(false, '');
+}
+
 function restoreGitHubToken() {
   try {
     const saved = JSON.parse(localStorage.getItem('eqgc.github.v1') || '{}');
@@ -297,6 +457,171 @@ function restoreGitHubToken() {
       $('githubRemember').checked = true;
     }
   } catch { /* storage optional */ }
+  refreshGitHubMcpStatus();
+}
+
+function saveGitHubMcpToken() {
+  const token = $('githubMcpToken').value.trim();
+  if ($('githubMcpRemember').checked) {
+    if (!token) return toast('Enter a GitHub token.');
+    localStorage.setItem('eqgc.github.v1', JSON.stringify({ token }));
+    $('githubToken').value = token;
+    $('githubRemember').checked = true;
+  } else {
+    localStorage.removeItem('eqgc.github.v1');
+  }
+  refreshGitHubMcpStatus();
+  toast($('githubMcpRemember').checked ? 'GitHub token saved in this browser.' : 'GitHub token kept for this open pane only.');
+}
+
+const GIT_STORE = 'eqgc.git.v1';
+
+function readGitWorkspace() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(GIT_STORE) || '{}');
+    return {
+      repo: typeof saved.repo === 'string' ? saved.repo : '',
+      file: typeof saved.file === 'string' ? saved.file : ''
+    };
+  } catch { return { repo: '', file: '' }; }
+}
+
+function writeGitWorkspace(next) {
+  const current = readGitWorkspace();
+  const saved = { repo: next.repo ?? current.repo, file: next.file ?? current.file };
+  localStorage.setItem(GIT_STORE, JSON.stringify(saved));
+  refreshGitWorkspaceStatus();
+  return saved;
+}
+
+function refreshGitWorkspaceStatus() {
+  const saved = readGitWorkspace();
+  if ($('gitRepo') && saved.repo && !$('gitRepo').value) $('gitRepo').value = saved.repo;
+  const label = saved.file ? `${saved.file}` : 'No file open';
+  setSourceStatus('gitWorkspaceStatus', saved.repo ? `${label} · local Git` : label, Boolean(saved.file));
+}
+
+function saveGitRepoFolder() {
+  const repo = $('gitRepo').value.trim();
+  if (!repo) return toast('Enter the local repo folder.');
+  writeGitWorkspace({ repo });
+  toast('Repo folder saved on this PC.');
+}
+
+function restoreGitWorkspace() {
+  const saved = readGitWorkspace();
+  if ($('gitRepo') && saved.repo) $('gitRepo').value = saved.repo;
+  refreshGitWorkspaceStatus();
+}
+
+async function readWordBody() {
+  return Word.run(async context => {
+    const body = context.document.body;
+    body.load('text');
+    await context.sync();
+    return body.text || '';
+  });
+}
+
+async function replaceWordBody(text) {
+  await Word.run(async context => {
+    context.document.body.insertText(text, 'Replace');
+    await context.sync();
+  });
+}
+
+async function appendWordAnswer(text) {
+  const body = String(text || '').trim();
+  if (!body || state.host !== 'Word') return;
+  await Word.run(async context => {
+    context.document.body.insertText(`\n\nQwen\n${body}\n`, 'End');
+    await context.sync();
+  });
+}
+
+async function runGitWorkspace(prompt) {
+  const command = AgentCore.parseGitCommand(prompt);
+  if (!command) return false;
+  renderMessage('user', prompt.trim());
+  state.busy = true;
+  $('send').textContent = '■';
+  try {
+    if (hostedRelay()) {
+      renderMessage('assistant', 'Opening a code file uses the local relay on this PC. 開啟程式檔要用這部電腦的本機 relay。');
+      return true;
+    }
+    if (state.host !== 'Word') {
+      renderMessage('assistant', 'Open the code file in Word. Excel stays on the workbook. 請在 Word 開啟程式檔。Excel 仍是活頁簿。');
+      return true;
+    }
+    const saved = readGitWorkspace();
+    const repo = ($('gitRepo')?.value || saved.repo || '').trim();
+    const file = command.path || saved.file;
+    if (command.rejected) {
+      renderMessage('assistant', 'git push updates the current branch and does not use --force. Type git push. git push 會更新目前分支，不會使用 --force。請輸入 git push。');
+      return true;
+    }
+    if (command.action === 'push') {
+      if (!repo) {
+        renderMessage('assistant', 'Save the repo folder under MCP first. 請先在 MCP 儲存 repo 資料夾。');
+        return true;
+      }
+      const pushed = await api('git/push', { repo });
+      renderMessage('assistant', `Pushed the current branch. ${pushed.summary || ''} 已 push 目前分支。`);
+      return true;
+    }
+    if (!file) {
+      renderMessage('assistant', 'Open one file first. Example: open src/app.js. 請先開一個檔，例如 open src/app.js。');
+      return true;
+    }
+    if (command.action === 'commit' || command.action === 'commit-push') {
+      const content = await readWordBody();
+      const result = await api('git/commit', { repo, path: file, content, message: command.message });
+      writeGitWorkspace({ repo: result.repo || repo, file: result.path || file });
+      if (command.action === 'commit') {
+        renderMessage('assistant', result.unchanged
+          ? `No change to commit in ${result.path}. ${result.path} 沒有變更。`
+          : `Committed ${result.path} as ${result.commit}. 已提交 ${result.path}，版本 ${result.commit}。`);
+        return true;
+      }
+      try {
+        const pushed = await api('git/push', { repo: result.repo || repo });
+        const committed = result.unchanged
+          ? `No change to commit in ${result.path}.`
+          : `Committed ${result.path} as ${result.commit}.`;
+        renderMessage('assistant', `${committed} Pushed. ${pushed.summary || ''} ${result.unchanged ? `${result.path} 沒有變更。` : `已提交 ${result.path}，版本 ${result.commit}。`} 已 push。`);
+      } catch (error) {
+        const committed = result.unchanged
+          ? `No change to commit in ${result.path}.`
+          : `Committed ${result.path} as ${result.commit}.`;
+        renderMessage('assistant', `${committed} Push did not run. ${explainError(error.message)} 已處理提交。push 沒有執行。`);
+      }
+      return true;
+    }
+    const result = command.action === 'pull'
+      ? await api('git/pull', { repo, path: file })
+      : await api('git/open', { repo, path: file });
+    await replaceWordBody(result.text);
+    writeGitWorkspace({ repo: result.repo || repo, file: result.path || file });
+    renderMessage('assistant', command.action === 'pull'
+      ? `Pulled and opened ${result.path}. ${result.summary || ''} 已 pull 並打開 ${result.path}。`
+      : `Opened ${result.path} from the repo. 已從 repo 打開 ${result.path}。`);
+    return true;
+  } catch (error) {
+    renderMessage('assistant', explainError(error.message));
+    return true;
+  } finally {
+    resetComposer();
+  }
+}
+
+function clearGitHubMcpToken() {
+  localStorage.removeItem('eqgc.github.v1');
+  $('githubMcpToken').value = '';
+  $('githubToken').value = '';
+  $('githubRemember').checked = false;
+  refreshGitHubMcpStatus();
+  toast('GitHub token cleared.');
 }
 
 async function installGitHubSkill() {
@@ -307,6 +632,7 @@ async function installGitHubSkill() {
     const result = await api('skills/github', { repo, token, replace: $('githubReplace').checked });
     if ($('githubRemember').checked) localStorage.setItem('eqgc.github.v1', JSON.stringify({ token }));
     else localStorage.removeItem('eqgc.github.v1');
+    refreshGitHubMcpStatus();
     await refreshSkills();
     toast(result.replaced ? `Skill updated: ${result.id}` : `Skill installed: ${result.id}`);
   } catch (error) { toast(explainError(error.message)); }
@@ -453,25 +779,57 @@ function trimContext(text, limit) {
   return { text: text.slice(0, Math.max(0, limit - marker.length)) + marker, truncated: true };
 }
 
-async function buildWordContext(limit = CONTEXT_CAP) {
-  const source = await Word.run(async context => {
-    const selection = context.document.getSelection();
-    const body = context.document.body;
-    selection.load('text');
-    body.load('text');
-    await context.sync();
-    if (String(selection.text || '').trim()) return { kind: 'selection', text: selection.text };
-    if (String(body.text || '').trim()) return { kind: 'document', text: body.text };
-    return null;
-  });
-  if (!source) return null;
-  const clipped = trimContext(annotateEvidenceLines(source.text), limit);
-  return { header: `[Word ${source.kind}]`, text: clipped.text, address: source.kind === 'selection' ? 'Selection' : 'Document', kind: source.kind, truncated: clipped.truncated, chars: clipped.text.length };
+function quotedPassages(question) {
+  const found = [];
+  for (const match of String(question || '').matchAll(/["“「]([^"”」\n]{4,160})["”」]/g)) {
+    const value = match[1].trim();
+    if (value) found.push(value);
+  }
+  return found;
 }
 
-async function buildContext(limit = CONTEXT_CAP) {
+function focusWordExcerpt(raw, needles, limit) {
+  const annotated = annotateEvidenceLines(raw);
+  const needle = needles.find(item => raw.toLowerCase().includes(item.toLowerCase()));
+  if (!needle || annotated.length <= limit) return trimContext(annotated, limit);
+  const at = raw.toLowerCase().indexOf(needle.toLowerCase());
+  const lineIndex = raw.slice(0, at).split('\n').length - 1;
+  const lines = annotated.split('\n');
+  const startLine = Math.max(0, lineIndex - 2);
+  const lead = startLine > 0 ? '[...earlier document text omitted; this excerpt contains the requested passage]\n' : '';
+  return trimContext(lead + lines.slice(startLine).join('\n'), limit);
+}
+
+function wordContextSource(bodyText, selectionText) {
+  const body = String(bodyText || '').replace(/\r\n?/g, '\n').trim();
+  const selected = String(selectionText || '').replace(/\r\n?/g, '\n').trim();
+  const text = body || selected;
+  if (!text) return null;
+  return { kind: 'document', text };
+}
+
+async function buildWordContext(limit = CONTEXT_CAP, question = '') {
+  const needles = quotedPassages(question);
+  const source = await Word.run(async context => {
+    const body = context.document.body;
+    const paragraphs = body.paragraphs;
+    body.load('text');
+    if (paragraphs) paragraphs.load('items/text');
+    await context.sync();
+    const fromBody = String(body.text || '');
+    const fromParagraphs = (paragraphs?.items || []).map(item => item.text || '').join('\n');
+    return wordContextSource(fromParagraphs.length > fromBody.length ? fromParagraphs : fromBody, '');
+  });
+  if (!source) return null;
+  const clipped = focusWordExcerpt(source.text, needles, limit);
+  const note = 'This is the Word document text, the same as an Excel sheet.\n';
+  const text = note + clipped.text;
+  return { header: '[Word document]', text, address: 'Document', kind: 'document', truncated: clipped.truncated, chars: text.length };
+}
+
+async function buildContext(limit = CONTEXT_CAP, question = '') {
   if (!state.officeReady || !$('includeContext').checked) return null;
-  if (state.host === 'Word') return buildWordContext(limit);
+  if (state.host === 'Word') return buildWordContext(limit, question);
   let source = null, kind = 'selection';
   if (!state.forceSheet) {
     const selection = await readSelection();
@@ -738,6 +1096,72 @@ function watchSelection() {
     clearTimeout(watchSelection.timer);
     watchSelection.timer = setTimeout(refreshContextCard, 400);
   });
+}
+
+function renderGitHubWrite(proposal) {
+  const conversation = $('conversation');
+  conversation.querySelector('.welcome')?.remove();
+  const card = document.createElement('div');
+  card.className = 'message assistant';
+  const label = document.createElement('div');
+  label.className = 'message-label';
+  label.textContent = 'GITHUB WRITE';
+  const body = document.createElement('div');
+  const title = document.createElement('strong');
+  title.textContent = `${proposal.repo} · ${proposal.title}`;
+  body.append(title);
+  if (proposal.body) {
+    const why = document.createElement('p');
+    why.textContent = proposal.body;
+    body.append(why);
+  }
+  for (const file of proposal.files) {
+    const name = document.createElement('div');
+    name.textContent = file.path;
+    const pre = document.createElement('pre');
+    pre.className = 'github-draft';
+    pre.textContent = file.content;
+    body.append(name, pre);
+  }
+  const status = document.createElement('p');
+  status.className = 'hint';
+  status.textContent = 'Nothing has been sent to GitHub. Write to GitHub opens a pull request on a new branch. The default branch needs its own click. 尚未送出。Write to GitHub 會開新分支和 pull request。預設分支要另外再按一次。';
+  const actions = document.createElement('div');
+  actions.className = 'github-write';
+  const writeBtn = document.createElement('button');
+  writeBtn.type = 'button';
+  writeBtn.className = 'primary';
+  writeBtn.textContent = 'Write to GitHub';
+  const defaultBtn = document.createElement('button');
+  defaultBtn.type = 'button';
+  defaultBtn.className = 'secondary';
+  defaultBtn.textContent = 'Write to default branch';
+  const sendWrite = async target => {
+    writeBtn.disabled = true;
+    defaultBtn.disabled = true;
+    try {
+      const auth = githubAuthBody();
+      if (!auth.token && !auth.useAccount) throw new Error('Connect to Github in MCP first. 請先在 MCP 按 Connect to Github。');
+      const result = await api('connectors/github/write', {
+        ...auth, repo: proposal.repo, title: proposal.title, body: proposal.body, files: proposal.files, target
+      });
+      status.textContent = result.prUrl
+        ? `Pull request opened: ${result.prUrl}`
+        : `Committed ${result.commit} on ${result.base}.`;
+      state.audit.push(AgentCore.audit({ kind: 'context', address: result.prUrl || result.commit || proposal.repo, chars: proposal.files.length }));
+    } catch (error) {
+      status.textContent = explainError(error.message);
+      writeBtn.disabled = false;
+      defaultBtn.disabled = false;
+    }
+  };
+  writeBtn.addEventListener('click', () => sendWrite('pull-request'));
+  defaultBtn.addEventListener('click', () => sendWrite('default'));
+  actions.append(writeBtn, defaultBtn);
+  body.append(status, actions);
+  card.append(label, body);
+  conversation.append(card);
+  conversation.scrollTop = conversation.scrollHeight;
 }
 
 function renderMessage(role, content) {
@@ -1716,6 +2140,8 @@ async function applyWordActions(actions) {
         if (typeof action.bold === 'boolean') selection.font.bold = action.bold;
         if (typeof action.italic === 'boolean') selection.font.italic = action.italic;
       } else if (action.op === 'styleSelection') {
+        selection.load('style');
+        await context.sync();
         undo.push({ host: 'word', op: 'styleSelection', style: selection.style || 'Normal' });
         selection.style = action.style;
       } else if (action.op === 'replaceAll') {
@@ -2110,10 +2536,7 @@ function restoreChatPrefs() {
 
 async function readWorkbookMeta() {
   if (!state.officeReady) return null;
-  if (state.host === 'Word') {
-    const text = 'host: Word\nAsk for the selection before quoting the document.';
-    return { header: '[Word document outline]', text, address: 'Document', kind: 'metadata', truncated: false, chars: text.length };
-  }
+  if (state.host === 'Word') return buildWordContext(8000);
   return Excel.run(async context => {
     const book = context.workbook;
     book.load?.('name');
@@ -2154,8 +2577,9 @@ async function readWorkbookMeta() {
   });
 }
 
-async function contextForMode(mode, limit = CONTEXT_CAP) {
+async function contextForMode(mode, limit = CONTEXT_CAP, question = '') {
   if (!state.officeReady || !$('includeContext').checked) return null;
+  if (state.host === 'Word') return buildWordContext(limit, question);
   if (mode === 'chat' || mode === 'legacy' || state.forceSheet) return buildContext(limit);
   let ctx;
   try { ctx = await readWorkbookMeta(); }
@@ -2435,19 +2859,7 @@ async function routeForPrompt(text, mode) {
 }
 
 function renderAuditCard() {
-  if (!state.audit.length) return;
-  const conversation = $('conversation');
-  const card = document.createElement('div');
-  card.className = 'message assistant audit-card';
-  const label = document.createElement('div');
-  label.className = 'message-label';
-  label.textContent = 'AUDIT';
-  const body = document.createElement('div');
-  body.className = 'edit-row';
-  body.textContent = AgentCore.summarize(state.audit);
-  card.append(label, body);
-  conversation.append(card);
-  conversation.scrollTop = conversation.scrollHeight;
+  // The trail stays in the saved session. The pane does not show an AUDIT card.
 }
 
 function validationEvidence(result) {
@@ -2691,6 +3103,7 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
   $('send').setAttribute?.('aria-label', 'Stop');
   const interrupted = () => turn !== state.turn || run?.stopRequested;
   let outcome = 'Could not finish · 未能完成';
+  let answerForWord = '';
   const observe = (content, source = '') => {
     task.observation = content;
     task.observationSource = source;
@@ -2733,7 +3146,7 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
     const contextLimit = Math.max(0, Math.min(CONTEXT_CAP, 49_000 - clean.length - files.length - skillText.length - memoryText.length - FINANCE_EVIDENCE_INSTRUCTION.length - 300));
     if (contextLimit < 300 && $('includeContext').checked) { failEarly('The prompt and attachments leave too little room for workbook context. Remove a file or shorten the prompt.'); return; }
     let ctx = null;
-    try { ctx = await contextForMode(mode, contextLimit); } catch (error) { if (turn === state.turn) toast(`Could not read workbook context: ${error.message}`); }
+    try { ctx = await contextForMode(mode, contextLimit, clean); } catch (error) { if (turn === state.turn) toast(`Could not read workbook context: ${error.message}`); }
     if (interrupted()) return;
     const financeTask = AgentCore.isFinancePrompt(`${clean}\n${files}\n${ctx?.text || ''}`);
     const evidenceSources = collectFinanceSources(ctx, files);
@@ -2742,7 +3155,8 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
     const financeValidations = [];
     let financeAnswerText = '';
     const userPrompt = financeTask ? `${clean}${FINANCE_EVIDENCE_INSTRUCTION}` : clean;
-    const content = `${userPrompt}${files}${ctx ? `\n\n${ctx.header}\n${ctx.text}` : ''}${skillText ? `\n\n[Saved skills]\n${skillText}` : ''}${memoryText ? `\n\n[Memory]\n${memoryText}` : ''}\n\n[Mode: ${mode}]`;
+    const repoNote = githubRepoNote();
+    const content = `${userPrompt}${files}${ctx ? `\n\n${ctx.header}\n${ctx.text}` : ''}${skillText ? `\n\n[Saved skills]\n${skillText}` : ''}${memoryText ? `\n\n[Memory]\n${memoryText}` : ''}${repoNote}\n\n[Mode: ${mode}]`;
     if (content.length > 49_500) { failEarly('Message plus workbook context is too large — shorten the message or turn context off.'); return; }
     agentCheckpoint = null;
     state.forceSheet = false;
@@ -2750,7 +3164,7 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
     if (resumeContext) state.messages.push({ role: 'user', content: resumeContext });
     const fileNames = state.attachments.map(file => file.name);
     const skillNames = skillCtx?.selected?.length ? `\n\nSkills: ${skillCtx.selected.join(', ')}` : '';
-    renderMessage('user', displayPrompt + (fileNames.length ? `\n\nAttachments: ${fileNames.join(', ')}` : '') + skillNames + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
+    renderMessage('user', displayPrompt + (fileNames.length ? `\n\nAttachments: ${fileNames.join(', ')}` : '') + skillNames + (selectedGitHubRepo() && repoNote ? `\n\nGitHub: ${selectedGitHubRepo()}` : '') + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
     state.audit.push(AgentCore.audit({ kind: 'context', address: ctx?.address || 'none', chars: ctx?.chars || 0 }));
     if (skillText) state.audit.push(AgentCore.audit({ kind: 'context', address: `skills ${skillCtx.selected.join(', ')}`, chars: skillText.length }));
     if (skillCtx?.selected?.length) renderAuditCard();
@@ -2772,15 +3186,28 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
       financeAnswerText = envelope.prose || revision.prose;
       state.messages.push({ role: 'assistant', content: result.text });
       state.lastAnswer = envelope.prose || revision.prose;
+      if (state.lastAnswer) answerForWord = state.lastAnswer;
       $('insertAnswer').disabled = !state.lastAnswer;
       $('lastAnswerState').textContent = result.model ? `via ${result.model}` : '';
       result.bubble.children[result.bubble.children.length - 1].textContent = state.lastAnswer || '(model returned only a JSON envelope; see the audit card)';
       state.audit.push(AgentCore.audit({ kind: 'model', round: run?.round, provider: routed.provider, model: result.model, decision: envelope.decision || 'COMPLETE', plan: envelope.plan?.goal || '' }));
       const normalized = envelope.actions ? normalizeActions(envelope.actions) : { actions: revision.actions || [], skipped: revision.skipped || 0 };
-      if (!$('includeContext').checked && (envelope.profileRequest || envelope.contextRequest || envelope.scanRequest || envelope.sourceRequest || usableChecks(envelope.plan).length)) {
+      if (!$('includeContext').checked && (envelope.profileRequest || envelope.contextRequest || envelope.scanRequest || envelope.sourceRequest || envelope.githubRequest || envelope.githubWrite || usableChecks(envelope.plan).length)) {
         observe('Office file sharing is off. No workbook or document range was read or sent to AI. Turn on Share Office file data with AI to review the open file.');
         state.audit.push(AgentCore.audit({ kind: 'blocked', reason: 'Office file sharing is off' }));
         outcome = 'File sharing off · 檔案分享已關閉';
+        break;
+      }
+      if (envelope.githubWrite) {
+        if (hostedRelay()) {
+          observe('GitHub MCP is available on the local relay on this PC. Nothing was written.');
+          state.audit.push(AgentCore.audit({ kind: 'blocked', reason: 'GitHub MCP needs the local relay' }));
+          outcome = 'Local relay required · 需要本機 relay';
+          break;
+        }
+        renderGitHubWrite(envelope.githubWrite);
+        state.audit.push(AgentCore.audit({ kind: 'stopped', reason: 'GitHub write is waiting for a click' }));
+        outcome = 'Review required · 等候審批';
         break;
       }
       if (mode === 'plan' || envelope.decision === 'NEEDS_USER' || (mode === 'agent' && !$('directRevise').checked && normalized.actions.length)) {
@@ -2814,6 +3241,38 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
         } catch (error) {
           observe(`No OneDrive file was read: ${error.message}. Nothing was returned, so this is not a successful read.`);
           state.audit.push(AgentCore.audit({ kind: 'blocked', reason: `onedrive rejected: ${String(error.message || error).slice(0, 240)}` }));
+        }
+        if (interrupted()) return;
+        guard += 1;
+        continue;
+      }
+      if (envelope.githubRequest && !normalized.actions.length) {
+        if (hostedRelay()) {
+          observe('GitHub MCP is available on the local relay on this PC. Nothing was read or written.');
+          state.audit.push(AgentCore.audit({ kind: 'blocked', reason: 'GitHub MCP needs the local relay' }));
+          outcome = 'Local relay required · 需要本機 relay';
+          break;
+        }
+        showAgentStatus(run?.round || 1, envelope.githubRequest.action === 'repos' ? 'Listing GitHub repositories · 列出 GitHub repo' : 'Reading GitHub file · 讀取 GitHub 檔案');
+        try {
+          if (envelope.githubRequest.action === 'repos') {
+            const result = await api('connectors/github/repos', githubAuthBody({ query: envelope.githubRequest.query }));
+            const items = Array.isArray(result.items) ? result.items : [];
+            const lines = items.map((item, index) => `${index + 1}. ${item.fullName}${item.private ? ' (private)' : ''}${item.defaultBranch ? ` | default: ${item.defaultBranch}` : ''}`);
+            const label = envelope.githubRequest.query ? `GitHub repos matching "${envelope.githubRequest.query}"` : 'GitHub repositories';
+            observe(`${label}.\n${lines.join('\n') || 'No repositories matched.'}\nNothing was written. To read one file, set githubRequest to {"action":"read","repo":"owner/repo","path":"README.md"}.`, label);
+            state.audit.push(AgentCore.audit({ kind: 'context', address: label, chars: lines.join('\n').length }));
+          } else {
+            const result = await api('connectors/github/read', githubAuthBody({ repo: envelope.githubRequest.repo, path: envelope.githubRequest.path }));
+            const clipped = trimContext(String(result.text || ''), 8000);
+            const label = `${envelope.githubRequest.repo}/${envelope.githubRequest.path}`;
+            const note = result.truncated || clipped.truncated ? '\nThe file was truncated.' : '';
+            observe(`GitHub file ${label}.\n\n${clipped.text}${note}`, label);
+            state.audit.push(AgentCore.audit({ kind: 'context', address: label, chars: clipped.text.length }));
+          }
+        } catch (error) {
+          observe(`No GitHub file was read: ${error.message}. Nothing was returned, so this is not a successful read.`);
+          state.audit.push(AgentCore.audit({ kind: 'blocked', reason: `github rejected: ${String(error.message || error).slice(0, 240)}` }));
         }
         if (interrupted()) return;
         guard += 1;
@@ -3046,6 +3505,10 @@ async function sendAgentPrompt(prompt, checkpoint = null) {
       activeAgent = null;
       if (run) $('newChat').disabled = false;
       resetComposer();
+      if (answerForWord && state.host === 'Word' && !run?.stopRequested) {
+        try { await appendWordAnswer(answerForWord); }
+        catch (error) { toast(`Could not write the answer into Word: ${error.message}`); }
+      }
       state.audit.push(AgentCore.audit({ kind: 'stopped', reason: `run ended at round ${run?.round ?? 0}: ${outcome}` }));
       renderAuditCard();
       persistSession(outcome);
@@ -3065,6 +3528,7 @@ async function sendPrompt(prompt) {
   state.busy = true;
   $('send').textContent = '■';
   $('send').setAttribute?.('aria-label', 'Stop');
+  let answerForWord = '';
   try {
     await ensureKeys();
     if (turn !== state.turn) return;
@@ -3081,23 +3545,26 @@ async function sendPrompt(prompt) {
     const contextLimit = Math.max(0, Math.min(CONTEXT_CAP, 49_000 - clean.length - files.length - skillText.length - memoryText.length - FINANCE_EVIDENCE_INSTRUCTION.length - 100));
     if (contextLimit < 300 && $('includeContext').checked) { toast('The prompt and attachments leave too little room for workbook context. Remove a file or shorten the prompt.'); return; }
     let ctx = null;
-    try { ctx = await buildContext(contextLimit); } catch (error) { if (turn === state.turn) toast(`Could not read workbook context: ${error.message}`); }
+    try { ctx = await buildContext(contextLimit, clean); } catch (error) { if (turn === state.turn) toast(`Could not read workbook context: ${error.message}`); }
     if (turn !== state.turn) return;
     const financeTask = AgentCore.isFinancePrompt(`${clean}\n${files}\n${ctx?.text || ''}`);
     const evidenceSources = collectFinanceSources(ctx, files);
-    const content = `${clean}${financeTask ? FINANCE_EVIDENCE_INSTRUCTION : ''}${files}${ctx ? `\n\n${ctx.header}\n${ctx.text}` : ''}${skillText ? `\n\n[Saved skills]\n${skillText}` : ''}${memoryText ? `\n\n[Memory]\n${memoryText}` : ''}`;
+    const repoNote = githubRepoNote();
+    const content = `${clean}${financeTask ? FINANCE_EVIDENCE_INSTRUCTION : ''}${files}${ctx ? `\n\n${ctx.header}\n${ctx.text}` : ''}${skillText ? `\n\n[Saved skills]\n${skillText}` : ''}${memoryText ? `\n\n[Memory]\n${memoryText}` : ''}${repoNote}`;
     if (content.length > 49_500) { toast('Message plus workbook context is too large — shorten the message or turn context off.'); return; }
     state.forceSheet = false;
     state.messages.push({ role: 'user', content });
     const fileNames = state.attachments.map(file => file.name);
     const skillNames = skillCtx?.selected?.length ? `\n\nSkills: ${skillCtx.selected.join(', ')}` : '';
-    renderMessage('user', clean + (fileNames.length ? `\n\nAttachments: ${fileNames.join(', ')}` : '') + skillNames + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
+    renderMessage('user', clean + (fileNames.length ? `\n\nAttachments: ${fileNames.join(', ')}` : '') + skillNames + (selectedGitHubRepo() && repoNote ? `\n\nGitHub: ${selectedGitHubRepo()}` : '') + (ctx ? `\n\nContext: ${ctx.address}${ctx.truncated ? ' (truncated)' : ''}` : ''));
     const fields = chatFields();
     const result = await streamChat({ provider, model: fields.model, endpoint: $('qwenEndpoint').value.trim(), messages: dedupContext(state.messages.slice(-24)), fast: fields.fast, effort: fields.effort, host: state.host === 'Word' ? 'word' : 'excel' });
     if (turn !== state.turn) return;
     const revision = parseRevision(result.text);
     state.messages.push({ role: 'assistant', content: result.text });
-    state.lastAnswer = revision.prose; $('insertAnswer').disabled = !revision.prose; $('lastAnswerState').textContent = result.model ? `via ${result.model}` : '';
+    state.lastAnswer = revision.prose;
+    if (state.lastAnswer) answerForWord = state.lastAnswer;
+    $('insertAnswer').disabled = !revision.prose; $('lastAnswerState').textContent = result.model ? `via ${result.model}` : '';
     result.bubble.children[result.bubble.children.length - 1].textContent = revision.prose;
     if (revision.actions) await renderPlanCard(revision.actions, revision.skipped);
     else if (revision.edits) await renderEditsCard(revision.edits, revision.skipped);
@@ -3120,7 +3587,15 @@ async function sendPrompt(prompt) {
       toast(explainError(error.message));
     }
   } finally {
-    if (turn === state.turn) { resetComposer(); persistSession('Completed · 已完成'); refreshHistory(); }
+    if (turn === state.turn) {
+      if (answerForWord && state.host === 'Word') {
+        try { await appendWordAnswer(answerForWord); }
+        catch (error) { toast(`Could not write the answer into Word: ${error.message}`); }
+      }
+      resetComposer();
+      persistSession('Completed · 已完成');
+      refreshHistory();
+    }
   }
 }
 
@@ -3212,6 +3687,7 @@ function applyHostedChrome() {
   showExecutionPath();
   if (!hostedRelay()) return;
   $('cloudSources')?.classList.add('hidden');
+  $('githubRepoSlot')?.classList.add('hidden');
   $('relayFields')?.classList.add('hidden');
   $('localKeyFields')?.classList.remove('hidden');
   const hint = $('keyHint');
@@ -3382,12 +3858,15 @@ function setAttachMenu(open) {
   $('attachMenu').classList.toggle('hidden', !open);
   $('attachFiles').setAttribute('aria-expanded', String(open));
 }
-$('attachFiles').addEventListener('click', () => setAttachMenu($('attachMenu').classList.contains('hidden')));
+$('attachFiles').addEventListener('click', () => { setGitHubRepoMenu(false); setAttachMenu($('attachMenu').classList.contains('hidden')); });
 $('menuUpload').addEventListener('click', () => { setAttachMenu(false); $('attachmentPicker').click(); });
 $('menuCloud').addEventListener('click', () => { setAttachMenu(false); setSidebar(true); $('cloudSources').open = true; $('sourceQuery').focus(); });
 $('menuSkill').addEventListener('click', () => { setAttachMenu(false); setSidebar(true); $('skillsCard').open = true; $('skillId').focus(); });
 $('menuSource').addEventListener('click', () => { setAttachMenu(false); setSidebar(true); });
-document.addEventListener('click', event => { if (!event.target.closest?.('.attach-menu-wrap')) setAttachMenu(false); });
+document.addEventListener('click', event => {
+  if (!event.target.closest?.('.attach-menu-wrap')) setAttachMenu(false);
+  if (!event.target.closest?.('.repo-slot')) setGitHubRepoMenu(false);
+});
 $('attachmentPicker').addEventListener('change', async event => {
   await addAttachments(event.target.files || []);
   event.target.value = '';
@@ -3398,6 +3877,7 @@ $('composer').addEventListener('submit', async event => {
   const value = $('prompt').value;
   if (!value.trim()) return;
   $('prompt').value = '';
+  if (await runGitWorkspace(value)) return;
   await sendPrompt(value);
 });
 $('prompt').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('composer').requestSubmit(); } });
@@ -3409,7 +3889,19 @@ loadFinanceProfile();
 });
 
 $('installGithubSkill').addEventListener('click', installGitHubSkill);
+$('saveGitHubToken').addEventListener('click', saveGitHubMcpToken);
+$('clearGitHubToken').addEventListener('click', clearGitHubMcpToken);
+$('connectGitHub').addEventListener('click', connectGitHubAccount);
+$('disconnectGitHub').addEventListener('click', disconnectGitHubAccount);
+$('githubRepoPick').addEventListener('click', () => setGitHubRepoMenu($('githubRepoMenu').classList.contains('hidden')));
+$('githubRepoNone').addEventListener('click', () => setGitHubRepo(''));
+$('githubRepoConnect').addEventListener('click', () => { setGitHubRepoMenu(false); setSidebar(true); $('cloudSources').open = true; });
+refreshGitHubRepoPick();
+setGitHubRepoMenu(false);
+$('saveGitRepo').addEventListener('click', saveGitRepoFolder);
 restoreGitHubToken();
+refreshGitHubAccount();
+restoreGitWorkspace();
 $('modelPick').addEventListener('change', () => syncModel('modelPick'));
 $('qwenModel').addEventListener('change', () => syncModel('qwenModel'));
 $('effortMode').addEventListener('change', saveChatPrefs);
