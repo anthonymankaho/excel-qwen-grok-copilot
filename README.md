@@ -140,6 +140,10 @@ OneDrive 文字檢視支援 XLSX/XLSM、DOCX、HTML、TXT、MD、CSV、TSV、JSO
 
 ## Processing status · 處理狀態
 
+**2026-11-25 — GitHub skill links and download zip.** Local build `2026-11-25.4`. Install accepts `www.github.com`, a skill-folder link, and `owner/repo.git`. Quoted `name` and `description` lines install under the unquoted name. A GitHub rate limit is reported as a rate limit. The download zip matches this tree. Restart the local relay and reopen the pane. The hosted Worker was not deployed. `npm test` 130/130.
+
+**2026-11-25 — GitHub 技能連結與下載 zip。** 本機版本 `2026-11-25.4`。安裝接受 `www.github.com`、技能資料夾連結，以及 `owner/repo.git`。引號包住的 name 與 description 會去掉引號再安裝。GitHub 速率限制會如實說明。下載 zip 與目前程式一致。請重啟本機 relay 並重新開啟窗格。託管 Worker 未部署。`npm test` 130/130。
+
 **2026-11-25 — GitHub skill install.** Local build `2026-11-25.3`. Saved skills installs one `SKILL.md` from a GitHub repository into the OneDrive skills folder. A public repo can omit the token. Remember keeps the token in this browser only. Restart the local relay and reopen the pane. The hosted Worker was not deployed.
 
 **2026-11-25 — 從 GitHub 安裝技能。** 本機版本 `2026-11-25.3`。Saved skills 可把一個 GitHub `SKILL.md` 安裝到 OneDrive 技能資料夾。公開 repo 可以不填 token。Remember 只把 token 留在這個瀏覽器。請重啟本機 relay 並重新開啟窗格。託管 Worker 未部署。

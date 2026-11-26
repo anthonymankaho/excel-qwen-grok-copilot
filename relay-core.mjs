@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 
 // Bump together with public/taskpane.js PANE_BUILD whenever pane and relay must ship as one build.
-export const RELAY_BUILD = '2026-11-25.3';
+export const RELAY_BUILD = '2026-11-25.4';
 const QWEN_PATH = '/compatible-mode/v1/chat/completions';
 const SUPPORTED_MODELS = new Set(['auto', 'qwen4-max', 'qwen3.8-max', 'qwen3.8-flash']);
 const EFFORTS = new Set(['off', 'none', 'low', 'medium', 'high', 'xhigh']);
@@ -187,13 +187,22 @@ export function resolveSkillsRoot(explicit = '') {
   return '';
 }
 
+function yamlValue(value) {
+  const text = String(value ?? '').trim();
+  if (text.length >= 2) {
+    const quote = text[0];
+    if ((quote === '"' || quote === "'") && text.endsWith(quote)) return text.slice(1, -1).trim();
+  }
+  return text;
+}
+
 function skillMeta(text) {
   const meta = {};
   const block = String(text).match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (block) {
     for (const line of block[1].split(/\r?\n/)) {
       const kv = line.match(/^([A-Za-z-]+):\s*(.*)$/);
-      if (kv) meta[kv[1]] = kv[2].trim();
+      if (kv) meta[kv[1]] = yamlValue(kv[2]);
     }
   }
   return meta;
@@ -279,23 +288,32 @@ export function parseGitHubSkillSource(raw) {
   const short = text.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/);
   if (short) {
     owner = short[1];
-    repo = short[2];
+    repo = short[2].replace(/\.git$/, '');
   } else {
     let url;
     try { url = new URL(text); } catch { return { error: 'Use owner/repo or one https://github.com/owner/repo link to a SKILL.md file.' }; }
-    if (url.protocol !== 'https:' || url.username || url.password || url.hostname !== 'github.com') {
+    const host = url.hostname.toLowerCase();
+    if (url.protocol !== 'https:' || url.username || url.password || (host !== 'github.com' && host !== 'www.github.com')) {
       return { error: 'Only an https://github.com/owner/repo link is accepted.' };
     }
-    const parts = url.pathname.split('/').filter(Boolean).map(part => decodeURIComponent(part));
+    const parts = url.pathname.split('/').filter(Boolean).map(part => {
+      try { return decodeURIComponent(part); } catch { return part; }
+    });
     if (parts.length < 2 || parts.some(part => part === '.' || part === '..')) {
       return { error: 'Use owner/repo or one https://github.com/owner/repo link to a SKILL.md file.' };
     }
     owner = parts[0];
     repo = parts[1].replace(/\.git$/, '');
     if (parts.length > 2) {
-      if (parts[2] !== 'blob' || parts.length < 5) return { error: 'Use the repository link or a link to one SKILL.md file.' };
+      if ((parts[2] !== 'blob' && parts[2] !== 'tree') || parts.length < 4) return { error: 'Use the repository link, a skill folder link, or a link to one SKILL.md file.' };
       ref = parts[3];
       filePath = parts.slice(4).join('/');
+      const last = filePath.split('/').filter(Boolean).at(-1) || '';
+      if (!filePath) filePath = 'SKILL.md';
+      else if (last !== 'SKILL.md') {
+        if (last.includes('.')) return { error: 'Only a SKILL.md file can be installed.' };
+        filePath = `${filePath}/SKILL.md`;
+      }
     }
   }
   if (!GITHUB_NAME_RE.test(owner) || !GITHUB_NAME_RE.test(repo)) return { error: 'Invalid repository name.' };
@@ -326,7 +344,12 @@ export async function fetchGitHubSkill({ owner, repo, ref = '', path: filePath, 
   }
   if (response.status >= 300 && response.status < 400) return { error: 'GitHub redirected this request. The redirect was not followed.', status: 502 };
   if (response.status === 404) return { error: 'That repository has no SKILL.md at the requested path.', status: 404 };
-  if (response.status === 401 || response.status === 403) return { error: 'GitHub refused this token or this repository is private.', status: response.status };
+  if (response.status === 401 || response.status === 403) {
+    let detail = '';
+    try { detail = String(await response.text() || '').slice(0, 4000); } catch { detail = ''; }
+    if (/rate limit/i.test(detail)) return { error: 'GitHub rate limit reached. Wait, or add a token for a higher limit.', status: response.status };
+    return { error: 'GitHub refused this token or this repository is private.', status: response.status };
+  }
   if (response.status !== 200) return { error: `GitHub returned HTTP ${response.status}.`, status: 502 };
   const declared = Number(response.headers?.get?.('content-length') || 0);
   if (declared > 64 * 1024) return { error: 'SKILL.md is over 64 KB. The pane skips files that large.', status: 400 };

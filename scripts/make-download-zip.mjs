@@ -39,10 +39,15 @@ FIRST USE
    ticked > Use key. The dot turns green.
 
 OPTIONAL CLOUD SOURCES
-   The app owner sets the public OAuth client IDs once in cloud-oauth.json
-   before sharing the package. Each colleague then clicks Connect and signs
-   in to their own Microsoft account. No account address or token
-   is built into the app.
+   The app owner sets the public Microsoft OAuth client ID once in
+   cloud-oauth.json before sharing the package. Each colleague then
+   clicks Connect and signs in to their own Microsoft account. No
+   account address or token is built into the app.
+
+GITHUB SKILLS
+   In Skills, paste owner/repo, a github.com link to one SKILL.md, or a
+   link to the skill folder. www.github.com is accepted. A public repo
+   can omit the token. Remember keeps the token in this browser only.
 
 WORD
    Close Word, then in this folder run:  npm run start:word
@@ -57,7 +62,7 @@ EXCEL ON THE WEB
    Each person pastes their own Qwen key. Do not use a Token Plan key
    with this custom add-in unless Alibaba confirms permission.
    No provider key is in this zip. The hosted Worker was not updated
-   with the 2026-11-25.2 local build.
+   with the 2026-11-25.4 local build.
 
 DOCS
    SOP-INSTALL.md     installation, CLI steps, troubleshooting

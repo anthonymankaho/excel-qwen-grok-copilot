@@ -16,7 +16,7 @@ Each person uses **their own API key**. The owner's Token Plan key stays on the 
 | Folder | The folder that holds `manifest.xml`. Every command below runs from there |
 | Key | Your own Qwen key. Nothing is bundled |
 
-The pane and the local relay both live at `http://127.0.0.1:3000`. Both manifests are version **1.5.0.0**. The local build to use is **2026-11-25.3**.
+The pane and the local relay both live at `http://127.0.0.1:3000`. Both manifests are version **1.5.0.0**. The local build to use is **2026-11-25.4**.
 
 **This PC’s folder is `C:\Users\User\Desktop\excel-qwen-grok-copilot`.** Run every `npm` command from that folder. PowerShell opened in `C:\WINDOWS\System32` cannot see `package.json` and fails with `ENOENT`. The older folder `C:\Users\User\Desktop\Excel Qwen Grok Copilot` is an archived checkout. Do not install or edit it.
 
@@ -172,7 +172,7 @@ npm run relay-ensure
 
 Then close the task pane and open it again. `npm start` is only needed when you also want to re-sideload and open Excel. Run these commands inside the project folder, not from `C:\WINDOWS\System32`.
 
-**The relay loads its code at process start**, so a code change needs a restart. Pane files are served with `no-store`, so reopening the pane loads the new screen. On another computer, `git pull` first. The pane and relay builds must match. Build **2026-11-25.2** adds the model list (`auto`, `qwen4-max`, `qwen3.8-max`, `qwen3.8-flash`) and Effort (Off, Low, Medium, High, Extra). See `SOP-USER-GUIDE.md`.
+**The relay loads its code at process start**, so a code change needs a restart. Pane files are served with `no-store`, so reopening the pane loads the new screen. On another computer, `git pull` first. The pane and relay builds must match. Build **2026-11-25.4** installs one GitHub `SKILL.md`, including a skill-folder link and `www.github.com`. It still offers the model list (`auto`, `qwen4-max`, `qwen3.8-max`, `qwen3.8-flash`) and Effort (Off, Low, Medium, High, Extra). See `SOP-USER-GUIDE.md`.
 
 A restart clears keys held only in relay memory. If **Remember key** was ticked, the pane reloads it automatically on reconnect; otherwise re-enter it in Settings.
 
@@ -221,6 +221,10 @@ If auto-start is installed, `relay-stop` alone is not enough — the minute task
 ---
 
 ## 12. Processing status · 處理狀態
+
+**2026-11-25 — GitHub skill links and download zip.** Local build `2026-11-25.4`. Install accepts `www.github.com`, a skill-folder link, and `owner/repo.git`. Quoted `name` and `description` lines install under the unquoted name. A GitHub rate limit is reported as a rate limit. The download zip matches this tree. Restart the local relay and reopen the pane. Hosted Worker was not redeployed. `npm test` 130/130.
+
+**2026-11-25 — GitHub 技能連結與下載 zip。** 本機版本 `2026-11-25.4`。安裝接受 `www.github.com`、技能資料夾連結，以及 `owner/repo.git`。引號包住的 name 與 description 會去掉引號再安裝。GitHub 速率限制會如實說明。下載 zip 與目前程式一致。請重啟本機 relay 並重新開啟窗格。託管 Worker 未重新部署。`npm test` 130/130。
 
 **2026-11-25 — GitHub skill install.** Local build `2026-11-25.3`. Saved skills can install one `SKILL.md` from `https://github.com/owner/repo`. The token stays in this browser when Remember is ticked. Restart the local relay and reopen the pane. Hosted Worker was not redeployed.
 

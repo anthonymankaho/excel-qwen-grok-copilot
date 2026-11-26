@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { createRelay } from '../server.mjs';
-import { fetchGitHubSkill, installSkillFile, parseGitHubSkillSource } from '../relay-core.mjs';
+import { fetchGitHubSkill, installSkillFile, listSkills, parseGitHubSkillSource } from '../relay-core.mjs';
 
 const skill = `---
 name: demo-skill
@@ -24,6 +24,15 @@ test('a GitHub skill source accepts owner/repo and one SKILL.md link', () => {
   });
   assert.deepEqual(parseGitHubSkillSource('https://github.com/kgraph57/demo-skill/blob/main/skills/demo-skill/SKILL.md'), {
     owner: 'kgraph57', repo: 'demo-skill', ref: 'main', path: 'skills/demo-skill/SKILL.md'
+  });
+  assert.deepEqual(parseGitHubSkillSource('kgraph57/mckinsey-style-visualization-skill.git'), {
+    owner: 'kgraph57', repo: 'mckinsey-style-visualization-skill', ref: '', path: 'SKILL.md'
+  });
+  assert.deepEqual(parseGitHubSkillSource('https://www.github.com/kgraph57/demo-skill/tree/main/skills/demo-skill'), {
+    owner: 'kgraph57', repo: 'demo-skill', ref: 'main', path: 'skills/demo-skill/SKILL.md'
+  });
+  assert.deepEqual(parseGitHubSkillSource('https://github.com/kgraph57/demo-skill/blob/main'), {
+    owner: 'kgraph57', repo: 'demo-skill', ref: 'main', path: 'SKILL.md'
   });
   for (const bad of [
     'https://user:ghp_secret@github.com/owner/repo',
@@ -52,6 +61,10 @@ test('an installed GitHub skill keeps its original file and replaces only when a
     assert.match(fs.readFileSync(file, 'utf8'), /Updated body/);
     assert.equal(fs.readFileSync(path.join(root, 'demo-skill', 'notes.txt'), 'utf8'), 'keep me');
     assert.match(installSkillFile(root, '---\nname: Bad_Name\ndescription: x\n---\nbody').error, /name/i);
+    const quoted = installSkillFile(root, '---\nname: "quoted-skill"\ndescription: "Use for quotes."\n---\n\n# Quoted\n', {});
+    assert.equal(quoted.id, 'quoted-skill');
+    assert.match(fs.readFileSync(path.join(root, 'quoted-skill', 'SKILL.md'), 'utf8'), /name: "quoted-skill"/);
+    assert.equal(listSkills(root).some(item => item.id === 'quoted-skill' && item.description === 'Use for quotes.'), true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -78,6 +91,18 @@ test('GitHub skill fetch stays on api.github.com and does not follow a redirect'
   });
   assert.match(redirected.error, /redirect/i);
   assert.equal(redirected.error.includes(token), false);
+  const limited = await fetchGitHubSkill({
+    owner: 'kgraph57', repo: 'demo-skill', ref: '', path: 'SKILL.md', token,
+    fetchImpl: async () => ({ status: 403, headers: { get: () => null }, text: async () => '{"message":"API rate limit exceeded for this client"}' })
+  });
+  assert.match(limited.error, /rate limit/i);
+  assert.equal(limited.error.includes(token), false);
+  const refused = await fetchGitHubSkill({
+    owner: 'kgraph57', repo: 'demo-skill', ref: '', path: 'SKILL.md', token,
+    fetchImpl: async () => ({ status: 401, headers: { get: () => null }, text: async () => '{"message":"Bad credentials"}' })
+  });
+  assert.match(refused.error, /private/i);
+  assert.equal(refused.error.includes(token), false);
 });
 
 test('the local relay installs a GitHub skill and leaves the token out of the reply', async () => {

@@ -369,7 +369,7 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
     fetch: async (url, opts) => {
       const body = opts?.body ? JSON.parse(opts.body) : null;
       calls.push({ url, body, headers: opts?.headers || {} });
-      if (url.endsWith('/api/health')) return { ok: true, status: 200, json: async () => ({ ok: true, build: healthBuild || '2026-11-25.3', configured: { qwen: true } }) };
+      if (url.endsWith('/api/health')) return { ok: true, status: 200, json: async () => ({ ok: true, build: healthBuild || '2026-11-25.4', configured: { qwen: true } }) };
       if (url.endsWith('/api/connectors/search')) return { ok: true, status: 200, json: async () => ({ items: [{ id: 'item-1', name: 'aging.xlsx', detail: 'sheet' }] }) };
       if (url.endsWith('/api/connectors/read')) return { ok: true, status: 200, json: async () => ({ name: body.item.name, kind: 'XLSX', text: 'Coverage: COMPLETE\nGJ001 | 100' }) };
       if (url.endsWith('/api/extract')) return { ok: true, status: 200, json: async () => ({ text: '[Sheet: Data]\nL1: Voucher | Debit\nL2: GJ001 | 100', kind: 'XLSX' }) };
