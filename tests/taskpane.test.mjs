@@ -335,7 +335,21 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
             load() {},
             items: (sheetNames || ['Sheet1']).map(n => ({ name: n, load() {} })),
             getActiveWorksheet: () => ({ getUsedRangeOrNullObject: () => range(used) }),
-            add(sheetName) { writes.push({ kind: 'addSheet', name: sheetName }); return makeSheet(sheetName); },
+            add(sheetName) {
+              writes.push({ kind: 'addSheet', name: sheetName });
+              const sheet = makeSheet(sheetName);
+              // Real Office.js: a freshly added object throws PropertyNotLoaded when an
+              // unloaded property is read. Reproduce that so mocks cannot hide the bug.
+              let nullLoaded = false;
+              sheet.load = props => { if (String(props).includes('isNullObject')) nullLoaded = true; };
+              Object.defineProperty(sheet, 'isNullObject', {
+                get() {
+                  if (!nullLoaded) throw new Error("The property 'isNullObject' is not available. Before reading the property value, call the load method on the containing object and call context.sync() on the relevant request context.");
+                  return false;
+                }
+              });
+              return sheet;
+            },
             getItem: sheet => makeSheet(sheet),
             getItemOrNullObject: sheet => makeSheet(sheet)
           }
@@ -2092,4 +2106,32 @@ test('An unknown pivot field names the offending header and leaves no partial pi
   assert.match(fed, /Headers are: Entity, Bucket, Total USD/);
   assert.match(savedAuditText(sb), /FAILED/);
   assert.match(savedAuditText(sb), /USD O\/S/);
+});
+
+test('addSheet then set/format on the new sheet in one batch applies (real Office.js isNullObject semantics)', async () => {
+  const reply = {
+    text: 'Build.\n```json\n{"actions":[{"op":"addSheet","name":"Sales Invoice"},{"op":"set","sheet":"Sales Invoice","range":"A1:B2","values":[["Item","Amount"],["Widget",1200]]},{"op":"set","sheet":"Sales Invoice","range":"B3","values":[["=B2*1.05"]]},{"op":"format","sheet":"Sales Invoice","range":"A1:B1","bold":true}],"decision":"COMPLETE"}\n```',
+    model: 'm'
+  };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  sb.els('directRevise').checked = true;
+  await ask(sb, 'create a demo sales invoice in a new tab');
+  assert.ok(sb.writes.some(w => w.kind === 'addSheet' && w.name === 'Sales Invoice'), 'the sheet was created');
+  assert.ok(sb.writes.some(w => w.kind === 'value' && w.sheet === 'Sales Invoice'), 'values were written to the new sheet');
+  assert.ok(sb.writes.some(w => w.kind === 'formula' && w.sheet === 'Sales Invoice'), 'the formula was written to the new sheet');
+  assert.doesNotMatch(savedAuditText(sb), /FAILED/);
+  assert.match(visible(sb.els('conversation')), /REVISED 4 CHANGES/);
+});
+
+test('a set on a genuinely missing sheet still fails closed and writes nothing', async () => {
+  const reply = { text: 'Write.\n```json\n{"actions":[{"op":"set","sheet":"Ghost","range":"A1","values":[["x"]]}],"decision":"COMPLETE"}\n```', model: 'm' };
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply, missingSheets: ['Ghost'] });
+  await boot(sb);
+  sb.els('workMode').value = 'agent';
+  sb.els('directRevise').checked = true;
+  await ask(sb, 'write to ghost');
+  assert.ok(!sb.writes.some(w => w.kind === 'value'), 'nothing was written');
+  assert.match(savedAuditText(sb), /FAILED/);
 });

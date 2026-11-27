@@ -1750,7 +1750,9 @@ async function applyExcelActions(actions) {
         continue;
       }
       const sheet = action.sheet ? wanted.get(action.sheet) : null;
-      if (action.sheet && (!sheet || sheetMissing(sheet))) throw new Error(`Sheet “${action.sheet}” is not in this workbook. Nothing was written.`);
+      // Sheets created in this batch are known to exist; reading isNullObject on a freshly
+      // added worksheet throws PropertyNotLoaded in real Office.js (it was never load()-ed).
+      if (action.sheet && (!sheet || (!createdNames.has(action.sheet) && sheetMissing(sheet)))) throw new Error(`Sheet “${action.sheet}” is not in this workbook. Nothing was written.`);
       if (action.op === 'renameSheet') {
         sheet.name = action.name;
         undo.push({ host: 'excel', op: 'renameSheet', sheet: action.name, name: action.sheet });

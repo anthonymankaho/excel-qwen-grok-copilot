@@ -140,6 +140,8 @@ OneDrive 文字檢視支援 XLSX/XLSM、DOCX、HTML、TXT、MD、CSV、TSV、JSO
 
 ## Processing status · 處理狀態
 
+**2026-11-28 — Fixed: creating a sheet and writing to it in one batch.** A model batch like `addSheet "Sales Invoice"` followed by `set`/`format` on that new sheet failed with the Office.js error "property 'isNullObject' is not available… call load… context.sync()", rolling back the whole batch (real case: 39 demo invoice actions, nothing written). Cause: the missing-sheet guard read `isNullObject` on a freshly added worksheet object, which real Office.js forbids before `load()`. The guard now skips sheets created in the same batch. The test mock reproduces the real throw, and a regression test (addSheet→set→format) plus a missing-sheet fail-closed test were added; the regression test was proven to fail on the old code. `npm test` **151/151**. Local relay restarted on build `2026-11-26.3`; reopen the pane and retry. Hosted Worker not deployed. / **修正：同一批次新增工作表並寫入。** addSheet 後對新表 set/format 會觸發 Office.js「isNullObject 未 load」錯誤，整批回滾（真實案例：39 個 demo 發票動作全沒寫入）。原因：缺表檢查讀取了刚新增、未 load 的工作表物件。現同一批次新增的表略過該檢查；mock 模擬真实拋錯，新增回归測試（已證明旧代码會失敗）與缺表 fail-closed 測試。151/151 全綠；本機 relay 已重啟，重開 pane 即可重試。託管 Worker 未部署。
+
 **2026-11-26 — Audit card hidden.** The pane no longer shows an AUDIT card after a question. The trail is still saved with the session. Close and reopen the task pane.
 
 **2026-11-26 — 隱藏 AUDIT 卡。** 提問之後，窗格不再顯示 AUDIT 卡。紀錄仍保存在該次對話。請關閉並重新開啟工作窗格。
