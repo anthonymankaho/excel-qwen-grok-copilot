@@ -33,6 +33,7 @@ The composer shows the current **Agent round out of 25** and what Agent is doing
 - **Plan and Agent** send workbook *metadata* first — workbook name, sheet names, used-range sizes, table names, selection address. Agent chooses the relevant sheets and ranges; the user does not set a technical scope.
 - **Profile a big sheet.** Agent can scan up to 2 million requested cells locally in 20,000-cell batches and send a compact profile: covered rows/columns, column counts, sample values, numeric sum/min/max and Excel error-value counts with sample addresses. The profile says **INCOMPLETE** if it reaches the cap. A column sum alone does not prove an accounting reconciliation; inspect the relevant rows and formulas.
 - **Word Chat** sends the selection; an empty selection sends the document body.
+- **Local git in Word.** `open src/app.js` or `open README` loads that file from the repo folder saved in MCP. A question that merely starts with “open”, such as “open the document and summarize”, still goes to Qwen. `git pull`, `git commit`, and `git push` must be the whole message. `git push` does not use `--force`. If commit fails, the original file is put back. Remove the appended Qwen notes before commit. 在 Word，`open src/app.js` 或 `open README` 會從 MCP 裡的 repo 資料夾載入該檔。只是以「open」開頭的問題，例如「open the document and summarize」，仍會交給 Qwen。`git pull`、`git commit`、`git push` 必須是整句訊息。`git push` 不會使用 `--force`。提交失敗會把原檔放回。提交前刪去文末的 Qwen 註記。
 - Press **Workbook** to open the context card. It shows the exact text being sent. **↻ Refresh** re-reads it. Press **Workbook** again to hide the card. 按 **Workbook** 打開上下文卡，它顯示即將送出的文字。**↻ Refresh** 會重讀。再按 **Workbook** 即隱藏。
 - **Share Office file data with AI** is a data-sharing switch, not a sheet-scope setting. Turn it off to prevent workbook/document metadata and Agent-requested ranges from being sent to Qwen. The add-in will stop a requested read and show **File sharing off**. Attachments are controlled separately.
 - **Attach files** with **＋**. Text types (HTML/HTM, TXT, MD, CSV, TSV, JSON, XML) are up to 5 MB. PDF, DOCX, XLSX/XLSM, and PNG/JPG/WEBP go through the local relay and are up to 20 MB. Choose up to 3 files. The pane keeps up to 18,000 characters per file and at most 26,000 attachment characters in a question. PDF pages are numbered. Excel shows sheet coverage (`COMPLETE` or `INCOMPLETE` plus the next offset). Word keeps headings and table rows.
@@ -211,6 +212,10 @@ For relay, sideload and install problems see `SOP-INSTALL.md` §10.
 ---
 
 ## 12. Processing status · 處理狀態
+
+**2026-11-26 — Review fixes.** Local build `2026-11-26.4`. In Word, only a file path after `open` loads a repo file. A question such as “open the document and summarize” goes to Qwen. A failed `git commit` restores the file. Restart the local relay and reopen the pane. The hosted Worker was not deployed. `npm test` 152/152.
+
+**2026-11-26 — 覆核修正。** 本機版本 `2026-11-26.4`。在 Word，只有 `open` 後面是檔案路徑才會載入 repo 檔。像「open the document and summarize」這種問題會交給 Qwen。`git commit` 失敗會還原檔案。請重啟本機 relay 並重新開啟窗格。託管 Worker 未部署。
 
 **2026-11-26 — Audit card hidden.** The pane no longer shows an AUDIT card after a question. The trail is still saved with the session. Close and reopen the task pane.
 

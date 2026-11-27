@@ -5,6 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const MAX_FILE_BYTES = 64 * 1024;
+const GIT_TIMEOUT_MS = 90_000;
+const GIT_OUTPUT_CAP = 8000;
 const SECRET_RE = /(?:sk-[A-Za-z0-9]{8,}|ghp_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}|AKIA[0-9A-Z]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{8,})/;
 const SECRET_NAMES = new Set(['.env', '.env.local', '.env.production', 'id_rsa', 'id_dsa', 'id_ecdsa', 'id_ed25519']);
 
@@ -14,7 +16,13 @@ export function gitSecretError(text) {
 }
 
 function cleanGitText(value) {
-  return String(value || '').replace(/\u0000/g, '').trim().slice(0, 500);
+  const text = String(value || '').replace(/\u0000/g, '').trim();
+  return text.length > 500 ? text.slice(-500) : text;
+}
+
+function appendCapped(current, chunk) {
+  const next = current + String(chunk);
+  return next.length > GIT_OUTPUT_CAP ? next.slice(-GIT_OUTPUT_CAP) : next;
 }
 
 function runGit(cwd, args, spawnImpl) {
@@ -22,17 +30,33 @@ function runGit(cwd, args, spawnImpl) {
   return new Promise(resolve => {
     let stdout = '';
     let stderr = '';
+    let settled = false;
+    const finish = result => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
     let child;
     try {
       child = spawn('git', args, { cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (error) {
-      resolve({ code: 127, stdout: '', stderr: cleanGitText(error.message) });
+      finish({ code: 127, stdout: '', stderr: cleanGitText(error.message) });
       return;
     }
-    child.stdout.on('data', chunk => { stdout += chunk; });
-    child.stderr.on('data', chunk => { stderr += chunk; });
-    child.once('error', error => resolve({ code: 127, stdout, stderr: cleanGitText(error.message) }));
-    child.once('close', code => resolve({ code: code ?? 1, stdout, stderr }));
+    const timer = setTimeout(() => {
+      child.kill();
+      finish({ code: 1, stdout, stderr: 'Git did not finish. If it is waiting for a login, sign in and try again.' });
+    }, GIT_TIMEOUT_MS);
+    child.stdout.on('data', chunk => { stdout = appendCapped(stdout, chunk); });
+    child.stderr.on('data', chunk => { stderr = appendCapped(stderr, chunk); });
+    child.once('error', error => {
+      clearTimeout(timer);
+      finish({ code: 127, stdout, stderr: cleanGitText(error.message) });
+    });
+    child.once('close', code => {
+      clearTimeout(timer);
+      finish({ code: code ?? 1, stdout, stderr });
+    });
   });
 }
 
@@ -68,7 +92,12 @@ function readTextFile(absolute) {
   const text = original.toString('utf8');
   const secret = gitSecretError(text);
   if (secret) return { error: secret };
-  return { text, original: text };
+  return { text, original: text, bytes: original };
+}
+
+async function restoreFile(root, relative, absolute, bytes, added, spawnImpl) {
+  try { fs.writeFileSync(absolute, bytes); } catch { /* the git error is the one shown */ }
+  if (added) await runGit(root, ['reset', '-q', '--', relative], spawnImpl);
 }
 
 function withRepoNewlines(original, incoming) {
@@ -131,10 +160,16 @@ export async function commitGitFile({ repo, path: filePath, content, message, sp
   if (next === existing.original) return { ok: true, unchanged: true, repo: located.root, path: located.relative };
   fs.writeFileSync(located.absolute, next);
   const added = await runGit(located.root, ['add', '--', located.relative], spawnImpl);
-  if (added.code !== 0) return { error: cleanGitText(added.stderr) || 'git add failed.', status: 400 };
+  if (added.code !== 0) {
+    await restoreFile(located.root, located.relative, located.absolute, existing.bytes, false, spawnImpl);
+    return { error: cleanGitText(added.stderr) || 'git add failed.', status: 400 };
+  }
   const title = String(message || 'Update from Word').trim().slice(0, 500) || 'Update from Word';
   const committed = await runGit(located.root, ['commit', '-m', title, '--', located.relative], spawnImpl);
-  if (committed.code !== 0) return { error: cleanGitText(committed.stderr) || cleanGitText(committed.stdout) || 'git commit failed.', status: 400 };
+  if (committed.code !== 0) {
+    await restoreFile(located.root, located.relative, located.absolute, existing.bytes, true, spawnImpl);
+    return { error: cleanGitText(committed.stderr) || cleanGitText(committed.stdout) || 'git commit failed.', status: 400 };
+  }
   const shown = await runGit(located.root, ['rev-parse', '--short', 'HEAD'], spawnImpl);
   return { ok: true, repo: located.root, path: located.relative, commit: cleanGitText(shown.stdout), message: title };
 }

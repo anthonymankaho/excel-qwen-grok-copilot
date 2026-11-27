@@ -44,6 +44,27 @@ test('open and commit change one file inside the repo', async () => {
   }
 });
 
+test('a failed git commit puts the original file back', async () => {
+  const dir = initRepo();
+  const file = path.join(dir, 'notes.txt');
+  const before = fs.readFileSync(file);
+  const spawnImpl = async (args) => {
+    if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') return { code: 0, stdout: dir, stderr: '' };
+    if (args[0] === 'add') return { code: 0, stdout: '', stderr: '' };
+    if (args[0] === 'commit') return { code: 1, stdout: '', stderr: 'Author identity unknown' };
+    if (args[0] === 'reset') return { code: 0, stdout: '', stderr: '' };
+    return { code: 1, stdout: '', stderr: 'unexpected' };
+  };
+  try {
+    const failed = await commitGitFile({ repo: dir, path: 'notes.txt', content: 'changed from word', message: 'no', spawnImpl });
+    assert.match(failed.error, /identity unknown/i);
+    assert.equal(fs.readFileSync(file).equals(before), true);
+    assert.equal(fs.readFileSync(path.join(dir, 'keep.txt'), 'utf8'), 'leave me\n');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('git pull uses fast-forward only and a secret path is refused before git runs', async () => {
   const calls = [];
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eqgc-git-pull-'));

@@ -53,12 +53,28 @@
     return String(raw || '').trim().replace(/^-m\s+/, '').replace(/^["']|["']$/g, '').trim();
   }
 
+  function looksLikeRepoPath(value) {
+    const text = String(value || '').trim();
+    if (!text || text.length > 400 || /[\r\n?]/.test(text) || text.startsWith('-')) return false;
+    if (text.includes('/') || text.includes('\\')) return true;
+    if (/\s/.test(text)) return /\.[A-Za-z0-9]{1,12}$/.test(text);
+    return /^[A-Za-z0-9._-]+$/.test(text);
+  }
+
   function parseGitCommand(text) {
     const clean = String(text || '').trim();
     const open = clean.match(/^open\s+(\S[\s\S]*)$/i);
-    if (open) return { action: 'open', path: open[1].trim() };
+    if (open) {
+      const filePath = open[1].trim();
+      if (!looksLikeRepoPath(filePath)) return null;
+      return { action: 'open', path: filePath };
+    }
     const pull = clean.match(/^git\s+pull(?:\s+(\S[\s\S]*))?$/i);
-    if (pull) return { action: 'pull', path: (pull[1] || '').trim() };
+    if (pull) {
+      const filePath = (pull[1] || '').trim();
+      if (filePath && !looksLikeRepoPath(filePath)) return null;
+      return { action: 'pull', path: filePath };
+    }
     const commitPush = clean.match(/^git\s+commit\s+and\s+push(?:\s+([\s\S]+))?$/i);
     if (commitPush) return { action: 'commit-push', message: commitMessage(commitPush[1]) };
     const commit = clean.match(/^git\s+commit(?:\s+([\s\S]+))?$/i);

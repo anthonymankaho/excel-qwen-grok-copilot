@@ -82,3 +82,16 @@ test('the project zip has the installer and leaves secrets out', async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('the committed download zip matches a fresh package of this tree', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'eqgc-committed-'));
+  const outFile = path.join(dir, 'fresh.zip');
+  try {
+    await makeDownloadZip(projectRoot, outFile);
+    const fresh = await readFile(outFile);
+    const committed = await readFile(path.join(projectRoot, 'download', 'Qwen-for-Excel-and-Word.zip'));
+    assert.equal(fresh.equals(committed), true, 'The download zip is stale. Rebuild it with npm run package.');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

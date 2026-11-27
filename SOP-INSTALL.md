@@ -16,7 +16,7 @@ Each person uses **their own API key**. The owner's Token Plan key stays on the 
 | Folder | The folder that holds `manifest.xml`. Every command below runs from there |
 | Key | Your own Qwen key. Nothing is bundled |
 
-The pane and the local relay both live at `http://127.0.0.1:3000`. Both manifests are version **1.5.0.0**. The local build to use is **2026-11-26.3**.
+The pane and the local relay both live at `http://127.0.0.1:3000`. Both manifests are version **1.5.0.0**. The local build to use is **2026-11-26.4**.
 
 **This PC’s folder is `C:\Users\User\Desktop\excel-qwen-grok-copilot`.** Run every `npm` command from that folder. PowerShell opened in `C:\WINDOWS\System32` cannot see `package.json` and fails with `ENOENT`. The older folder `C:\Users\User\Desktop\Excel Qwen Grok Copilot` is an archived checkout. Do not install or edit it.
 
@@ -172,7 +172,7 @@ npm run relay-ensure
 
 Then close the task pane and open it again. `npm start` is only needed when you also want to re-sideload and open Excel. Run these commands inside the project folder, not from `C:\WINDOWS\System32`.
 
-**The relay loads its code at process start**, so a code change needs a restart. Pane files are served with `no-store`, so reopening the pane loads the new screen. On another computer, `git pull` first. The pane and relay builds must match. The current local build is **2026-11-26.3**. It includes the model list (`auto`, `qwen4-max`, `qwen3.8-max`, `qwen3.8-flash`), Effort, GitHub skill install, GitHub MCP, **Connect to Github** through the GitHub CLI login on this PC, Word `open` / `git pull` / `git commit` / `git push` for one local file, appending each finished Qwen answer in Word, and the pane names **Workbook**, **MCP**, and **Skills**. `git push` does not use `--force`. **Disconnect** in the pane does not sign the PC out of GitHub. See `SOP-USER-GUIDE.md`.
+**The relay loads its code at process start**, so a code change needs a restart. Pane files are served with `no-store`, so reopening the pane loads the new screen. On another computer, `git pull` first. The pane and relay builds must match. The current local build is **2026-11-26.4**. It includes the model list (`auto`, `qwen4-max`, `qwen3.8-max`, `qwen3.8-flash`), Effort, GitHub skill install, GitHub MCP, **Connect to Github** through the GitHub CLI login on this PC, Word `open` / `git pull` / `git commit` / `git push` for one local file, appending each finished Qwen answer in Word, and the pane names **Workbook**, **MCP**, and **Skills**. `git push` does not use `--force`. **Disconnect** in the pane does not sign the PC out of GitHub. See `SOP-USER-GUIDE.md`.
 
 A restart clears keys held only in relay memory. If **Remember key** was ticked, the pane reloads it automatically on reconnect; otherwise re-enter it in Settings.
 
@@ -221,6 +221,10 @@ If auto-start is installed, `relay-stop` alone is not enough — the minute task
 ---
 
 ## 12. Processing status · 處理狀態
+
+**2026-11-26 — Review fixes.** Local build `2026-11-26.4`. In Word, only a file path after `open` loads a repo file. A failed `git commit` restores that file. Git stops after 90 seconds if it is waiting. The download zip matches this tree. Restart the local relay and reopen the pane. The hosted Worker was not redeployed. `npm test` 152/152.
+
+**2026-11-26 — 覆核修正。** 本機版本 `2026-11-26.4`。在 Word，只有 `open` 後面是檔案路徑才會載入 repo 檔。`git commit` 失敗會還原該檔。Git 若一直等候，90 秒後會停止。下載 zip 與目前程式一致。請重啟本機 relay 並重新開啟窗格。託管 Worker 未重新部署。
 
 **2026-11-26 — Hosted pane deployed.** `npx wrangler deploy` from this folder published commit `6534f67`. Live health is `build: 2026-11-25.3`, `byo:true`, `configured.qwen:false`. Close and reopen the Excel web task pane. MCP, Skills, History, Memory, and PDF/Word/Excel extraction remain local-only. The email-and-password team version is cancelled and was never deployed. A Token Plan key cannot back that shared login.
 

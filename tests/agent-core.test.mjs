@@ -150,6 +150,9 @@ test('a OneDrive source request keeps search and one-file read, and drops a blan
   assert.equal(write.githubWrite.files.length, 1);
   assert.equal(write.githubWrite.files[0].content, 'Hello');
   assert.equal(AgentCore.parseGitCommand('open src/app.js').action, 'open');
+  assert.equal(AgentCore.parseGitCommand('open README').path, 'README');
+  assert.equal(AgentCore.parseGitCommand('open the document and summarize the second paragraph'), null);
+  assert.equal(AgentCore.parseGitCommand('git pull --rebase'), null);
   assert.equal(AgentCore.parseGitCommand('git pull').action, 'pull');
   assert.equal(AgentCore.parseGitCommand('git commit -m "Update the note"').message, 'Update the note');
   assert.equal(AgentCore.parseGitCommand('git commit and push Update the note').action, 'commit-push');

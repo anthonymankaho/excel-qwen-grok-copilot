@@ -140,6 +140,10 @@ OneDrive 文字檢視支援 XLSX/XLSM、DOCX、HTML、TXT、MD、CSV、TSV、JSO
 
 ## Processing status · 處理狀態
 
+**2026-11-26 — Review fixes.** Local build `2026-11-26.4`. In Word, `open src/app.js` still loads a repo file, and a normal question that starts with “open” goes to Qwen. A failed `git commit` puts the original file back. Git commands stop after 90 seconds instead of waiting on a login prompt. Skill install accepts a folder link, `www.github.com`, and quoted names. The download zip matches this tree. Restart the local relay and reopen the pane. The hosted Worker was not deployed. `npm test` 152/152.
+
+**2026-11-26 — 覆核修正。** 本機版本 `2026-11-26.4`。在 Word，`open src/app.js` 仍會載入 repo 檔案；以「open」開頭的普通問題會交給 Qwen。`git commit` 失敗會把原檔放回。Git 指令若 90 秒未完成會停止，不會一直等登入。技能安裝接受資料夾連結、`www.github.com` 和引號包住的名稱。下載 zip 與目前程式一致。請重啟本機 relay 並重新開啟窗格。託管 Worker 未部署。
+
 **2026-11-26 — Audit card hidden.** The pane no longer shows an AUDIT card after a question. The trail is still saved with the session. Close and reopen the task pane.
 
 **2026-11-26 — 隱藏 AUDIT 卡。** 提問之後，窗格不再顯示 AUDIT 卡。紀錄仍保存在該次對話。請關閉並重新開啟工作窗格。
