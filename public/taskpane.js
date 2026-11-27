@@ -1,5 +1,5 @@
 const API = '';
-const PANE_BUILD = '2026-11-26.3'; // Must match relay-core RELAY_BUILD; a stale relay process is detected and reported.
+const PANE_BUILD = '2026-11-26.4'; // Must match relay-core RELAY_BUILD; a stale relay process is detected and reported.
 const CHAT_MODELS = ['auto', 'qwen4-max', 'qwen3.8-max', 'qwen3.8-flash'];
 const CHAT_EFFORTS = ['off', 'low', 'medium', 'high', 'xhigh'];
 const CONTEXT_CAP = 45_000; // Relay rejects messages over 50,000 chars; leave room for the prompt itself.

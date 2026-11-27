@@ -391,7 +391,7 @@ function makeSandbox({ selection, used, reply, seedKeys, cells, missingSheets, l
     fetch: async (url, opts) => {
       const body = opts?.body ? JSON.parse(opts.body) : null;
       calls.push({ url, body, headers: opts?.headers || {} });
-      if (url.endsWith('/api/health')) return { ok: true, status: 200, json: async () => ({ ok: true, build: healthBuild || '2026-11-26.3', configured: { qwen: true } }) };
+      if (url.endsWith('/api/health')) return { ok: true, status: 200, json: async () => ({ ok: true, build: healthBuild || '2026-11-26.4', configured: { qwen: true } }) };
       if (url.endsWith('/api/connectors/github/account')) return { ok: true, status: 200, json: async () => ({ connected: true, login: 'anthonymankaho', email: '' }) };
       if (url.endsWith('/api/connectors/github/connect')) return { ok: true, status: 200, json: async () => ({ connected: true, login: 'anthonymankaho', email: '' }) };
       if (url.endsWith('/api/connectors/github/repos')) return { ok: true, status: 200, json: async () => ({ items: [{ fullName: 'owner/repo', private: false, defaultBranch: 'main', description: '' }] }) };
@@ -1389,6 +1389,15 @@ test('a selected Word heading still includes the text under it', async () => {
   assert.match(sent, /Second advice line/);
   assert.match(sent, /\[Word document\]/);
   assert.equal(sent.includes('[Word selection]'), false);
+});
+
+test('a Word question that starts with open still goes to Qwen', async () => {
+  const sb = makeSandbox({ selection: singleEmpty, used: usedSmall, reply: { text: 'Summary.', model: 'm' } });
+  await boot(sb);
+  sb.officeCb({ host: 'Word' });
+  await ask(sb, 'open the document and summarize the second paragraph');
+  assert.equal(sb.calls.some(call => String(call.url).endsWith('/api/git/open')), false);
+  assert.equal(sb.calls.some(call => String(call.url).endsWith('/api/chat-stream')), true);
 });
 
 test('open in Word replaces the document and git pull in Excel does not call Git', async () => {

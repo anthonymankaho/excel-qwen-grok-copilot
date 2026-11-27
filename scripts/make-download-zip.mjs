@@ -39,13 +39,17 @@ FIRST USE
    ticked > Use key. The dot turns green.
 
 OPTIONAL CLOUD SOURCES
-   The app owner sets the public OAuth client IDs once in cloud-oauth.json
-   before sharing the package. Each colleague then clicks Connect and signs
-   in to their own Microsoft account. No account address or token
-   is built into the app.
+   The app owner sets the public Microsoft OAuth client ID once in
+   cloud-oauth.json before sharing the package. Each colleague then
+   clicks Connect and signs in to their own Microsoft account. No
+   account address or token is built into the app.
 
-WORD
-   Close Word, then in this folder run:  npm run start:word
+WORD AND LOCAL GIT
+   Close Word, then run:  npm run start:word
+   In Word, "open src/app.js" loads one file from the repo folder set
+   in MCP. git pull, git commit, and git push update that file and the
+   current branch. git push does not use --force. A normal question
+   that starts with "open" still goes to Qwen.
 
 MODEL AND EFFORT
    The composer offers auto, qwen4-max, qwen3.8-max, and qwen3.8-flash.
@@ -57,7 +61,7 @@ EXCEL ON THE WEB
    Each person pastes their own Qwen key. Do not use a Token Plan key
    with this custom add-in unless Alibaba confirms permission.
    No provider key is in this zip. The hosted Worker was not updated
-   with the 2026-11-25.2 local build.
+   with the 2026-11-26.4 local build.
 
 DOCS
    SOP-INSTALL.md     installation, CLI steps, troubleshooting
